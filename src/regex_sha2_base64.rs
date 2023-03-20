@@ -4,7 +4,7 @@ use base64::{
     Engine as _,
 };
 use halo2_base::halo2_proofs::{
-    circuit::{AssignedCell, Value},
+    circuit::{AssignedCell, Layouter, Value},
     plonk::Error,
 };
 use halo2_base::QuantumCell;
@@ -34,9 +34,9 @@ pub struct RegexSha2Base64Result<'a, F: Field> {
 
 #[derive(Debug, Clone)]
 pub struct RegexSha2Base64Config<F: Field> {
-    sha256_config: Sha256DynamicConfig<F>,
-    substr_match_config: SubstrMatchConfig<F>,
-    base64_config: Base64Config<F>,
+    pub(crate) sha256_config: Sha256DynamicConfig<F>,
+    pub(crate) substr_match_config: SubstrMatchConfig<F>,
+    pub(crate) base64_config: Base64Config<F>,
 }
 
 impl<F: Field> RegexSha2Base64Config<F> {
@@ -146,5 +146,18 @@ impl<F: Field> RegexSha2Base64Config<F> {
 
     pub fn gate(&self) -> &FlexGateConfig<F> {
         self.range().gate()
+    }
+
+    pub fn load(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        regex_lookups: &[&[u64]],
+        accepted_states: &[u64],
+    ) -> Result<(), Error> {
+        self.substr_match_config
+            .load(layouter, regex_lookups, accepted_states)?;
+        self.range().load_lookup_table(layouter)?;
+        self.base64_config.load(layouter)?;
+        Ok(())
     }
 }
