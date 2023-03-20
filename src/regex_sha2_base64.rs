@@ -10,12 +10,12 @@ use halo2_base::{
 };
 use halo2_base64::Base64Config;
 use halo2_dynamic_sha256::Field;
-use halo2_regex::{AssignedSubstrResult, SubstrDef};
+use halo2_regex::{AssignedSubstrsResult, SubstrDef};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone)]
 pub struct RegexSha2Base64Result<'a, F: Field> {
-    pub substrs: Vec<AssignedSubstrResult<'a, F>>,
+    pub substrs: AssignedSubstrsResult<'a, F>,
     pub encoded_hash: Vec<AssignedCell<F, F>>,
 }
 
@@ -37,17 +37,8 @@ impl<F: Field> RegexSha2Base64Config<F> {
         &self,
         ctx: &mut Context<'v, F>,
         input: &[u8],
-        states: &[u64],
-        substr_positions_array: &[&[u64]],
-        substr_defs: &[SubstrDef],
     ) -> Result<RegexSha2Base64Result<'a, F>, Error> {
-        let regex_sha2_result = self.regex_sha2.match_and_hash(
-            ctx,
-            input,
-            states,
-            substr_positions_array,
-            substr_defs,
-        )?;
+        let regex_sha2_result = self.regex_sha2.match_and_hash(ctx, input)?;
 
         let actual_hash = Sha256::digest(input).to_vec();
         debug_assert_eq!(actual_hash.len(), 32);
@@ -84,14 +75,8 @@ impl<F: Field> RegexSha2Base64Config<F> {
         self.range().gate()
     }
 
-    pub fn load(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        regex_lookups: &[&[u64]],
-        accepted_states: &[u64],
-    ) -> Result<(), Error> {
-        self.regex_sha2
-            .load(layouter, regex_lookups, accepted_states)?;
+    pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+        self.regex_sha2.load(layouter)?;
         self.base64_config.load(layouter)?;
         Ok(())
     }

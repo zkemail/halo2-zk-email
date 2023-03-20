@@ -9,7 +9,7 @@ use halo2_base::{
     Context,
 };
 use halo2_dynamic_sha256::Field;
-use halo2_regex::{AssignedSubstrResult, SubstrDef};
+use halo2_regex::{AssignedSubstrsResult, SubstrDef};
 use halo2_rsa::{
     AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstructions, RSAPublicKey,
     RSASignature,
@@ -73,13 +73,7 @@ impl<F: Field> EmailVerifyConfig<F> {
         body_hash_positions_array: &[u64],
         public_key: &AssignedRSAPublicKey<'v, F>,
         signature: &AssignedRSASignature<'v, F>,
-    ) -> Result<
-        (
-            Vec<AssignedSubstrResult<'a, F>>,
-            Vec<AssignedSubstrResult<'a, F>>,
-        ),
-        Error,
-    > {
+    ) -> Result<(AssignedSubstrsResult<'a, F>, AssignedSubstrsResult<'a, F>), Error> {
         debug_assert_eq!(
             header_substr_positions_array.len(),
             self.header_substr_defs.len()
@@ -91,13 +85,7 @@ impl<F: Field> EmailVerifyConfig<F> {
         let gate = self.gate();
 
         // 1. Extract sub strings in the body and compute the base64 encoded hash of the body.
-        let body_result = self.body_processer.match_hash_and_base64(
-            ctx,
-            body_bytes,
-            body_regex_states,
-            body_substr_positions_array,
-            &self.body_substr_defs,
-        )?;
+        let body_result = self.body_processer.match_hash_and_base64(ctx, body_bytes)?;
 
         // 2. Extract sub strings in the header, which includes the body hash, and compute the raw hash of the header.
         let mut header_substr_defs = vec![self.body_hash_substr_def.clone()];
@@ -108,13 +96,7 @@ impl<F: Field> EmailVerifyConfig<F> {
         for array in header_substr_positions_array.into_iter() {
             header_substr_positions_array_all.push(array);
         }
-        let header_result = self.header_processer.match_and_hash(
-            ctx,
-            header_bytes,
-            header_regex_states,
-            &header_substr_positions_array_all,
-            &self.header_substr_defs,
-        )?;
+        let header_result = self.header_processer.match_and_hash(ctx, header_bytes)?;
 
         // 3. Verify the rsa signature.
         let mut hashed_bytes = header_result.hash_bytes;
@@ -141,38 +123,26 @@ impl<F: Field> EmailVerifyConfig<F> {
         gate.assert_is_const(ctx, &is_sign_valid, F::one());
 
         // 4. Check that the encoded hash value is equal to the value in the email header.
-        let hash_body_substr = &header_result.substrs[0];
+        let hash_body_substr = &header_result.substrs.substrs_bytes[0];
         let body_encoded_hash = body_result.encoded_hash;
-        debug_assert_eq!(
-            hash_body_substr.assigned_bytes.len(),
-            body_encoded_hash.len()
-        );
-        for (substr_byte, encoded_byte) in hash_body_substr
-            .assigned_bytes
-            .iter()
-            .zip(body_encoded_hash.into_iter())
+        debug_assert_eq!(hash_body_substr.len(), body_encoded_hash.len());
+        for (substr_byte, encoded_byte) in
+            hash_body_substr.iter().zip(body_encoded_hash.into_iter())
         {
             ctx.region
                 .constrain_equal(substr_byte.cell(), encoded_byte.cell())?;
         }
         gate.assert_is_const(
             ctx,
-            &hash_body_substr.assigned_length,
+            &header_result.substrs.substrs_length[0],
             F::from(32 * 4 / 3 + 4),
         );
         Ok((header_result.substrs, body_result.substrs))
     }
 
-    pub fn load(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        regex_lookups: &[&[u64]],
-        accepted_states: &[u64],
-    ) -> Result<(), Error> {
-        self.header_processer
-            .load(layouter, regex_lookups, accepted_states)?;
-        self.body_processer
-            .load(layouter, regex_lookups, accepted_states)?;
+    pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+        self.header_processer.load(layouter)?;
+        self.body_processer.load(layouter)?;
         self.rsa_config.range().load_lookup_table(layouter)?;
         Ok(())
     }
