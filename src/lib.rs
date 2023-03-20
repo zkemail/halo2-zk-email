@@ -178,7 +178,7 @@ impl<F: Field> EmailVerifyConfig<F> {
             &hash_body_substr.assigned_length,
             F::from(32 * 4 / 3 + 4),
         );
-        Ok((header_result.substrs[1..].to_vec(), body_result.substrs))
+        Ok((header_result.substrs, body_result.substrs))
     }
 
     pub fn load(
