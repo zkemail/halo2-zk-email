@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use halo2_base::halo2_proofs::circuit::Region;
 use halo2_base::halo2_proofs::plonk::ConstraintSystem;
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
 use halo2_base::QuantumCell;
@@ -10,7 +11,7 @@ use halo2_base::{
 use halo2_dynamic_sha256::{Field, Sha256CompressionConfig, Sha256DynamicConfig};
 use halo2_regex::{AssignedSubstrsResult, RegexCheckConfig, SubstrDef, SubstrMatchConfig};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RegexSha2Result<'a, F: Field> {
     pub substrs: AssignedSubstrsResult<'a, F>,
     pub hash_bytes: Vec<AssignedValue<'a, F>>,
@@ -112,5 +113,201 @@ impl<F: Field> RegexSha2Config<F> {
         self.substr_match_config.load(layouter)?;
         self.range().load_lookup_table(layouter)?;
         Ok(())
+    }
+
+    pub fn new_context<'a, 'b>(&'b self, region: Region<'a, F>) -> Context<'a, F> {
+        self.sha256_config.new_context(region)
+    }
+
+    pub fn finalize(&self, ctx: &mut Context<F>) {
+        self.range().finalize(ctx);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::marker::PhantomData;
+
+    pub use super::*;
+
+    use halo2_base::halo2_proofs::{
+        circuit::{floor_planner::V1, Cell, SimpleFloorPlanner},
+        dev::{CircuitCost, FailureLocation, MockProver, VerifyFailure},
+        halo2curves::bn256::{Fr, G1},
+        plonk::{Any, Circuit, Column, Instance},
+    };
+    use halo2_base::{gates::range::RangeStrategy::Vertical, ContextParams, SKIP_FIRST_PASS};
+    use halo2_regex::read_regex_lookups;
+    use sha2::{self, Digest, Sha256};
+
+    #[derive(Debug, Clone)]
+    struct TestRegexSha2Config<F: Field> {
+        inner: RegexSha2Config<F>,
+        hash_instance: Column<Instance>,
+        substr_len_instance: Column<Instance>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct TestRegexSha2<F: Field> {
+        input: Vec<u8>,
+        _f: PhantomData<F>,
+    }
+
+    impl<F: Field> Circuit<F> for TestRegexSha2<F> {
+        type Config = TestRegexSha2Config<F>;
+        type FloorPlanner = SimpleFloorPlanner;
+
+        fn without_witnesses(&self) -> Self {
+            Self {
+                input: vec![],
+                _f: PhantomData,
+            }
+        }
+
+        fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+            let range_config = RangeConfig::configure(
+                meta,
+                Vertical,
+                &[Self::NUM_ADVICE],
+                &[Self::NUM_LOOKUP_ADVICE],
+                Self::NUM_FIXED,
+                Self::LOOKUP_BITS,
+                0,
+                Self::K as usize,
+            );
+            let lookup_filepath = "./test_regexes/regex_test_lookup.txt";
+            let state_lookup = read_regex_lookups(lookup_filepath);
+            let substr_def = SubstrDef::new(4, 21, Self::MAX_BYTE_SIZE as u64 - 4, 22);
+            let inner = RegexSha2Config::configure(
+                meta,
+                Self::MAX_BYTE_SIZE,
+                Self::NUM_SHA2_COMP,
+                range_config,
+                state_lookup,
+                &[Self::ACCEPTED_STATE],
+                vec![substr_def],
+            );
+            let hash_instance = meta.instance_column();
+            meta.enable_equality(hash_instance);
+            let substr_len_instance = meta.instance_column();
+            meta.enable_equality(substr_len_instance);
+            Self::Config {
+                inner,
+                hash_instance,
+                substr_len_instance,
+            }
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            mut layouter: impl Layouter<F>,
+        ) -> Result<(), Error> {
+            config.inner.load(&mut layouter)?;
+            let mut first_pass = SKIP_FIRST_PASS;
+            let mut hash_bytes_cell = None;
+            let mut len_cell = None;
+            layouter.assign_region(
+                || "regex",
+                |region| {
+                    if first_pass {
+                        first_pass = false;
+                        return Ok(());
+                    }
+                    let ctx = &mut config.inner.new_context(region);
+                    let result = config.inner.match_and_hash(ctx, &self.input)?;
+                    config.inner.finalize(ctx);
+                    hash_bytes_cell = Some(
+                        result
+                            .hash_bytes
+                            .into_iter()
+                            .map(|byte| byte.cell())
+                            .collect::<Vec<Cell>>(),
+                    );
+                    len_cell = Some(result.substrs.substrs_length[0].cell());
+                    Ok(())
+                },
+            )?;
+            for (idx, cell) in hash_bytes_cell.unwrap().into_iter().enumerate() {
+                layouter.constrain_instance(cell, config.hash_instance, idx)?;
+            }
+            layouter.constrain_instance(len_cell.unwrap(), config.substr_len_instance, 0)?;
+            Ok(())
+        }
+    }
+
+    impl<F: Field> TestRegexSha2<F> {
+        const MAX_BYTE_SIZE: usize = 1024;
+        const NUM_SHA2_COMP: usize = 2;
+        const NUM_ADVICE: usize = 50;
+        const NUM_FIXED: usize = 1;
+        const NUM_LOOKUP_ADVICE: usize = 4;
+        const LOOKUP_BITS: usize = 12;
+        const K: u32 = 13;
+        const ACCEPTED_STATE: u64 = 23;
+    }
+
+    #[test]
+    fn test_regex_sha2_valid_case1() {
+        let input: Vec<u8> = "email was meant for @y".chars().map(|c| c as u8).collect();
+        let circuit = TestRegexSha2::<Fr> {
+            input,
+            _f: PhantomData,
+        };
+        let expected_output = Sha256::digest(&circuit.input);
+        let hash_fs = expected_output
+            .iter()
+            .map(|byte| Fr::from(*byte as u64))
+            .collect::<Vec<Fr>>();
+        let len_f = Fr::from(1);
+        let prover =
+            MockProver::run(TestRegexSha2::<Fr>::K, &circuit, vec![hash_fs, vec![len_f]]).unwrap();
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    #[test]
+    fn test_regex_sha2_invalid_case1() {
+        let input: Vec<u8> = "email was meant for @@".chars().map(|c| c as u8).collect();
+        let circuit = TestRegexSha2::<Fr> {
+            input,
+            _f: PhantomData,
+        };
+        let expected_output = Sha256::digest(&circuit.input);
+        let hash_fs = expected_output
+            .iter()
+            .map(|byte| Fr::from(*byte as u64))
+            .collect::<Vec<Fr>>();
+        let len_f = Fr::from(1);
+        let prover =
+            MockProver::run(TestRegexSha2::<Fr>::K, &circuit, vec![hash_fs, vec![len_f]]).unwrap();
+        match prover.verify() {
+            Err(_) => {
+                println!("Error successfully achieved!");
+            }
+            _ => assert!(false, "Should be error."),
+        }
+    }
+
+    #[test]
+    fn test_regex_sha2_invalid_case2() {
+        let input: Vec<u8> = "email was meant for @y".chars().map(|c| c as u8).collect();
+        let circuit = TestRegexSha2::<Fr> {
+            input,
+            _f: PhantomData,
+        };
+        let expected_output = vec![0; 32];
+        let hash_fs = expected_output
+            .iter()
+            .map(|byte| Fr::from(*byte as u64))
+            .collect::<Vec<Fr>>();
+        let len_f = Fr::from(1);
+        let prover =
+            MockProver::run(TestRegexSha2::<Fr>::K, &circuit, vec![hash_fs, vec![len_f]]).unwrap();
+        match prover.verify() {
+            Err(_) => {
+                println!("Error successfully achieved!");
+            }
+            _ => assert!(false, "Should be error."),
+        }
     }
 }
