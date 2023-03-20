@@ -21,4 +21,6 @@ halo2-ecc = { version = "0.2.2", default-features = false, features = [
 halo2-dynamic-sha256 = { git = "https://github.com/zkemail/halo2-dynamic-sha256.git", version = "0.1.0", branch = "main" }
 halo2-rsa = { git = "https://github.com/zkemail/halo2-rsa.git", version = "0.1.0", branch = "feat/new_bigint" }
 halo2-regex = { git = "https://github.com/zkemail/halo2-regex.git", version = "0.1.0", branch = "main" }
+halo2-base64 = { git = "https://github.com/zkemail/halo2-base64.git", version = "0.1.0", branch = "main" }
 num-traits = "0.2.15"
+base64 = "0.21"

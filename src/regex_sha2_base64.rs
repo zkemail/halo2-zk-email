@@ -1,10 +1,19 @@
-use halo2_base::halo2_proofs::{circuit::Value, plonk::Error};
+use base64::{
+    alphabet,
+    engine::{self, general_purpose},
+    Engine as _,
+};
+use halo2_base::halo2_proofs::{
+    circuit::{AssignedCell, Value},
+    plonk::Error,
+};
 use halo2_base::QuantumCell;
 use halo2_base::{
     gates::{flex_gate::FlexGateConfig, range::RangeConfig, GateInstructions, RangeInstructions},
     utils::{bigint_to_fe, biguint_to_fe, fe_to_biguint, modulus, PrimeField},
     AssignedValue, Context,
 };
+use halo2_base64::{AssignedBase64Result, Base64Config};
 use halo2_dynamic_sha256::{
     AssignedHashResult, Field, Sha256CompressionConfig, Sha256DynamicConfig,
 };
@@ -15,32 +24,42 @@ use halo2_ecc::bigint::{
 use halo2_regex::{AssignedAllString, AssignedSubstrResult, SubstrDef, SubstrMatchConfig};
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{One, Signed, Zero};
+use sha2::{Digest, Sha256};
+
+#[derive(Debug, Clone)]
+pub struct RegexSha2Base64Result<'a, F: Field> {
+    pub substrs: Vec<AssignedSubstrResult<'a, F>>,
+    pub encoded_hash: Vec<AssignedCell<F, F>>,
+}
 
 #[derive(Debug, Clone)]
 pub struct RegexSha2Base64Config<F: Field> {
     sha256_config: Sha256DynamicConfig<F>,
     substr_match_config: SubstrMatchConfig<F>,
+    base64_config: Base64Config<F>,
 }
 
 impl<F: Field> RegexSha2Base64Config<F> {
     pub fn construct(
         sha256_config: Sha256DynamicConfig<F>,
         substr_match_config: SubstrMatchConfig<F>,
+        base64_config: Base64Config<F>,
     ) -> Self {
         Self {
             sha256_config,
             substr_match_config,
+            base64_config,
         }
     }
 
-    pub fn match_hash_and_base64(
+    pub fn match_hash_and_base64<'v: 'a, 'a>(
         &self,
-        ctx: &mut Context<F>,
+        ctx: &mut Context<'v, F>,
         input: &[u8],
         states: &[u64],
         substr_positions_array: &[&[u64]],
         substr_defs: &[SubstrDef],
-    ) -> Result<(), Error> {
+    ) -> Result<RegexSha2Base64Result<'a, F>, Error> {
         let max_input_size = self.sha256_config.max_byte_size;
         // 1. Let's match sub strings!
         let assigned_all_strings =
@@ -94,7 +113,31 @@ impl<F: Field> RegexSha2Base64Config<F> {
             QuantumCell::Existing(&assigned_hash_result.input_len),
         );
 
-        Ok(())
+        let actual_hash = Sha256::digest(input).to_vec();
+        debug_assert_eq!(actual_hash.len(), 32);
+        let mut hash_base64 = Vec::new();
+        hash_base64.resize(actual_hash.len() * 4 / 3 + 4, 0);
+        let bytes_written = general_purpose::STANDARD
+            .encode_slice(&actual_hash, &mut hash_base64)
+            .expect("fail to convert the hash bytes into the base64 strings");
+        debug_assert_eq!(bytes_written, actual_hash.len() * 4 / 3 + 4);
+        let base64_result = self
+            .base64_config
+            .assign_values(&mut ctx.region, &hash_base64)?;
+        debug_assert_eq!(base64_result.decoded.len(), 32);
+        for (assigned_hash, assigned_decoded) in assigned_hash_result
+            .output_bytes
+            .into_iter()
+            .zip(base64_result.decoded.into_iter())
+        {
+            ctx.region
+                .constrain_equal(assigned_hash.cell(), assigned_decoded.cell())?;
+        }
+        let result = RegexSha2Base64Result {
+            substrs: assigned_substrs,
+            encoded_hash: base64_result.encoded,
+        };
+        Ok(result)
     }
 
     pub fn range(&self) -> &RangeConfig<F> {
