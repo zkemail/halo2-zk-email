@@ -7,7 +7,7 @@ use base64::{
     Engine as _,
 };
 use halo2_base::halo2_proofs::{
-    circuit::{AssignedCell, Value},
+    circuit::{AssignedCell, Layouter, Value},
     plonk::Error,
 };
 use halo2_base::QuantumCell;
@@ -179,6 +179,20 @@ impl<F: Field> EmailVerifyConfig<F> {
             F::from(32 * 4 / 3 + 4),
         );
         Ok((header_result.substrs[1..].to_vec(), body_result.substrs))
+    }
+
+    pub fn load(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        regex_lookups: &[&[u64]],
+        accepted_states: &[u64],
+    ) -> Result<(), Error> {
+        self.header_processer
+            .load(layouter, regex_lookups, accepted_states)?;
+        self.body_processer
+            .load(layouter, regex_lookups, accepted_states)?;
+        self.rsa_config.range().load_lookup_table(layouter)?;
+        Ok(())
     }
 
     pub fn range(&self) -> &RangeConfig<F> {
