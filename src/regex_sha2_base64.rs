@@ -1,30 +1,16 @@
-use crate::regex_sha2::{RegexSha2Config, RegexSha2Result};
-use base64::{
-    alphabet,
-    engine::{self, general_purpose},
-    Engine as _,
-};
+use crate::regex_sha2::RegexSha2Config;
+use base64::{engine::general_purpose, Engine as _};
 use halo2_base::halo2_proofs::{
-    circuit::{AssignedCell, Layouter, Value},
+    circuit::{AssignedCell, Layouter},
     plonk::Error,
 };
-use halo2_base::QuantumCell;
 use halo2_base::{
-    gates::{flex_gate::FlexGateConfig, range::RangeConfig, GateInstructions, RangeInstructions},
-    utils::{bigint_to_fe, biguint_to_fe, fe_to_biguint, modulus, PrimeField},
-    AssignedValue, Context,
+    gates::{flex_gate::FlexGateConfig, range::RangeConfig, RangeInstructions},
+    Context,
 };
-use halo2_base64::{AssignedBase64Result, Base64Config};
-use halo2_dynamic_sha256::{
-    AssignedHashResult, Field, Sha256CompressionConfig, Sha256DynamicConfig,
-};
-use halo2_ecc::bigint::{
-    big_is_equal, big_is_zero, big_less_than, carry_mod, mul_no_carry, negative, select, sub,
-    CRTInteger, FixedCRTInteger, FixedOverflowInteger, OverflowInteger,
-};
-use halo2_regex::{AssignedAllString, AssignedSubstrResult, SubstrDef, SubstrMatchConfig};
-use num_bigint::{BigInt, BigUint, Sign};
-use num_traits::{One, Signed, Zero};
+use halo2_base64::Base64Config;
+use halo2_dynamic_sha256::Field;
+use halo2_regex::{AssignedSubstrResult, SubstrDef};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone)]
