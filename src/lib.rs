@@ -65,23 +65,10 @@ impl<F: Field> EmailVerifyConfig<F> {
         &self,
         ctx: &mut Context<'v, F>,
         header_bytes: &[u8],
-        header_regex_states: &[u64],
-        header_substr_positions_array: &[&[u64]],
         body_bytes: &[u8],
-        body_regex_states: &[u64],
-        body_substr_positions_array: &[&[u64]],
-        body_hash_positions_array: &[u64],
         public_key: &AssignedRSAPublicKey<'v, F>,
         signature: &AssignedRSASignature<'v, F>,
     ) -> Result<(AssignedSubstrsResult<'a, F>, AssignedSubstrsResult<'a, F>), Error> {
-        debug_assert_eq!(
-            header_substr_positions_array.len(),
-            self.header_substr_defs.len()
-        );
-        debug_assert_eq!(
-            body_substr_positions_array.len(),
-            self.body_substr_defs.len()
-        );
         let gate = self.gate();
 
         // 1. Extract sub strings in the body and compute the base64 encoded hash of the body.
@@ -91,10 +78,6 @@ impl<F: Field> EmailVerifyConfig<F> {
         let mut header_substr_defs = vec![self.body_hash_substr_def.clone()];
         for header_def in self.header_substr_defs.iter() {
             header_substr_defs.push(header_def.clone());
-        }
-        let mut header_substr_positions_array_all = vec![body_hash_positions_array];
-        for array in header_substr_positions_array.into_iter() {
-            header_substr_positions_array_all.push(array);
         }
         let header_result = self.header_processer.match_and_hash(ctx, header_bytes)?;
 
