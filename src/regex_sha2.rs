@@ -1,12 +1,14 @@
+use std::collections::HashMap;
+
+use halo2_base::halo2_proofs::plonk::ConstraintSystem;
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
 use halo2_base::QuantumCell;
 use halo2_base::{
     gates::{flex_gate::FlexGateConfig, range::RangeConfig, GateInstructions, RangeInstructions},
     AssignedValue, Context,
 };
-use halo2_dynamic_sha256::{Field, Sha256DynamicConfig};
-use halo2_regex::{AssignedSubstrsResult, SubstrDef, SubstrMatchConfig};
-use sha2::{Digest, Sha256};
+use halo2_dynamic_sha256::{Field, Sha256CompressionConfig, Sha256DynamicConfig};
+use halo2_regex::{AssignedSubstrsResult, RegexCheckConfig, SubstrDef, SubstrMatchConfig};
 
 #[derive(Debug, Clone)]
 pub struct RegexSha2Result<'a, F: Field> {
@@ -21,10 +23,27 @@ pub struct RegexSha2Config<F: Field> {
 }
 
 impl<F: Field> RegexSha2Config<F> {
-    pub fn construct(
-        sha256_config: Sha256DynamicConfig<F>,
-        substr_match_config: SubstrMatchConfig<F>,
+    pub fn configure(
+        meta: &mut ConstraintSystem<F>,
+        max_byte_size: usize,
+        num_sha2_compression_per_column: usize,
+        range_config: RangeConfig<F>,
+        state_lookup: HashMap<(u8, u64), u64>,
+        accepted_state_vals: &[u64],
+        substr_defs: Vec<SubstrDef>,
     ) -> Self {
+        let sha256_comp_configs = (0..num_sha2_compression_per_column)
+            .map(|_| Sha256CompressionConfig::configure(meta))
+            .collect();
+        let sha256_config = Sha256DynamicConfig::construct(
+            sha256_comp_configs,
+            max_byte_size,
+            range_config.clone(),
+        );
+        let regex_config =
+            RegexCheckConfig::configure(meta, state_lookup, accepted_state_vals, max_byte_size);
+        let substr_match_config =
+            SubstrMatchConfig::construct(regex_config, range_config.gate().clone(), substr_defs);
         Self {
             sha256_config,
             substr_match_config,
@@ -73,9 +92,6 @@ impl<F: Field> RegexSha2Config<F> {
             QuantumCell::Existing(&input_len_sum),
             QuantumCell::Existing(&assigned_hash_result.input_len),
         );
-
-        let actual_hash = Sha256::digest(input).to_vec();
-        debug_assert_eq!(actual_hash.len(), 32);
 
         let result = RegexSha2Result {
             substrs: regex_result,

@@ -1,6 +1,9 @@
 pub mod regex_sha2;
 pub mod regex_sha2_base64;
+use std::collections::HashMap;
+
 use crate::regex_sha2::RegexSha2Config;
+use halo2_base::halo2_proofs::plonk::ConstraintSystem;
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
 use halo2_base::QuantumCell;
 use halo2_base::{
@@ -21,27 +24,46 @@ pub struct EmailVerifyConfig<F: Field> {
     header_processer: RegexSha2Config<F>,
     body_processer: RegexSha2Base64Config<F>,
     rsa_config: RSAConfig<F>,
-    header_substr_defs: Vec<SubstrDef>,
-    body_substr_defs: Vec<SubstrDef>,
-    body_hash_substr_def: SubstrDef,
 }
 
 impl<F: Field> EmailVerifyConfig<F> {
-    pub fn construct(
-        header_processer: RegexSha2Config<F>,
-        body_processer: RegexSha2Base64Config<F>,
-        rsa_config: RSAConfig<F>,
+    pub fn configure(
+        meta: &mut ConstraintSystem<F>,
+        max_byte_size: usize,
+        num_sha2_compression_per_column: usize,
+        range_config: RangeConfig<F>,
+        header_state_lookup: HashMap<(u8, u64), u64>,
+        header_accepted_state_vals: &[u64],
         header_substr_defs: Vec<SubstrDef>,
+        body_state_lookup: HashMap<(u8, u64), u64>,
+        body_accepted_state_vals: &[u64],
         body_substr_defs: Vec<SubstrDef>,
-        body_hash_substr_def: SubstrDef,
+        public_key_bits: usize,
     ) -> Self {
+        let header_processer = RegexSha2Config::configure(
+            meta,
+            max_byte_size,
+            num_sha2_compression_per_column,
+            range_config.clone(),
+            header_state_lookup,
+            header_accepted_state_vals,
+            header_substr_defs,
+        );
+        let body_processer = RegexSha2Base64Config::configure(
+            meta,
+            max_byte_size,
+            num_sha2_compression_per_column,
+            range_config.clone(),
+            body_state_lookup,
+            body_accepted_state_vals,
+            body_substr_defs,
+        );
+        let biguint_config = halo2_rsa::BigUintConfig::construct(range_config, 64);
+        let rsa_config = RSAConfig::construct(biguint_config, public_key_bits, 5);
         Self {
             header_processer,
             body_processer,
             rsa_config,
-            header_substr_defs,
-            body_substr_defs,
-            body_hash_substr_def,
         }
     }
 
@@ -75,10 +97,6 @@ impl<F: Field> EmailVerifyConfig<F> {
         let body_result = self.body_processer.match_hash_and_base64(ctx, body_bytes)?;
 
         // 2. Extract sub strings in the header, which includes the body hash, and compute the raw hash of the header.
-        let mut header_substr_defs = vec![self.body_hash_substr_def.clone()];
-        for header_def in self.header_substr_defs.iter() {
-            header_substr_defs.push(header_def.clone());
-        }
         let header_result = self.header_processer.match_and_hash(ctx, header_bytes)?;
 
         // 3. Verify the rsa signature.

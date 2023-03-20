@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use crate::regex_sha2::RegexSha2Config;
 use base64::{engine::general_purpose, Engine as _};
 use halo2_base::halo2_proofs::{
     circuit::{AssignedCell, Layouter},
-    plonk::Error,
+    plonk::{ConstraintSystem, Error},
 };
 use halo2_base::{
     gates::{flex_gate::FlexGateConfig, range::RangeConfig, RangeInstructions},
@@ -26,7 +28,25 @@ pub struct RegexSha2Base64Config<F: Field> {
 }
 
 impl<F: Field> RegexSha2Base64Config<F> {
-    pub fn construct(regex_sha2: RegexSha2Config<F>, base64_config: Base64Config<F>) -> Self {
+    pub fn configure(
+        meta: &mut ConstraintSystem<F>,
+        max_byte_size: usize,
+        num_sha2_compression_per_column: usize,
+        range_config: RangeConfig<F>,
+        state_lookup: HashMap<(u8, u64), u64>,
+        accepted_state_vals: &[u64],
+        substr_defs: Vec<SubstrDef>,
+    ) -> Self {
+        let regex_sha2 = RegexSha2Config::configure(
+            meta,
+            max_byte_size,
+            num_sha2_compression_per_column,
+            range_config,
+            state_lookup,
+            accepted_state_vals,
+            substr_defs,
+        );
+        let base64_config = Base64Config::configure(meta);
         Self {
             regex_sha2,
             base64_config,
