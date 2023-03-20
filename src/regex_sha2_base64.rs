@@ -63,11 +63,11 @@ impl<F: Field> RegexSha2Base64Config<F> {
         let actual_hash = Sha256::digest(input).to_vec();
         debug_assert_eq!(actual_hash.len(), 32);
         let mut hash_base64 = Vec::new();
-        hash_base64.resize(actual_hash.len() * 4 / 3 + 4, 0);
+        hash_base64.resize(44, 0);
         let bytes_written = general_purpose::STANDARD
             .encode_slice(&actual_hash, &mut hash_base64)
             .expect("fail to convert the hash bytes into the base64 strings");
-        // debug_assert_eq!(bytes_written, actual_hash.len() * 4 / 3 + 4);
+        debug_assert_eq!(bytes_written, 44);
         println!(
             "hash_base64 {}",
             String::from_utf8(hash_base64.to_vec()).unwrap()
@@ -237,7 +237,6 @@ mod test {
         const ACCEPTED_STATE: u64 = 23;
     }
 
-    #[ignore]
     #[test]
     fn test_regex_sha2_base64_valid_case1() {
         let input: Vec<u8> = "email was meant for @y".chars().map(|c| c as u8).collect();
@@ -247,7 +246,7 @@ mod test {
         };
         let hash = Sha256::digest(&circuit.input);
         let mut expected_output = Vec::new();
-        expected_output.resize(hash.len() * 4 / 3 + 4, 0);
+        expected_output.resize(44, 0);
         general_purpose::STANDARD
             .encode_slice(&hash, &mut expected_output)
             .unwrap();
@@ -265,7 +264,6 @@ mod test {
         assert_eq!(prover.verify(), Ok(()));
     }
 
-    #[ignore]
     #[test]
     fn test_regex_sha2_base64_invalid_case1() {
         let input: Vec<u8> = "email was meant for @@".chars().map(|c| c as u8).collect();
@@ -275,7 +273,7 @@ mod test {
         };
         let hash = Sha256::digest(&circuit.input);
         let mut expected_output = Vec::new();
-        expected_output.resize(hash.len() * 4 / 3 + 4, 0);
+        expected_output.resize(44, 0);
         general_purpose::STANDARD
             .encode_slice(&hash, &mut expected_output)
             .unwrap();
@@ -290,6 +288,43 @@ mod test {
             vec![hash_fs, vec![len_f]],
         )
         .unwrap();
-        assert_eq!(prover.verify(), Ok(()));
+        match prover.verify() {
+            Err(_) => {
+                println!("Error successfully achieved!");
+            }
+            _ => assert!(false, "Should be error."),
+        }
+    }
+
+    #[test]
+    fn test_regex_sha2_base64_invalid_case2() {
+        let input: Vec<u8> = "email was meant for @y".chars().map(|c| c as u8).collect();
+        let circuit = TestRegexSha2Base64::<Fr> {
+            input,
+            _f: PhantomData,
+        };
+        let hash = [0; 32];
+        let mut expected_output = Vec::new();
+        expected_output.resize(44, 0);
+        general_purpose::STANDARD
+            .encode_slice(&hash, &mut expected_output)
+            .unwrap();
+        let hash_fs = expected_output
+            .iter()
+            .map(|byte| Fr::from(*byte as u64))
+            .collect::<Vec<Fr>>();
+        let len_f = Fr::from(1);
+        let prover = MockProver::run(
+            TestRegexSha2Base64::<Fr>::K,
+            &circuit,
+            vec![hash_fs, vec![len_f]],
+        )
+        .unwrap();
+        match prover.verify() {
+            Err(_) => {
+                println!("Error successfully achieved!");
+            }
+            _ => assert!(false, "Should be error."),
+        }
     }
 }
