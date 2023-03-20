@@ -58,10 +58,17 @@ impl<F: Field> RegexSha2Config<F> {
         substr_defs: &[SubstrDef],
     ) -> Result<RegexSha2Result<'a, F>, Error> {
         let max_input_size = self.sha256_config.max_byte_size;
+        let mut input = input.to_vec();
+        let mut states = states.to_vec();
+        debug_assert_eq!(input.len(), states.len());
+        for _ in 0..(max_input_size - input.len()) {
+            input.push(0);
+            states.push(0);
+        }
         // 1. Let's match sub strings!
         let assigned_all_strings =
             self.substr_match_config
-                .assign_all_string(ctx, input, states, max_input_size)?;
+                .assign_all_string(ctx, &input, &states, max_input_size)?;
         let mut assigned_substrs = Vec::new();
         for (substr_def, substr_positions) in substr_defs
             .into_iter()
@@ -77,7 +84,7 @@ impl<F: Field> RegexSha2Config<F> {
         }
 
         // Let's compute the hash!
-        let assigned_hash_result = self.sha256_config.digest(ctx, input)?;
+        let assigned_hash_result = self.sha256_config.digest(ctx, &input)?;
         // Assert that the same input is used in the regex circuit and the sha2 circuit.
         let gate = self.gate();
         let mut input_len_sum = gate.load_zero(ctx);

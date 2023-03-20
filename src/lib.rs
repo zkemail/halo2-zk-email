@@ -88,7 +88,7 @@ impl<F: Field> EmailVerifyConfig<F> {
         body_bytes: &[u8],
         body_regex_states: &[u64],
         body_substr_positions_array: &[&[u64]],
-        bodyhash_positions_array: &[u64],
+        body_hash_positions_array: &[u64],
         public_key: &AssignedRSAPublicKey<'v, F>,
         signature: &AssignedRSASignature<'v, F>,
     ) -> Result<
@@ -122,11 +122,15 @@ impl<F: Field> EmailVerifyConfig<F> {
         for header_def in self.header_substr_defs.iter() {
             header_substr_defs.push(header_def.clone());
         }
+        let mut header_substr_positions_array_all = vec![body_hash_positions_array];
+        for array in header_substr_positions_array.into_iter() {
+            header_substr_positions_array_all.push(array);
+        }
         let header_result = self.header_processer.match_and_hash(
             ctx,
             header_bytes,
             header_regex_states,
-            header_substr_positions_array,
+            &header_substr_positions_array_all,
             &self.header_substr_defs,
         )?;
 
@@ -167,7 +171,7 @@ impl<F: Field> EmailVerifyConfig<F> {
             .zip(body_encoded_hash.into_iter())
         {
             ctx.region
-                .constrain_equal(substr_byte.cell(), encoded_byte.cell());
+                .constrain_equal(substr_byte.cell(), encoded_byte.cell())?;
         }
         gate.assert_is_const(
             ctx,
