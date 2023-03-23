@@ -2,7 +2,7 @@ mod macros;
 pub mod regex_sha2;
 pub mod regex_sha2_base64;
 use crate::regex_sha2::RegexSha2Config;
-use halo2_base::halo2_proofs::circuit::SimpleFloorPlanner;
+use halo2_base::halo2_proofs::circuit::{Region, SimpleFloorPlanner};
 use halo2_base::halo2_proofs::plonk::{Circuit, ConstraintSystem};
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
 use halo2_base::QuantumCell;
@@ -150,6 +150,10 @@ impl<F: Field> EmailVerifyConfig<F> {
 
     pub fn finalize(&self, ctx: &mut Context<F>) {
         self.header_processer.finalize(ctx);
+    }
+
+    pub fn new_context<'a, 'b>(&'b self, region: Region<'a, F>) -> Context<'a, F> {
+        self.header_processer.new_context(region)
     }
 
     pub fn range(&self) -> &RangeConfig<F> {
