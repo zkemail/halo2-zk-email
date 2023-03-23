@@ -12,7 +12,7 @@ use halo2_base::{
 };
 use halo2_base64::Base64Config;
 use halo2_dynamic_sha256::Field;
-use halo2_regex::{AssignedSubstrsResult, SubstrDef};
+use halo2_regex::{AssignedSubstrsResult, RegexDef, SubstrDef};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone)]
@@ -33,8 +33,7 @@ impl<F: Field> RegexSha2Base64Config<F> {
         max_byte_size: usize,
         num_sha2_compression_per_column: usize,
         range_config: RangeConfig<F>,
-        state_lookup: HashMap<(u8, u64), u64>,
-        accepted_state_vals: &[u64],
+        regex_def: RegexDef,
         substr_defs: Vec<SubstrDef>,
     ) -> Self {
         let regex_sha2 = RegexSha2Config::configure(
@@ -42,8 +41,7 @@ impl<F: Field> RegexSha2Base64Config<F> {
             max_byte_size,
             num_sha2_compression_per_column,
             range_config,
-            state_lookup,
-            accepted_state_vals,
+            regex_def,
             substr_defs,
         );
         let base64_config = Base64Config::configure(meta);
@@ -116,9 +114,10 @@ impl<F: Field> RegexSha2Base64Config<F> {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
     use std::marker::PhantomData;
 
-    pub use super::*;
+    use super::*;
 
     use halo2_base::halo2_proofs::{
         circuit::{floor_planner::V1, Cell, SimpleFloorPlanner},
@@ -127,7 +126,6 @@ mod test {
         plonk::{Any, Circuit, Column, Instance},
     };
     use halo2_base::{gates::range::RangeStrategy::Vertical, ContextParams, SKIP_FIRST_PASS};
-    use halo2_regex::read_regex_lookups;
     use sha2::{self, Digest, Sha256};
 
     #[derive(Debug, Clone)]
@@ -166,16 +164,34 @@ mod test {
                 Self::K as usize,
             );
             let lookup_filepath = "./test_regexes/regex_test_lookup.txt";
-            let state_lookup = read_regex_lookups(lookup_filepath);
-            let substr_def = SubstrDef::new(4, 21, Self::MAX_BYTE_SIZE as u64 - 4, 22);
+            let regex_def = RegexDef::read_from_text(lookup_filepath);
+            let substr_def1 = SubstrDef::new(
+                4,
+                0,
+                Self::MAX_BYTE_SIZE as u64 - 1,
+                HashSet::from([(29, 1), (1, 1)]),
+            );
+            let substr_def2 = SubstrDef::new(
+                11,
+                0,
+                Self::MAX_BYTE_SIZE as u64 - 1,
+                HashSet::from([
+                    (4, 8),
+                    (8, 9),
+                    (9, 10),
+                    (10, 11),
+                    (11, 12),
+                    (12, 4),
+                    (12, 12),
+                ]),
+            );
             let inner = RegexSha2Base64Config::configure(
                 meta,
                 Self::MAX_BYTE_SIZE,
                 Self::NUM_SHA2_COMP,
                 range_config,
-                state_lookup,
-                &[Self::ACCEPTED_STATE],
-                vec![substr_def],
+                regex_def,
+                vec![substr_def1, substr_def2],
             );
             let hash_instance = meta.instance_column();
             meta.enable_equality(hash_instance);
@@ -196,7 +212,7 @@ mod test {
             config.inner.load(&mut layouter)?;
             let mut first_pass = SKIP_FIRST_PASS;
             let mut hash_bytes_cell = None;
-            let mut len_cell = None;
+            let mut len_cells = Vec::new();
             layouter.assign_region(
                 || "regex",
                 |region| {
@@ -214,14 +230,23 @@ mod test {
                             .map(|byte| byte.cell())
                             .collect::<Vec<Cell>>(),
                     );
-                    len_cell = Some(result.substrs.substrs_length[0].cell());
+                    len_cells.append(
+                        &mut result
+                            .substrs
+                            .substrs_length
+                            .into_iter()
+                            .map(|val| val.cell())
+                            .collect(),
+                    );
                     Ok(())
                 },
             )?;
             for (idx, cell) in hash_bytes_cell.unwrap().into_iter().enumerate() {
                 layouter.constrain_instance(cell, config.hash_instance, idx)?;
             }
-            layouter.constrain_instance(len_cell.unwrap(), config.substr_len_instance, 0)?;
+            for (idx, cell) in len_cells.into_iter().enumerate() {
+                layouter.constrain_instance(cell, config.substr_len_instance, idx)?;
+            }
             Ok(())
         }
     }
@@ -229,17 +254,16 @@ mod test {
     impl<F: Field> TestRegexSha2Base64<F> {
         const MAX_BYTE_SIZE: usize = 1024;
         const NUM_SHA2_COMP: usize = 2;
-        const NUM_ADVICE: usize = 50;
+        const NUM_ADVICE: usize = 154;
         const NUM_FIXED: usize = 1;
         const NUM_LOOKUP_ADVICE: usize = 4;
         const LOOKUP_BITS: usize = 12;
         const K: u32 = 13;
-        const ACCEPTED_STATE: u64 = 23;
     }
 
     #[test]
     fn test_regex_sha2_base64_valid_case1() {
-        let input: Vec<u8> = "email was meant for @y".chars().map(|c| c as u8).collect();
+        let input: Vec<u8> = "email was meant for @y.".chars().map(|c| c as u8).collect();
         let circuit = TestRegexSha2Base64::<Fr> {
             input,
             _f: PhantomData,
@@ -254,11 +278,74 @@ mod test {
             .iter()
             .map(|byte| Fr::from(*byte as u64))
             .collect::<Vec<Fr>>();
-        let len_f = Fr::from(1);
+        let len_f1 = Fr::from(1);
+        let len_f2 = Fr::from(0);
         let prover = MockProver::run(
             TestRegexSha2Base64::<Fr>::K,
             &circuit,
-            vec![hash_fs, vec![len_f]],
+            vec![hash_fs, vec![len_f1, len_f2]],
+        )
+        .unwrap();
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    #[test]
+    fn test_regex_sha2_base64_valid_case2() {
+        let input: Vec<u8> = "email was meant for @yjkt."
+            .chars()
+            .map(|c| c as u8)
+            .collect();
+        let circuit = TestRegexSha2Base64::<Fr> {
+            input,
+            _f: PhantomData,
+        };
+        let hash = Sha256::digest(&circuit.input);
+        let mut expected_output = Vec::new();
+        expected_output.resize(44, 0);
+        general_purpose::STANDARD
+            .encode_slice(&hash, &mut expected_output)
+            .unwrap();
+        let hash_fs = expected_output
+            .iter()
+            .map(|byte| Fr::from(*byte as u64))
+            .collect::<Vec<Fr>>();
+        let len_f1 = Fr::from(4);
+        let len_f2 = Fr::from(0);
+        let prover = MockProver::run(
+            TestRegexSha2Base64::<Fr>::K,
+            &circuit,
+            vec![hash_fs, vec![len_f1, len_f2]],
+        )
+        .unwrap();
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    #[test]
+    fn test_regex_sha2_base64_valid_case3() {
+        let input: Vec<u8> = "email was meant for @yjkt and jeiw and kirjrt and iwiw."
+            .chars()
+            .map(|c| c as u8)
+            .collect();
+        let circuit = TestRegexSha2Base64::<Fr> {
+            input,
+            _f: PhantomData,
+        };
+        let hash = Sha256::digest(&circuit.input);
+        let mut expected_output = Vec::new();
+        expected_output.resize(44, 0);
+        general_purpose::STANDARD
+            .encode_slice(&hash, &mut expected_output)
+            .unwrap();
+        let hash_fs = expected_output
+            .iter()
+            .map(|byte| Fr::from(*byte as u64))
+            .collect::<Vec<Fr>>();
+        let len_f1 = Fr::from(4);
+        let len_f2 = Fr::from(28);
+        let prover = MockProver::run(
+            TestRegexSha2Base64::<Fr>::K,
+            &circuit,
+            vec![hash_fs, vec![len_f1, len_f2]],
         )
         .unwrap();
         assert_eq!(prover.verify(), Ok(()));
@@ -266,7 +353,7 @@ mod test {
 
     #[test]
     fn test_regex_sha2_base64_invalid_case1() {
-        let input: Vec<u8> = "email was meant for @@".chars().map(|c| c as u8).collect();
+        let input: Vec<u8> = "email was meant for @@.".chars().map(|c| c as u8).collect();
         let circuit = TestRegexSha2Base64::<Fr> {
             input,
             _f: PhantomData,
@@ -281,11 +368,12 @@ mod test {
             .iter()
             .map(|byte| Fr::from(*byte as u64))
             .collect::<Vec<Fr>>();
-        let len_f = Fr::from(1);
+        let len_f1 = Fr::from(0);
+        let len_f2 = Fr::from(0);
         let prover = MockProver::run(
             TestRegexSha2Base64::<Fr>::K,
             &circuit,
-            vec![hash_fs, vec![len_f]],
+            vec![hash_fs, vec![len_f1, len_f2]],
         )
         .unwrap();
         match prover.verify() {
@@ -313,11 +401,12 @@ mod test {
             .iter()
             .map(|byte| Fr::from(*byte as u64))
             .collect::<Vec<Fr>>();
-        let len_f = Fr::from(1);
+        let len_f1 = Fr::from(0);
+        let len_f2 = Fr::from(0);
         let prover = MockProver::run(
             TestRegexSha2Base64::<Fr>::K,
             &circuit,
-            vec![hash_fs, vec![len_f]],
+            vec![hash_fs, vec![len_f1, len_f2]],
         )
         .unwrap();
         match prover.verify() {

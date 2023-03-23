@@ -1,9 +1,9 @@
+mod macros;
 pub mod regex_sha2;
 pub mod regex_sha2_base64;
-use std::collections::HashMap;
-
 use crate::regex_sha2::RegexSha2Config;
-use halo2_base::halo2_proofs::plonk::ConstraintSystem;
+use halo2_base::halo2_proofs::circuit::SimpleFloorPlanner;
+use halo2_base::halo2_proofs::plonk::{Circuit, ConstraintSystem};
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
 use halo2_base::QuantumCell;
 use halo2_base::{
@@ -12,11 +12,12 @@ use halo2_base::{
     Context,
 };
 use halo2_dynamic_sha256::Field;
-use halo2_regex::{AssignedSubstrsResult, SubstrDef};
+use halo2_regex::{AssignedSubstrsResult, RegexDef, SubstrDef};
 use halo2_rsa::{
     AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstructions, RSAPublicKey,
     RSASignature,
 };
+pub use macros::*;
 use regex_sha2_base64::RegexSha2Base64Config;
 
 #[derive(Debug, Clone)]
@@ -29,33 +30,32 @@ pub struct EmailVerifyConfig<F: Field> {
 impl<F: Field> EmailVerifyConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
-        max_byte_size: usize,
         num_sha2_compression_per_column: usize,
         range_config: RangeConfig<F>,
-        header_state_lookup: HashMap<(u8, u64), u64>,
-        header_accepted_state_vals: &[u64],
+        header_max_byte_size: usize,
+        header_regex_def: RegexDef,
+        body_hash_substr_def: SubstrDef,
         header_substr_defs: Vec<SubstrDef>,
-        body_state_lookup: HashMap<(u8, u64), u64>,
-        body_accepted_state_vals: &[u64],
+        body_max_byte_size: usize,
+        body_regex_def: RegexDef,
         body_substr_defs: Vec<SubstrDef>,
         public_key_bits: usize,
     ) -> Self {
+        let header_substr_defs = [vec![body_hash_substr_def], header_substr_defs].concat();
         let header_processer = RegexSha2Config::configure(
             meta,
-            max_byte_size,
+            header_max_byte_size,
             num_sha2_compression_per_column,
             range_config.clone(),
-            header_state_lookup,
-            header_accepted_state_vals,
+            header_regex_def,
             header_substr_defs,
         );
         let body_processer = RegexSha2Base64Config::configure(
             meta,
-            max_byte_size,
+            body_max_byte_size,
             num_sha2_compression_per_column,
             range_config.clone(),
-            body_state_lookup,
-            body_accepted_state_vals,
+            body_regex_def,
             body_substr_defs,
         );
         let biguint_config = halo2_rsa::BigUintConfig::construct(range_config, 64);
@@ -148,6 +148,10 @@ impl<F: Field> EmailVerifyConfig<F> {
         Ok(())
     }
 
+    pub fn finalize(&self, ctx: &mut Context<F>) {
+        self.header_processer.finalize(ctx);
+    }
+
     pub fn range(&self) -> &RangeConfig<F> {
         self.header_processer.range()
     }
@@ -155,4 +159,60 @@ impl<F: Field> EmailVerifyConfig<F> {
     pub fn gate(&self) -> &FlexGateConfig<F> {
         self.header_processer.gate()
     }
+}
+
+// macro_rules!  {
+//     () => {
+
+//     };
+// }
+
+// #[derive(Debug, Clone)]
+// pub struct EmailVerifyCircuit<F: Field> {
+//     max_byte_size: usize,
+//     num_sha2_compression_per_column: usize,
+//     range_config: RangeConfig<F>,
+//     header_state_lookup: HashMap<(u8, u64), u64>,
+//     header_first_state: u64,
+//     header_accepted_state_vals: Vec<u64>,
+//     header_substr_defs: Vec<SubstrDef>,
+//     body_state_lookup: HashMap<(u8, u64), u64>,
+//     body_first_state: u64,
+//     body_accepted_state_vals: Vec<u64>,
+//     body_substr_defs: Vec<SubstrDef>,
+//     public_key_bits: usize,
+// }
+
+// impl<F: Field> Circuit<F> for EmailVerifyCircuit<F> {
+//     type Config = EmailVerifyConfig<F>;
+//     type FloorPlanner = SimpleFloorPlanner;
+
+//     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+//         Self::Config::configure()
+//     }
+// }
+
+// impl<F: Field> EmailVerifyCircuit<F> {
+//     const HEADER_REGEX_FILEPATH: &'static str = "./test_regexes/email_header"
+// }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use halo2_base::halo2_proofs::{
+        circuit::{floor_planner::V1, Cell, SimpleFloorPlanner},
+        dev::{CircuitCost, FailureLocation, MockProver, VerifyFailure},
+        halo2curves::bn256::{Fr, G1},
+        plonk::{Any, Circuit, Column, Instance},
+    };
+    use halo2_base::{gates::range::RangeStrategy::Vertical, ContextParams, SKIP_FIRST_PASS};
+    use mail_auth::dkim;
+    use sha2::{self, Digest, Sha256};
+
+    // impl_email_verify_circuit!(
+    //     TestEmailVerify2048Config,
+    //     TestEmailVerify2048Circuit,
+    //     2,
+    //     128,
+    // );
 }
