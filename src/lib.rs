@@ -213,10 +213,41 @@ mod test {
     use mail_auth::dkim;
     use sha2::{self, Digest, Sha256};
 
-    // impl_email_verify_circuit!(
-    //     TestEmailVerify2048Config,
-    //     TestEmailVerify2048Circuit,
-    //     2,
-    //     128,
-    // );
+    impl_email_verify_circuit!(
+        TestEmailVerifyConfig,
+        EmailVerifyCircuit,
+        5,
+        1024,
+        "./test_regexes/regex_header.txt",
+        SubstrDef::new(4, 0, 1024 - 1, HashSet::new()),
+        vec![SubstrDef::new(4, 0, 1024 - 1, HashSet::new())],
+        5000,
+        "./text_regex/regex_body.txt",
+        vec![SubstrDef::new(4, 0, 5000 - 1, HashSet::new())],
+        2048,
+        13
+    );
+
+    #[test]
+    fn test_simple_email_headers() {
+        // let input: Vec<u8> = "email was meant for @@".chars().map(|c| c as u8).collect();
+        // let circuit = TestRegexSha2::<Fr> {
+        //     input,
+        //     _f: PhantomData,
+        // };
+        // let expected_output = Sha256::digest(&circuit.input);
+        // let hash_fs = expected_output
+        //     .iter()
+        //     .map(|byte| Fr::from(*byte as u64))
+        //     .collect::<Vec<Fr>>();
+        // let len_f = Fr::from(1);
+        // let prover =
+        //     MockProver::run(TestRegexSha2::<Fr>::K, &circuit, vec![hash_fs, vec![len_f]]).unwrap();
+        // match prover.verify() {
+        //     Err(_) => {
+        //         println!("Error successfully achieved!");
+        //     }
+        //     _ => assert!(false, "Should be error."),
+        // }
+    }
 }

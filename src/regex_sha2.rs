@@ -266,7 +266,7 @@ mod test {
 
     impl<F: Field> TestRegexSha2<F> {
         const MAX_BYTE_SIZE: usize = 1024;
-        const NUM_SHA2_COMP: usize = 1;
+        const NUM_SHA2_COMP: usize = 1; // ~130 columns per extra SHA2 coloumn
         const NUM_ADVICE: usize = 154;
         const NUM_FIXED: usize = 1;
         const NUM_LOOKUP_ADVICE: usize = 4;
