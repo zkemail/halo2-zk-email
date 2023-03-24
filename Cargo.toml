@@ -26,5 +26,5 @@ num-traits = "0.2.15"
 base64 = "0.21"
 
 [dev-dependencies]
+mail-parser = "0.8.2"
 mail-auth = "0.3.0"
-rsa = { version = "0.6.1", features = ["serde"] }

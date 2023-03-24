@@ -124,7 +124,7 @@ macro_rules! impl_email_verify_circuit {
                             &assigned_signature,
                         )?;
                         let mut bytes_cells =
-                            vec![header_substrs.substrs_bytes, body_substrs.substrs_bytes]
+                            vec![&header_substrs.substrs_bytes[1..], &body_substrs.substrs_bytes]
                                 .concat()
                                 .into_iter()
                                 .flatten()
@@ -132,7 +132,7 @@ macro_rules! impl_email_verify_circuit {
                                 .collect();
                         substr_bytes.append(&mut bytes_cells);
                         let mut lens_cells =
-                            vec![header_substrs.substrs_length, body_substrs.substrs_length]
+                            vec![&header_substrs.substrs_length[1..], &body_substrs.substrs_length]
                                 .concat()
                                 .into_iter()
                                 .map(|val| val.cell())
