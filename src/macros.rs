@@ -40,7 +40,7 @@ macro_rules! impl_email_verify_circuit {
             body_bytes: Vec<u8>,
             public_key: RSAPublicKey<F>,
             signature: RSASignature<F>,
-            substrings: Vec<String>,
+            // substrings: Vec<String>,
         }
 
         impl<F: Field> Circuit<F> for $circuit_name<F> {
@@ -53,7 +53,7 @@ macro_rules! impl_email_verify_circuit {
                     body_bytes: vec![],
                     public_key: RSAPublicKey::without_witness(BigUint::from(Self::DEFAULT_E)),
                     signature: RSASignature::without_witness(),
-                    substrings: vec![],
+                    // substrings: vec![],
                 }
             }
 
@@ -124,7 +124,7 @@ macro_rules! impl_email_verify_circuit {
                             &assigned_signature,
                         )?;
                         let mut bytes_cells =
-                            vec![&header_substrs.substrs_bytes[1..], &body_substrs.substrs_bytes]
+                            vec![header_substrs.substrs_bytes, body_substrs.substrs_bytes]
                                 .concat()
                                 .into_iter()
                                 .flatten()
@@ -132,7 +132,7 @@ macro_rules! impl_email_verify_circuit {
                                 .collect();
                         substr_bytes.append(&mut bytes_cells);
                         let mut lens_cells =
-                            vec![&header_substrs.substrs_length[1..], &body_substrs.substrs_length]
+                            vec![header_substrs.substrs_length, body_substrs.substrs_length]
                                 .concat()
                                 .into_iter()
                                 .map(|val| val.cell())
@@ -161,18 +161,3 @@ macro_rules! impl_email_verify_circuit {
         }
     };
 }
-
-// impl_email_verify_circuit!(
-//     DummyConfig,
-//     DummyCircuit,
-//     1,
-//     1024,
-//     "./",
-//     SubstrDef::new(4, 0, 1024 - 1, HashSet::new()),
-//     vec![SubstrDef::new(4, 0, 1024 - 1, HashSet::new())],
-//     1024,
-//     "./",
-//     vec![SubstrDef::new(4, 0, 1024 - 1, HashSet::new())],
-//     2048,
-//     13
-// );
