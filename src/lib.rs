@@ -212,10 +212,12 @@ mod test {
     use halo2_base::{gates::range::RangeStrategy::Vertical, ContextParams, SKIP_FIRST_PASS};
     use mail_auth::dkim;
     use sha2::{self, Digest, Sha256};
+    use std::collections::HashSet;
+    use num_bigint::BigUint;
 
     impl_email_verify_circuit!(
         TestEmailVerifyConfig,
-        EmailVerifyCircuit,
+        TestEmailVerifyCircuit,
         5,
         1024,
         "./test_regexes/regex_header.txt",
@@ -230,6 +232,16 @@ mod test {
 
     #[test]
     fn test_simple_email_headers() {
+        // let header_bytes = include_str!("./test_data/test_header1.txt").as_bytes();
+        // let body_bytes =  include_str!("./test_data/test_body1.txt").as_bytes();
+
+        // let cirucit = TestEmailVerifyCircuit {
+        //     header_bytes,
+        //     body_bytes,
+        //     public_key: RSAPublicKey<F>,
+        //     signature: RSASignature<F>,
+        //     substrings: Vec<String>,
+        // }
         // let input: Vec<u8> = "email was meant for @@".chars().map(|c| c as u8).collect();
         // let circuit = TestRegexSha2::<Fr> {
         //     input,
