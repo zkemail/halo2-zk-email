@@ -220,12 +220,12 @@ mod test {
         TestEmailVerifyCircuit,
         5,
         1024,
-        "./test_regexes/regex_header.txt",
-        SubstrDef::new(4, 0, 1024 - 1, HashSet::new()),
-        vec![SubstrDef::new(4, 0, 1024 - 1, HashSet::new())],
-        5000,
+        "./test_regexes/regex_bh.txt",
+        SubstrDef::new(44, 0, 1024 - 1, [(23, 24), (24, 24)].iter().cloned().collect() as HashSet<(u64, u64)>),
+        vec![SubstrDef::new(44, 0, 1024 - 1, HashSet::from([(23, 24), (24, 24)]))],
+        6000,
         "./text_regex/regex_body.txt",
-        vec![SubstrDef::new(4, 0, 5000 - 1, HashSet::new())],
+        vec![SubstrDef::new(15, 0, 6000 - 1, HashSet::from([(29, 1), (1, 1)]))],
         2048,
         13
     );
