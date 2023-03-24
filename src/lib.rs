@@ -243,6 +243,7 @@ mod test {
 To: "zkemailverify@example.com" <zkemailverify@example.com>
 Subject: Hello, zkemail!
 
+this email was meant for @zkemailverify
 "#.to_vec();
         let signature_rsa = DkimSigner::from_key(pk_rsa)
         .domain("example.com")
@@ -268,15 +269,21 @@ Subject: Hello, zkemail!
         // println!("subject: {:?}",message.subject());
         // println!("header: {}",message.header_raw("DKIM-Signature").unwrap());
         // println!("body: {:?}",message.body_text(0).unwrap());
+        let signature_header_str = signature_rsa.to_header();
         let canonicalization = Canonicalization::Relaxed;
-        let canonicaled_header = canonicalization.canonical_headers(vec![(b"From",b"Sora Suegami <suegamisora@gmail.com>"),(b"To",b"\"zkemailverify@example.com\" <zkemailverify@example.com>"),(b"Subject",b"Hello, zkemail!")]);
-        let canonicaled_body = canonicalization.canonical_body(b"Hello ZKEmail!", u64::MAX);
+        let canonicaled_header = canonicalization.canonical_headers(vec![(b"From",b"Sora Suegami <suegamisora@gmail.com>"),(b"To",b"\"zkemailverify@example.com\" <zkemailverify@example.com>"),(b"Subject",b"Hello, zkemail!"),(b"DKIM-Signature",&(signature_header_str.as_bytes()))]);
+        let canonicaled_body = canonicalization.canonical_body(b"this email was meant for @zkemailverify", u64::MAX);
         let mut header_bytes = Vec::new();
         canonicaled_header.write(&mut header_bytes);
         let mut body_bytes = Vec::new();
         canonicaled_body.write(&mut body_bytes);
         println!("canonicaled_header: {}",String::from_utf8(header_bytes.clone()).unwrap());
         println!("canonicaled_body {}",String::from_utf8(body_bytes.clone()).unwrap());
+        
+        // let hash_fs = expected_output
+        //     .iter()
+        //     .map(|byte| Fr::from(*byte as u64))
+        //     .collect::<Vec<Fr>>();
         let e = RSAPubE::Fix(BigUint::from(TestEmailVerifyCircuit::<Fr>::DEFAULT_E));
         let private_key = rsa::RsaPrivateKey::read_pkcs1_pem_file("./test_data/test_rsa_key.pem").unwrap();
         let public_key = rsa::RsaPublicKey::from(&private_key);
@@ -286,13 +293,38 @@ Subject: Hello, zkemail!
         let signature_base64 = signature_rsa.signature();
         let signature_bytes = BASE64_STANDARD_NO_PAD.decode(signature_base64).unwrap();
         let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_le(&signature_bytes)));
+        let hash = Sha256::digest(&body_bytes);
         let circuit = TestEmailVerifyCircuit {
             header_bytes,
             body_bytes,
             public_key,
             signature,
-            substrings: vec!["zkemail".to_string()]
         };
+
+        let mut expected_output = Vec::new();
+        expected_output.resize(44, 0);
+        BASE64_STANDARD_NO_PAD
+            .encode_slice(&hash, &mut expected_output)
+            .unwrap();
+        let mut substr_bytes_fes = expected_output
+            .iter()
+            .map(|byte| Fr::from(*byte as u64))
+            .collect::<Vec<Fr>>();
+        for byte in b"zkemailverify".into_iter() {
+            substr_bytes_fes.push(Fr::from(*byte as u64));
+        }
+        let substr_lens_fes = vec![Fr::from(44),Fr::from(13)];
+        let prover = MockProver::run(
+            13,
+            &circuit,
+            vec![substr_bytes_fes, substr_lens_fes],
+        )
+        .unwrap();
+        assert_eq!(prover.verify(), Ok(()));
+
+        
+
+
 
 
 
