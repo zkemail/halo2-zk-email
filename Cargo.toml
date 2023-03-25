@@ -24,6 +24,7 @@ halo2-regex = { git = "https://github.com/zkemail/halo2-regex.git", version = "0
 halo2-base64 = { git = "https://github.com/zkemail/halo2-base64.git", version = "0.1.0", branch = "main" }
 num-traits = "0.2.15"
 base64 = "0.21"
+mail-auth = "0.3.0"
 
 [dev-dependencies]
 mail-auth = "0.3.0"
