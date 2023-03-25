@@ -100,11 +100,12 @@ macro_rules! impl_email_verify_circuit {
                 mut layouter: impl Layouter<F>,
             ) -> Result<(), Error> {
                 config.inner.load(&mut layouter)?;
+                config.inner.range().load_lookup_table(&mut layouter)?;
                 let mut first_pass = SKIP_FIRST_PASS;
                 let mut substr_bytes = Vec::<Cell>::new();
                 let mut substr_lens = Vec::<Cell>::new();
                 layouter.assign_region(
-                    || "regex",
+                    || "zkemail",
                     |region| {
                         if first_pass {
                             first_pass = false;
@@ -123,6 +124,7 @@ macro_rules! impl_email_verify_circuit {
                             &assigned_public_key,
                             &assigned_signature,
                         )?;
+                        config.inner.finalize(ctx);
                         let mut bytes_cells =
                             vec![header_substrs.substrs_bytes, body_substrs.substrs_bytes]
                                 .concat()
@@ -138,12 +140,11 @@ macro_rules! impl_email_verify_circuit {
                                 .map(|val| val.cell())
                                 .collect();
                         substr_lens.append(&mut lens_cells);
-                        config.inner.finalize(ctx);
                         Ok(())
                     },
                 )?;
-                for (idx, cell) in substr_bytes.into_iter().enumerate() {
-                    layouter.constrain_instance(cell, config.substr_bytes_instance, idx)?;
+                for (idx, cell) in substr_bytes[0..44+20].into_iter().enumerate() {
+                    layouter.constrain_instance(*cell, config.substr_bytes_instance, idx)?;
                 }
                 for (idx, cell) in substr_lens.into_iter().enumerate() {
                     layouter.constrain_instance(cell, config.substr_lens_instance, idx)?;
@@ -154,9 +155,9 @@ macro_rules! impl_email_verify_circuit {
 
         impl<F: Field> $circuit_name<F> {
             const DEFAULT_E: u128 = 65537;
-            const NUM_ADVICE: usize = 154;
+            const NUM_ADVICE: usize = 280;
             const NUM_FIXED: usize = 1;
-            const NUM_LOOKUP_ADVICE: usize = 8;
+            const NUM_LOOKUP_ADVICE: usize = 9;
             const LOOKUP_BITS: usize = 12;
         }
     };

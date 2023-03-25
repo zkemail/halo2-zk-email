@@ -136,7 +136,7 @@ impl<F: Field> EmailVerifyConfig<F> {
         gate.assert_is_const(
             ctx,
             &header_result.substrs.substrs_length[0],
-            F::from(32 * 4 / 3 + 4),
+            F::from(44),
         );
         Ok((header_result.substrs, body_result.substrs))
     }
@@ -144,7 +144,7 @@ impl<F: Field> EmailVerifyConfig<F> {
     pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.header_processer.load(layouter)?;
         self.body_processer.load(layouter)?;
-        self.rsa_config.range().load_lookup_table(layouter)?;
+        // self.rsa_config.range().load_lookup_table(layouter)?;
         Ok(())
     }
 
@@ -164,7 +164,6 @@ impl<F: Field> EmailVerifyConfig<F> {
         self.header_processer.gate()
     }
 }
-
 // macro_rules!  {
 //     () => {
 
@@ -211,50 +210,65 @@ mod test {
     };
     use halo2_base::{gates::range::RangeStrategy::Vertical, ContextParams, SKIP_FIRST_PASS};
     use halo2_rsa::RSAPubE;
-    use mail_auth::{dkim::{self, Canonicalization}, common::{headers::Writable, verify::VerifySignature}};
+    use mail_auth::{dkim::{self, Canonicalization}, common::{headers::Writable, verify::VerifySignature}, AuthenticatedMessage};
     use sha2::{self, Digest, Sha256};
     use std::collections::HashSet;
     use num_bigint::BigUint;
     use mail_auth::{common::{crypto::{RsaKey},headers::HeaderWriter},dkim::DkimSigner};
-    use mail_parser::{decoders::base64::base64_decode, Message, Addr, HeaderValue};
+    use mail_parser::{decoders::base64::base64_decode,  Message, Addr, HeaderValue};
     use rsa::{pkcs1::DecodeRsaPrivateKey, PublicKeyParts};
-    use base64::prelude::{Engine as _, BASE64_STANDARD_NO_PAD};
+    use base64::prelude::{Engine as _, BASE64_STANDARD};
+    use hex;
 
     impl_email_verify_circuit!(
-        TestEmailVerifyConfig,
-        TestEmailVerifyCircuit,
-        5,
+        Test1EmailVerifyConfig,
+        Test1EmailVerifyCircuit,
+        1,
         1024,
-        "./test_regexes/regex_bh.txt",
-        SubstrDef::new(44, 0, 1024 - 1, HashSet::from([(23, 24), (24, 24)])),
-        vec![SubstrDef::new(44, 0, 1024 - 1, HashSet::from([(23, 24), (24, 24)]))],
-        6000,
-        "./text_regex/regex_body.txt",
-        vec![SubstrDef::new(15, 0, 6000 - 1, HashSet::from([(29, 1), (1, 1)]))],
+        "./test_data/regex_header_test1.txt",
+        SubstrDef::new(44, 0, 1024 - 1, HashSet::from([(39, 3), (3, 3)])),
+        vec![SubstrDef::new(20, 0, 1024 - 1, HashSet::from([(16, 1), (1, 1), (1,12), (12,15), (15,15)]))],
+        1024,
+        "./test_data/regex_body_test1.txt",
+        vec![SubstrDef::new(15, 0, 1024 - 1, HashSet::from([(25, 1), (1, 1)]))],
         2048,
         13
     );
 
     #[test]
-    fn test_simple_email_headers() {
+    fn test_generated_email1() {
         let private_key = include_str!("../test_data/test_rsa_key.pem");
         let pk_rsa = RsaKey::<mail_auth::common::crypto::Sha256>::from_rsa_pem(private_key).unwrap();
-        let mut message = br#"From: Sora Suegami <suegamisora@gmail.com>
-To: "zkemailverify@example.com" <zkemailverify@example.com>
-Subject: Hello, zkemail!
-
-this email was meant for @zkemailverify
-"#.to_vec();
+        let body = "email was meant for @zkemailverify.";
+        let message = concat!(
+            "From: alice@zkemail.com\r\n",
+            "\r\n",
+            "email was meant for @zkemailverify.",
+        ).as_bytes();
+// "(from:(a-z)+|to:(a-z)+|subject:(a-z)+|^(from|to...)(a-z)+)+ "
         let signature_rsa = DkimSigner::from_key(pk_rsa)
         .domain("example.com")
         .selector("default")
-        .headers(["From", "To", "Subject"])
+        .headers(["From"])
         .header_canonicalization(Canonicalization::Relaxed)
         .body_canonicalization(Canonicalization::Relaxed)
         .sign(&message)
         .unwrap();
         // println!("signature {}",signature_rsa.to_header());
         // println!("signature {}",String::from_utf8(signature_rsa.signature().to_vec()).unwrap());
+        let mut signed_msg = Vec::with_capacity(message.len()+100);
+        signature_rsa.write_header(&mut signed_msg);
+        signed_msg.extend_from_slice(&message);
+        let auth_msg = AuthenticatedMessage::parse(&signed_msg).unwrap();
+        // println!("auth_msg:\n{}",String::from_utf8(auth_msg.raw_headers().to_vec()).unwrap());
+        let canonicalized_header = auth_msg.get_canonicalized_header().unwrap();
+        let canonicalization = Canonicalization::Relaxed;
+        let body_canonicalization = canonicalization.canonical_body(body.as_bytes(), u64::MAX);
+        let mut canonicalized_body = Vec::new();
+        body_canonicalization.write(&mut canonicalized_body);
+        println!("canonicalized_header:\n{}",String::from_utf8(canonicalized_header.clone()).unwrap());
+        println!("canonicalized_body:\n{}",String::from_utf8(canonicalized_body.clone()).unwrap());
+        
         // let mut complete_msg = Vec::new();
         // signature_rsa.write_header(&mut complete_msg);
         // complete_msg.append(&mut message);
@@ -269,55 +283,64 @@ this email was meant for @zkemailverify
         // println!("subject: {:?}",message.subject());
         // println!("header: {}",message.header_raw("DKIM-Signature").unwrap());
         // println!("body: {:?}",message.body_text(0).unwrap());
-        let signature_header_str = signature_rsa.to_header();
-        let canonicalization = Canonicalization::Relaxed;
-        let canonicaled_header = canonicalization.canonical_headers(vec![(b"From",b"Sora Suegami <suegamisora@gmail.com>"),(b"To",b"\"zkemailverify@example.com\" <zkemailverify@example.com>"),(b"Subject",b"Hello, zkemail!"),(b"DKIM-Signature",&(signature_header_str.as_bytes()))]);
-        let canonicaled_body = canonicalization.canonical_body(b"this email was meant for @zkemailverify", u64::MAX);
-        let mut header_bytes = Vec::new();
-        canonicaled_header.write(&mut header_bytes);
-        let mut body_bytes = Vec::new();
-        canonicaled_body.write(&mut body_bytes);
-        println!("canonicaled_header: {}",String::from_utf8(header_bytes.clone()).unwrap());
-        println!("canonicaled_body {}",String::from_utf8(body_bytes.clone()).unwrap());
+        // let signature_header_str = signature_rsa.to_header();
+        // let canonicalization = Canonicalization::Relaxed;
+        // let canonicaled_header = canonicalization.canonical_headers(vec![(b"From",b"Sora Suegami <suegamisora@gmail.com>"),(b"To",b"\"zkemailverify@example.com\" <zkemailverify@example.com>"),(b"Subject",b"Hello, zkemail!"),(b"DKIM-Signature",&(signature_header_str.as_bytes()))]);
+        // let canonicaled_body = canonicalization.canonical_body(b"this email was meant for @zkemailverify", u64::MAX);
+        // let mut header_bytes = Vec::new();
+        // canonicaled_header.write(&mut header_bytes);
+        // let mut body_bytes = Vec::new();
+        // canonicaled_body.write(&mut body_bytes);
+        // println!("canonicaled_header: {}",String::from_utf8(header_bytes.clone()).unwrap());
+        // println!("canonicaled_body {}",String::from_utf8(body_bytes.clone()).unwrap());
         
-        // let hash_fs = expected_output
-        //     .iter()
-        //     .map(|byte| Fr::from(*byte as u64))
-        //     .collect::<Vec<Fr>>();
-        let e = RSAPubE::Fix(BigUint::from(TestEmailVerifyCircuit::<Fr>::DEFAULT_E));
+        let e = RSAPubE::Fix(BigUint::from(Test1EmailVerifyCircuit::<Fr>::DEFAULT_E));
         let private_key = rsa::RsaPrivateKey::read_pkcs1_pem_file("./test_data/test_rsa_key.pem").unwrap();
         let public_key = rsa::RsaPublicKey::from(&private_key);
         let n_big =
                 BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
         let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
         let signature_base64 = signature_rsa.signature();
-        let signature_bytes = BASE64_STANDARD_NO_PAD.decode(signature_base64).unwrap();
-        let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_le(&signature_bytes)));
-        let hash = Sha256::digest(&body_bytes);
-        let circuit = TestEmailVerifyCircuit {
-            header_bytes,
-            body_bytes,
+        let signature_bytes = base64_decode(signature_base64).unwrap();
+        let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
+        let hash = Sha256::digest(&canonicalized_body);
+        let circuit = Test1EmailVerifyCircuit {
+            header_bytes: canonicalized_header,
+            body_bytes: canonicalized_body,
             public_key,
             signature,
         };
 
         let mut expected_output = Vec::new();
         expected_output.resize(44, 0);
-        BASE64_STANDARD_NO_PAD
+        BASE64_STANDARD
             .encode_slice(&hash, &mut expected_output)
             .unwrap();
         let mut substr_bytes_fes = expected_output
             .iter()
             .map(|byte| Fr::from(*byte as u64))
             .collect::<Vec<Fr>>();
-        for byte in b"zkemailverify".into_iter() {
-            substr_bytes_fes.push(Fr::from(*byte as u64));
+        let header_substr = b"alice@zkemail.com";
+        for idx in 0..20 {
+            if idx < header_substr.len() {
+                substr_bytes_fes.push(Fr::from(header_substr[idx] as u64));
+            } else {
+                substr_bytes_fes.push(Fr::from(0));
+            }
         }
-        let substr_lens_fes = vec![Fr::from(44),Fr::from(13)];
+        let body_substr = b"zkemailverify";
+        for idx in 0..15 {
+            if idx < body_substr.len() {
+                substr_bytes_fes.push(Fr::from(body_substr[idx] as u64));
+            } else {
+                substr_bytes_fes.push(Fr::from(0));
+            }
+        }
+        let substr_lens_fes = vec![Fr::from(44),Fr::from(17),Fr::from(13)];
         let prover = MockProver::run(
             13,
             &circuit,
-            vec![substr_bytes_fes, substr_lens_fes],
+            vec![substr_bytes_fes,substr_lens_fes],
         )
         .unwrap();
         assert_eq!(prover.verify(), Ok(()));

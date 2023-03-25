@@ -92,7 +92,6 @@ impl<F: Field> RegexSha2Config<F> {
             QuantumCell::Existing(&input_len_sum),
             QuantumCell::Existing(&assigned_hash_result.input_len),
         );
-
         let result = RegexSha2Result {
             substrs: regex_result,
             hash_bytes: assigned_hash_result.output_bytes,
@@ -110,7 +109,7 @@ impl<F: Field> RegexSha2Config<F> {
 
     pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.substr_match_config.load(layouter)?;
-        self.range().load_lookup_table(layouter)?;
+        // self.range().load_lookup_table(layouter)?;
         Ok(())
     }
 
@@ -222,6 +221,7 @@ mod test {
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
             config.inner.load(&mut layouter)?;
+            config.inner.range().load_lookup_table(&mut layouter)?;
             let mut first_pass = SKIP_FIRST_PASS;
             let mut hash_bytes_cell = None;
             let mut len_cells = Vec::new();

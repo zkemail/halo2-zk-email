@@ -27,4 +27,5 @@ base64 = "0.21"
 
 [dev-dependencies]
 mail-parser = "0.8.2"
-mail-auth = "0.3.0"
+mail-auth = { version = "0.3.0", git = "https://github.com/zkemail/mail-auth.git", branch = "feat/not_async" }
+hex = "0.4.3"

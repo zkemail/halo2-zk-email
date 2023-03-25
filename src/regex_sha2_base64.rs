@@ -210,6 +210,7 @@ mod test {
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
             config.inner.load(&mut layouter)?;
+            config.inner.range().load_lookup_table(&mut layouter)?;
             let mut first_pass = SKIP_FIRST_PASS;
             let mut hash_bytes_cell = None;
             let mut len_cells = Vec::new();
