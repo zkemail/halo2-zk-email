@@ -13,10 +13,7 @@ use halo2_base::{
 };
 use halo2_dynamic_sha256::Field;
 use halo2_regex::{AssignedSubstrsResult, RegexDef, SubstrDef};
-use halo2_rsa::{
-    AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstructions, RSAPublicKey,
-    RSASignature,
-};
+use halo2_rsa::{AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstructions, RSAPublicKey, RSASignature};
 pub use macros::*;
 use regex_sha2_base64::RegexSha2Base64Config;
 
@@ -67,19 +64,11 @@ impl<F: Field> EmailVerifyConfig<F> {
         }
     }
 
-    pub fn assign_public_key<'v>(
-        &self,
-        ctx: &mut Context<'v, F>,
-        public_key: RSAPublicKey<F>,
-    ) -> Result<AssignedRSAPublicKey<'v, F>, Error> {
+    pub fn assign_public_key<'v>(&self, ctx: &mut Context<'v, F>, public_key: RSAPublicKey<F>) -> Result<AssignedRSAPublicKey<'v, F>, Error> {
         self.rsa_config.assign_public_key(ctx, public_key)
     }
 
-    pub fn assign_signature<'v>(
-        &self,
-        ctx: &mut Context<'v, F>,
-        signature: RSASignature<F>,
-    ) -> Result<AssignedRSASignature<'v, F>, Error> {
+    pub fn assign_signature<'v>(&self, ctx: &mut Context<'v, F>, signature: RSASignature<F>) -> Result<AssignedRSASignature<'v, F>, Error> {
         self.rsa_config.assign_signature(ctx, signature)
     }
 
@@ -118,26 +107,17 @@ impl<F: Field> EmailVerifyConfig<F> {
             let sum = gate.inner_product(ctx, left, bases.clone());
             hashed_u64s.push(sum);
         }
-        let is_sign_valid =
-            self.rsa_config
-                .verify_pkcs1v15_signature(ctx, public_key, &hashed_u64s, signature)?;
+        let is_sign_valid = self.rsa_config.verify_pkcs1v15_signature(ctx, public_key, &hashed_u64s, signature)?;
         gate.assert_is_const(ctx, &is_sign_valid, F::one());
 
         // 4. Check that the encoded hash value is equal to the value in the email header.
         let hash_body_substr = &header_result.substrs.substrs_bytes[0];
         let body_encoded_hash = body_result.encoded_hash;
         debug_assert_eq!(hash_body_substr.len(), body_encoded_hash.len());
-        for (substr_byte, encoded_byte) in
-            hash_body_substr.iter().zip(body_encoded_hash.into_iter())
-        {
-            ctx.region
-                .constrain_equal(substr_byte.cell(), encoded_byte.cell())?;
+        for (substr_byte, encoded_byte) in hash_body_substr.iter().zip(body_encoded_hash.into_iter()) {
+            ctx.region.constrain_equal(substr_byte.cell(), encoded_byte.cell())?;
         }
-        gate.assert_is_const(
-            ctx,
-            &header_result.substrs.substrs_length[0],
-            F::from(32 * 4 / 3 + 4),
-        );
+        gate.assert_is_const(ctx, &header_result.substrs.substrs_length[0], F::from(32 * 4 / 3 + 4));
         Ok((header_result.substrs, body_result.substrs))
     }
 
@@ -211,9 +191,9 @@ mod test {
     };
     use halo2_base::{gates::range::RangeStrategy::Vertical, ContextParams, SKIP_FIRST_PASS};
     use mail_auth::dkim;
+    use num_bigint::BigUint;
     use sha2::{self, Digest, Sha256};
     use std::collections::HashSet;
-    use num_bigint::BigUint;
 
     impl_email_verify_circuit!(
         TestEmailVerifyConfig,
@@ -221,7 +201,7 @@ mod test {
         5,
         1024,
         "./test_regexes/regex_bh.txt",
-        SubstrDef::new(44, 0, 1024 - 1, [(23, 24), (24, 24)].iter().cloned().collect() as HashSet<(u64, u64)>),
+        SubstrDef::new(44, 0, 1024 - 1, HashSet::from([(23, 24), (24, 24)])),
         vec![SubstrDef::new(44, 0, 1024 - 1, HashSet::from([(23, 24), (24, 24)]))],
         6000,
         "./text_regex/regex_body.txt",
