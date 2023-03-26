@@ -39,7 +39,7 @@ async fn test_dkim_verify() {
 
     let parsedHeaders = authenticated_message.get_canonicalized_header().await.unwrap();
     println!("Result: {:?}", result);
-    println!("Parsed headers: {:?}", std::str::from_utf8(parsedHeaders));
+    println!("Parsed headers: {:?}", std::str::from_utf8(parsedHeaders.as_slice()));
 
     // Make sure all signatures passed verification
 }
