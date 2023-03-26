@@ -155,10 +155,11 @@ macro_rules! impl_email_verify_circuit {
 
         impl<F: Field> $circuit_name<F> {
             const DEFAULT_E: u128 = 65537;
-            const NUM_ADVICE: usize = 280;
+            const NUM_ADVICE: usize = 510;
             const NUM_FIXED: usize = 1;
-            const NUM_LOOKUP_ADVICE: usize = 9;
+            const NUM_LOOKUP_ADVICE: usize = 15;
             const LOOKUP_BITS: usize = 12;
+            const BITS_LEN: usize = $public_key_bits;
         }
     };
 }
