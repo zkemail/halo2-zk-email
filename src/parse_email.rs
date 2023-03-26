@@ -38,26 +38,3 @@ pub async fn parse_external_eml(raw_email: &String) -> Result<(Vec<u8>, Vec<u8>,
     Ok((parsed_headers.clone(), body_bytes.to_vec().clone(), signature.clone().signature().to_vec().clone()))
     // signature.clone().signature()))
 }
-
-// Use tokio async runtime to do network requests
-#[tokio::main]
-async fn main() -> std::io::Result<()> {
-    let test_verify = test_dkim_verify_local_eml();
-    block_on(test_verify);
-    Ok(())
-}
-
-async fn test_dkim_verify_local_eml() {
-    // Parse message
-    let raw_email = std::fs::read_to_string("./test_email/testemail.eml").unwrap();
-    let (parsed_headers, body_bytes, signature) = parse_external_eml(&raw_email).await.unwrap();
-
-    // Create a resolver using Cloudflare DNS
-    let resolver = Resolver::new_cloudflare_tls().unwrap();
-    let authenticated_message = AuthenticatedMessage::parse(raw_email.as_bytes()).unwrap();
-
-    // Validate signature
-    let result = resolver.verify_dkim(&authenticated_message).await;
-    assert!(result.iter().all(|s| s.result() == &DkimResult::Pass));
-    // Make sure all signatures passed verification
-}
