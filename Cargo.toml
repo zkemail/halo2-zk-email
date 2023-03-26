@@ -24,7 +24,8 @@ halo2-regex = { git = "https://github.com/zkemail/halo2-regex.git", version = "0
 halo2-base64 = { git = "https://github.com/zkemail/halo2-base64.git", version = "0.1.0", branch = "main" }
 num-traits = "0.2.15"
 base64 = "0.21"
-mail-auth = { git = "https://github.com/Divide-By-0/mail-auth.git", version = "0.3.0", branch = "main" }
+# mail-auth = { git = "https://github.com/Divide-By-0/mail-auth.git", version = "0.3.0", branch = "main" }
+mail-auth = { path = "../mail-auth/" }
 futures = "0.3.27"
 tokio = { version = "1.16", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }
 

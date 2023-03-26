@@ -15,6 +15,8 @@ use halo2_dynamic_sha256::Field;
 use halo2_regex::{AssignedSubstrsResult, RegexDef, SubstrDef};
 use halo2_rsa::{AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstructions, RSAPublicKey, RSASignature};
 pub use macros::*;
+use mail_auth::common::verify::VerifySignature;
+use mail_auth::{AuthenticatedMessage, DkimResult, Resolver};
 use regex_sha2_base64::RegexSha2Base64Config;
 
 #[derive(Debug, Clone)]
@@ -220,6 +222,62 @@ mod test {
         2048,
         13
     );
+
+    // Tokio on and test
+    #[tokio::test]
+
+    async fn test_dkim_verify_local_eml() {
+        // Create a resolver using Cloudflare DNS
+        let resolver = Resolver::new_cloudflare_tls().unwrap();
+
+        // Parse message
+        let raw_email = std::fs::read_to_string("./test_email/testemail.eml").unwrap();
+        let authenticated_message = AuthenticatedMessage::parse(raw_email.as_bytes()).unwrap();
+
+        // Validate signature
+        let result = resolver.verify_dkim(&authenticated_message).await;
+        assert!(result.iter().all(|s| s.result() == &DkimResult::Pass));
+
+        // Parsed and ordered bytes
+        let (header_bytes, signed_header_bytes) = authenticated_message.get_canonicalized_header().await.unwrap();
+        println!("Result: {:?}", result[0]);
+
+        let signature = result[0].signature().unwrap();
+        println!("B: {:?}", std::str::from_utf8(signature.signature()));
+        println!(
+            "Parsed headers: {:?} {:?}",
+            std::str::from_utf8(header_bytes.as_slice()),
+            std::str::from_utf8(signed_header_bytes)
+        );
+
+        let test = [
+            157, 60, 115, 183, 251, 120, 90, 178, 231, 85, 195, 18, 235, 43, 179, 173, 137, 5, 40, 169, 114, 217, 211, 128, 240, 182, 7, 67, 164, 121, 166, 114, 181, 44, 162, 226,
+            1, 13, 223, 214, 130, 192, 192, 86, 41, 31, 58, 93, 114, 34, 46, 201, 24, 16, 240, 22, 90, 84, 246, 141, 133, 183, 23, 40, 23, 160, 79, 118, 91, 146, 116, 165, 163,
+            182, 172, 126, 207, 60, 121, 138, 142, 55, 143, 9, 101, 224, 36, 191, 32, 233, 38, 21, 247, 161, 22, 85, 96, 37, 54, 48, 29, 70, 166, 50, 137, 29, 51, 153, 107, 39,
+            129, 248, 245, 213, 211, 137, 216, 115, 117, 242, 8, 147, 248, 0, 37, 102, 60, 55, 12, 255, 187, 210, 194, 86, 132, 83, 69, 71, 225, 159, 22, 13, 134, 216, 181, 56, 4,
+            105, 237, 16, 147, 212, 174, 89, 185, 76, 51, 137, 73, 131, 119, 143, 218, 10, 192, 40, 95, 202, 102, 100, 47, 15, 93, 131, 241, 1, 112, 122, 91, 135, 89, 4, 195, 23,
+            64, 164, 92, 161, 171, 50, 76, 210, 53, 193, 37, 252, 209, 34, 182, 105, 78, 179, 40, 185, 191, 33, 114, 178, 75, 171, 101, 248, 90, 193, 111, 182, 64, 119, 179, 143,
+            100, 108, 116, 223, 86, 66, 92, 251, 213, 24, 165, 153, 186, 32, 77, 4, 162, 160, 66, 223, 163, 14, 173, 153, 92, 165, 150, 125, 137, 157, 13, 112, 133, 99, 79, 14,
+        ];
+
+        let rsa_signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_le(signature.signature())));
+
+        let body_bytes = &authenticated_message.raw_message[authenticated_message.body_offset..];
+        let hash = Sha256::digest(&body_bytes);
+        #[warn(deprecated)]
+        assert_eq!(
+            base64::encode(hash),
+            base64::encode(signature.body_hash()),
+            "Extracted body hash and calculated body hash do not match!"
+        );
+        // let circuit = TestEmailVerifyCircuit {
+        //     parsed_header_bytes,
+        //     body_bytes,
+        //     public_key,
+        //     signature,
+        // };
+        // Make sure all signatures passed verification
+    }
 
     #[test]
     fn test_simple_email_headers() {
