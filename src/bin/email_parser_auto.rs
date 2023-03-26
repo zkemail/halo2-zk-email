@@ -1,10 +1,5 @@
-extern crate mail_auth;
-
-use std::sync::Arc;
-
+// extern crate mail_auth;
 use futures::executor::block_on;
-// use mail_auth::dkim::{Dkim, DkimResult};
-// use mail_auth::mail_parser::{parse_mail, Mail};
 use mail_auth::{AuthenticatedMessage, DkimResult, Resolver};
 
 // Use tokio async runtime to do network requests
@@ -44,7 +39,7 @@ async fn test_dkim_verify() {
 
     let parsedHeaders = authenticated_message.get_canonicalized_header().await.unwrap();
     println!("Result: {:?}", result);
-    println!("Parsed headers: {:?}", parsedHeaders);
+    println!("Parsed headers: {:?}", std::str::from_utf8(parsedHeaders));
 
     // Make sure all signatures passed verification
 }

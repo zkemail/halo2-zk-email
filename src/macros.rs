@@ -40,7 +40,7 @@ macro_rules! impl_email_verify_circuit {
             body_bytes: Vec<u8>,
             public_key: RSAPublicKey<F>,
             signature: RSASignature<F>,
-            substrings: Vec<String>,
+            // substrings: Vec<String>,
         }
 
         impl<F: Field> Circuit<F> for $circuit_name<F> {
@@ -53,7 +53,7 @@ macro_rules! impl_email_verify_circuit {
                     body_bytes: vec![],
                     public_key: RSAPublicKey::without_witness(BigUint::from(Self::DEFAULT_E)),
                     signature: RSASignature::without_witness(),
-                    substrings: vec![],
+                    // substrings: vec![],
                 }
             }
 
@@ -161,18 +161,3 @@ macro_rules! impl_email_verify_circuit {
         }
     };
 }
-
-// impl_email_verify_circuit!(
-//     DummyConfig,
-//     DummyCircuit,
-//     1,
-//     1024,
-//     "./",
-//     SubstrDef::new(4, 0, 1024 - 1, HashSet::new()),
-//     vec![SubstrDef::new(4, 0, 1024 - 1, HashSet::new())],
-//     1024,
-//     "./",
-//     vec![SubstrDef::new(4, 0, 1024 - 1, HashSet::new())],
-//     2048,
-//     13
-// );

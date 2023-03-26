@@ -29,4 +29,5 @@ futures = "0.3.27"
 tokio = { version = "1.16", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }
 
 [dev-dependencies]
-rsa = { version = "0.6.1", features = ["serde"] }
+mail-parser = "0.8.2"
+# mail-auth = "0.3.0"

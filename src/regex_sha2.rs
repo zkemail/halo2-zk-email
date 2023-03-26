@@ -174,7 +174,7 @@ mod test {
                 0,
                 Self::K as usize,
             );
-            let lookup_filepath = "./test_regexes/regex_test_lookup.txt";
+            let lookup_filepath = "./test_data/regex_test_lookup.txt";
             let regex_def = RegexDef::read_from_text(lookup_filepath);
             let substr_def1 = SubstrDef::new(
                 4,
