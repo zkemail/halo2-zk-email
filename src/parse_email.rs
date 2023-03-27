@@ -53,15 +53,6 @@ pub async fn parse_external_eml(raw_email: &String) -> Result<(Vec<u8>, Vec<u8>,
     // signature.clone().signature()))
 }
 
-#[tokio::main]
-async fn main() {
-    let domain = "20210112._domainkey.gmail.com.";
-    match get_public_key(domain).await {
-        Ok(key) => println!("RSA public key: {}", key),
-        Err(e) => eprintln!("Error: {}", e),
-    }
-}
-
 async fn get_public_key(domain: &str) -> Result<String, Box<dyn std::error::Error>> {
     let resolver = AsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())?;
     let response = resolver.lookup(domain, RecordType::TXT).await?;
@@ -87,4 +78,13 @@ async fn get_public_key(domain: &str) -> Result<String, Box<dyn std::error::Erro
     }
 
     Err("RSA public key not found.".into())
+}
+
+#[tokio::main]
+async fn main() {
+    let domain = "20210112._domainkey.gmail.com.";
+    match get_public_key(domain).await {
+        Ok(key) => println!("RSA public key: {}", key),
+        Err(e) => eprintln!("Error: {}", e),
+    }
 }
