@@ -26,7 +26,7 @@ use num_bigint::BigUint;
 
 #[macro_export]
 macro_rules! impl_email_verify_circuit {
-    ($config_name:ident, $circuit_name:ident, $num_sha2_compression_per_column:expr, $header_max_byte_size:expr, $header_regex_filepath:expr, $body_hash_substr_filepath:expr, $header_substr_filepathes:expr, $body_max_byte_size:expr, $body_regex_filepath:expr, $body_substr_filepathes:expr, $public_key_bits:expr, $k:expr) => {
+    ($config_name:ident, $circuit_name:ident, $num_sha2_compression_per_column:expr, $header_max_byte_size:expr, $header_regex_filepath:expr, $body_hash_substr_filepath:expr, $header_substr_filepathes:expr, $body_max_byte_size:expr, $body_regex_filepath:expr, $body_substr_filepathes:expr, $public_key_bits:expr, $num_advice:expr, $num_lookup_advice:expr, $k:expr) => {
         #[derive(Debug, Clone)]
         pub struct $config_name<F: Field> {
             inner: EmailVerifyConfig<F>,
@@ -146,8 +146,8 @@ macro_rules! impl_email_verify_circuit {
                         Ok(())
                     },
                 )?;
-                for (idx, cell) in substr_bytes[0..44+20].into_iter().enumerate() {
-                    layouter.constrain_instance(*cell, config.substr_bytes_instance, idx)?;
+                for (idx, cell) in substr_bytes.into_iter().enumerate() {
+                    layouter.constrain_instance(cell, config.substr_bytes_instance, idx)?;
                 }
                 for (idx, cell) in substr_lens.into_iter().enumerate() {
                     layouter.constrain_instance(cell, config.substr_lens_instance, idx)?;
@@ -158,9 +158,9 @@ macro_rules! impl_email_verify_circuit {
 
         impl<F: Field> $circuit_name<F> {
             const DEFAULT_E: u128 = 65537;
-            const NUM_ADVICE: usize = 510;
+            const NUM_ADVICE: usize = $num_advice;//510;
             const NUM_FIXED: usize = 1;
-            const NUM_LOOKUP_ADVICE: usize = 15;
+            const NUM_LOOKUP_ADVICE: usize = $num_lookup_advice;//15;
             const LOOKUP_BITS: usize = 12;
             const BITS_LEN: usize = $public_key_bits;
         }

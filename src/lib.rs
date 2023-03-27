@@ -238,6 +238,8 @@ mod test {
         vec!["./test_data/substr_body_test1_1.txt"],
         // vec![SubstrDef::new(15, 0, 1024 - 1, HashSet::from([(25, 1), (1, 1)]))],
         2048,
+        280,
+        9,
         13
     );
 
@@ -350,6 +352,8 @@ mod test {
         vec!["./test_data/substr_body_test2_1.txt","./test_data/substr_body_test2_2.txt"],
         // vec![SubstrDef::new(40, 0, 1024 - 1, HashSet::from([(31, 1), (1, 1)])),SubstrDef::new(40, 0, 1024 - 1, HashSet::from([(13, 15), (15, 15), (4,8), (8,10), (10,12),(12,13)]))],
         2048,
+        510,
+        15,
         13
     );
 
