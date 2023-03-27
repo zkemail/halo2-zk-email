@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "parse_email"
+path = "src/parse_email.rs"
 
 [dependencies]
 num-bigint = { version = "0.4", features = ["rand"] }
@@ -28,7 +31,13 @@ mail-auth = { git = "https://github.com/Divide-By-0/mail-auth.git", version = "0
 # mail-auth = { path = "../mail-auth/" }
 futures = "0.3.27"
 tokio = { version = "1.16", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }
+cfdkim = { version = "0.2.6", git = "https://github.com/SoraSuegami/dkim.git" }
+trust-dns-resolver = "0.22.0"
 
 [dev-dependencies]
-mail-parser = "0.8.2"
-# mail-auth = "0.3.0"
+# mail-parser = "0.8.2"
+# mail-auth = { version = "0.3.0", git = "https://github.com/zkemail/mail-auth.git", branch = "feat/not_async" }
+# cfdkim = { version = "0.2.6", path = "../dkim" }
+mailparse = "0.14"
+hex = "0.4.3"
+slog = "2.7.0"

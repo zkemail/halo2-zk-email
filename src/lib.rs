@@ -204,7 +204,7 @@ mod test {
         common::{headers::Writable, verify::VerifySignature},
         dkim::{self, Canonicalization},
     };
-    use mail_parser::{decoders::base64::base64_decode, Addr, HeaderValue, Message};
+    // use mail_parser::{decoders::base64::base64_decode, Addr, HeaderValue, Message};
     use num_bigint::BigUint;
     use rsa::{pkcs1::DecodeRsaPrivateKey, PublicKeyParts};
     use sha2::{self, Digest, Sha256};
@@ -215,11 +215,11 @@ mod test {
         TestEmailVerifyCircuit,
         5,
         1024,
-        "./test_regexes/regex_bh.txt",
+        "./test_data/regex_bh.txt",
         SubstrDef::new(44, 0, 1024 - 1, HashSet::from([(23, 24), (24, 24)])),
         vec![SubstrDef::new(44, 0, 1024 - 1, HashSet::from([(23, 24), (24, 24)]))],
         6000,
-        "./text_regex/regex_body.txt",
+        "./text_data/regex_body.txt",
         vec![SubstrDef::new(15, 0, 6000 - 1, HashSet::from([(29, 1), (1, 1)]))],
         2048,
         13
@@ -231,14 +231,39 @@ mod test {
     async fn test_dkim_verify_local_eml() {
         // Parse message
         let raw_email = std::fs::read_to_string("./test_email/testemail.eml").unwrap();
-        let (parsed_headers, body_bytes, signature) = parse_external_eml(&raw_email).await.unwrap();
+        let (header_bytes, body_bytes, public_key_bytes, signature_bytes) = parse_external_eml(&raw_email).await.unwrap();
 
-        // let circuit = TestEmailVerifyCircuit {
-        //     parsed_header_bytes,
-        //     body_bytes,
-        //     public_key,
-        //     signature,
-        // };
+        // Convert public_key_bytes to BigUint
+        let public_key_n = BigUint::from_bytes_le(&public_key_bytes);
+        let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_le(&signature_bytes)));
+
+        let e = RSAPubE::Fix(BigUint::from(TestEmailVerifyCircuit::<Fr>::DEFAULT_E));
+        // let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
+        let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from_bytes_le(&public_key_bytes)), e);
+
+        let hash = Sha256::digest(&body_bytes);
+        println!("hash: {:?}", hash);
+        println!("public_key: {:?}", public_key);
+        println!("signature: {:?}", signature);
+        let circuit = TestEmailVerifyCircuit {
+            header_bytes,
+            body_bytes,
+            public_key,
+            signature,
+        };
+
+        // let mut expected_output = Vec::new();
+        // expected_output.resize(44, 0);
+        // BASE64_STANDARD_NO_PAD.encode_slice(&hash, &mut expected_output).unwrap();
+        // let mut substr_bytes_fes = expected_output.iter().map(|byte| Fr::from(*byte as u64)).collect::<Vec<Fr>>();
+        // for byte in b"zkemailverify".into_iter() {
+        //     substr_bytes_fes.push(Fr::from(*byte as u64));
+        // }
+        // let substr_lens_fes = vec![Fr::from(44), Fr::from(13)];
+        // let prover = MockProver::run(13, &circuit, vec![substr_bytes_fes, substr_lens_fes]).unwrap();
+        // println!("Next line fails: ");
+        // assert_eq!(prover.verify(), Ok(()));
+
         // Make sure all signatures passed verification
     }
 
