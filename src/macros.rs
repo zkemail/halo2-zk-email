@@ -26,7 +26,7 @@ use num_bigint::BigUint;
 
 #[macro_export]
 macro_rules! impl_email_verify_circuit {
-    ($config_name:ident, $circuit_name:ident, $num_sha2_compression_per_column:expr, $header_max_byte_size:expr, $header_regex_filepath:expr, $body_hash_substr_def:expr, $header_substr_defs:expr, $body_max_byte_size:expr, $body_regex_filepath:expr, $body_substr_defs:expr, $public_key_bits:expr, $k:expr) => {
+    ($config_name:ident, $circuit_name:ident, $num_sha2_compression_per_column:expr, $header_max_byte_size:expr, $header_regex_filepath:expr, $body_hash_substr_filepath:expr, $header_substr_filepathes:expr, $body_max_byte_size:expr, $body_regex_filepath:expr, $body_substr_filepathes:expr, $public_key_bits:expr, $k:expr) => {
         #[derive(Debug, Clone)]
         pub struct $config_name<F: Field> {
             inner: EmailVerifyConfig<F>,
@@ -70,17 +70,20 @@ macro_rules! impl_email_verify_circuit {
                 );
                 let header_regex_def = RegexDef::read_from_text($header_regex_filepath);
                 let body_regex_def = RegexDef::read_from_text($body_regex_filepath);
+                let header_substr_defs = $header_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
+                let body_hash_substr_def = SubstrDef::read_from_text($body_hash_substr_filepath);
+                let body_substr_defs = $body_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
                 let inner = EmailVerifyConfig::configure(
                     meta,
                     $num_sha2_compression_per_column,
                     range_config,
                     $header_max_byte_size,
                     header_regex_def,
-                    $body_hash_substr_def,
-                    $header_substr_defs,
+                    body_hash_substr_def,
+                    header_substr_defs,
                     $body_max_byte_size,
                     body_regex_def,
-                    $body_substr_defs,
+                    body_substr_defs,
                     $public_key_bits,
                 );
                 let substr_bytes_instance = meta.instance_column();
