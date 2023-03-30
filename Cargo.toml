@@ -3,7 +3,6 @@ name = "halo2-zk-email"
 version = "0.1.0"
 edition = "2021"
 
-
 [dependencies]
 num-bigint = { version = "0.4", features = ["rand"] }
 sha2 = "0.10.6"
