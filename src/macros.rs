@@ -23,6 +23,7 @@ use halo2_rsa::{
     RSASignature,
 };
 use num_bigint::BigUint;
+use snark_verifier_sdk::CircuitExt;
 
 #[macro_export]
 macro_rules! impl_email_verify_circuit {
@@ -40,7 +41,7 @@ macro_rules! impl_email_verify_circuit {
             body_bytes: Vec<u8>,
             public_key: RSAPublicKey<F>,
             signature: RSASignature<F>,
-            // substrings: Vec<String>,
+            substrings: Vec<String>,
         }
 
         impl<F: Field> Circuit<F> for $circuit_name<F> {
@@ -53,7 +54,7 @@ macro_rules! impl_email_verify_circuit {
                     body_bytes: vec![],
                     public_key: RSAPublicKey::without_witness(BigUint::from(Self::DEFAULT_E)),
                     signature: RSASignature::without_witness(),
-                    // substrings: vec![],
+                    substrings: vec![],
                 }
             }
 
@@ -154,6 +155,49 @@ macro_rules! impl_email_verify_circuit {
                 }
                 Ok(())
             }
+        }
+
+        impl<F:Field> CircuitExt<F> for $circuit_name<F> {
+            fn num_instance(&self) -> Vec<usize> {
+                let header_substr_defs = $header_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
+                let body_hash_substr_def = SubstrDef::read_from_text($body_hash_substr_filepath);
+                let body_substr_defs = $body_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
+                let num_subst_defs = 1 + header_substr_defs.len() + body_substr_defs.len();
+                let mut substr_bytes_sum = body_hash_substr_def.max_length;
+                for substr_def in header_substr_defs.iter() {
+                    substr_bytes_sum += substr_def.max_length;
+                }
+                for substr_def in body_substr_defs.iter() {
+                    substr_bytes_sum += substr_def.max_length;
+                }
+                vec![substr_bytes_sum, num_subst_defs]
+            }
+
+            fn instances(&self) -> Vec<Vec<F>> {
+                let header_substr_defs = $header_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
+                let body_hash_substr_def = SubstrDef::read_from_text($body_hash_substr_filepath);
+                let body_substr_defs = $body_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
+                let mut max_lens = vec![body_hash_substr_def.max_length];
+                for substr_def in header_substr_defs.iter() {
+                    max_lens.push(substr_def.max_length);
+                }
+                for substr_def in body_substr_defs.iter() {
+                    max_lens.push(substr_def.max_length);
+                }
+                let bytes_frs = self.substrings.iter().enumerate().flat_map(|(idx,chars)| {
+                    let mut frs = Vec::new();
+                    for _char in chars.as_bytes().into_iter() {
+                        frs.push(F::from(*_char as u64));
+                    }
+                    for _ in chars.len() .. max_lens[idx] {
+                        frs.push(F::from(0));
+                    }
+                    frs
+                }).collect::<Vec<F>>();
+                let lens = self.substrings.iter().map(|chars| F::from(chars.len() as u64)).collect::<Vec<F>>();
+                vec![bytes_frs,lens]
+            }
+
         }
 
         impl<F: Field> $circuit_name<F> {
