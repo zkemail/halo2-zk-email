@@ -1,3 +1,4 @@
+use ark_std::{end_timer, start_timer};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use halo2_base::halo2_proofs;
 use halo2_base::halo2_proofs::circuit::SimpleFloorPlanner;
@@ -55,7 +56,7 @@ impl_email_verify_circuit!(
     15
 );
 
-const K1: usize = 21;
+const K1: usize = 23;
 
 impl_aggregation_email_verify!(
     Bench1EmailVerifyConfig,
@@ -80,6 +81,30 @@ fn gen_or_get_params(k: usize) -> ParamsKZG<Bn256> {
                 .write(&mut BufWriter::new(File::create(&path).unwrap()))
                 .unwrap();
             params
+        }
+    }
+}
+
+fn gen_or_get_pk1(agg_params: &ParamsKZG<Bn256>, snarks: &[Snark]) -> ProvingKey<G1Affine> {
+    let path = "proving_key_1.pk";
+    match File::open(&path) {
+        Ok(f) => {
+            let mut reader = BufReader::new(f);
+            ProvingKey::<G1Affine>::read::<_, AggregationCircuit>(
+                &mut reader,
+                SerdeFormat::RawBytes,
+            )
+            .unwrap()
+        }
+        Err(_) => {
+            let agg_pk = gen_bench1_agg_pk(&agg_params, snarks.to_vec(), &mut OsRng);
+            agg_pk
+                .write(
+                    &mut BufWriter::new(File::create(&path).unwrap()),
+                    SerdeFormat::RawBytes,
+                )
+                .unwrap();
+            agg_pk
         }
     }
 }
@@ -146,11 +171,18 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
         signature,
         substrings,
     };
+    let mock = start_timer!(|| "app pk generation");
     let app_pk = gen_bench1_email_pk(&app_params, circuit.clone());
+    end_timer!(mock);
     println!("application proving key is generated.");
+    let mock = start_timer!(|| "app snarks generation");
     let snarks = [(); 2].map(|_| gen_bench1_email_snark(&app_params, circuit.clone(), &app_pk));
+    end_timer!(mock);
     println!("application snarks are generated.");
-    let agg_pk = gen_bench1_agg_pk(&agg_params, snarks.to_vec(), &mut OsRng);
+    // let agg_pk = gen_bench1_agg_pk(&agg_params, snarks.to_vec(), &mut OsRng);
+    let mock = start_timer!(|| "aggregation pk generation");
+    let agg_pk = gen_or_get_pk1(&agg_params, &snarks);
+    end_timer!(mock);
     println!("aggregation proving key is generated.");
     group.bench_function("bench 1", |b| {
         b.iter(|| gen_bench1_agg_proof(&agg_params, &agg_pk, snarks.to_vec(), &mut OsRng))

@@ -66,10 +66,10 @@ impl<F: Field> RegexSha2Base64Config<F> {
             .encode_slice(&actual_hash, &mut hash_base64)
             .expect("fail to convert the hash bytes into the base64 strings");
         debug_assert_eq!(bytes_written, 44);
-        println!(
-            "hash_base64 {}",
-            String::from_utf8(hash_base64.to_vec()).unwrap()
-        );
+        // println!(
+        //     "hash_base64 {}",
+        //     String::from_utf8(hash_base64.to_vec()).unwrap()
+        // );
         let base64_result = self
             .base64_config
             .assign_values(&mut ctx.region, &hash_base64)?;

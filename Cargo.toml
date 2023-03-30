@@ -35,6 +35,8 @@ snark-verifier-sdk = { git = "https://github.com/zkemail/snark-verifier.git", ve
     "loader_halo2",
     "halo2-pse",
 ] }
+ark-std = { version = "0.4.0", features = ["print-trace"] }
+
 
 [dev-dependencies]
 # mail-parser = "0.8.2"
