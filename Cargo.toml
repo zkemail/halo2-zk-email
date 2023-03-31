@@ -53,8 +53,12 @@ fancy-regex = "0.11.0"
 # name = "email_verify"
 # harness = false
 
+# [[bench]]
+# name = "recursion"
+# harness = false
+
 [[bench]]
-name = "recursion"
+name = "recursion_without_sha2"
 harness = false
 
 [patch."https://github.com/axiom-crypto/halo2-lib.git"]
