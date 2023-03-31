@@ -7,7 +7,7 @@ use halo2_base::halo2_proofs::poly::kzg::commitment::ParamsKZG;
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
 use halo2_base::{gates::range::RangeConfig, utils::PrimeField, Context};
 use halo2_dynamic_sha256::Field;
-use halo2_regex::{RegexDef, SubstrDef};
+use halo2_regex::defs::{AllstrRegexDef, SubstrRegexDef};
 use halo2_rsa::{RSAPublicKey, RSASignature};
 use rand::rngs::OsRng;
 use snark_verifier_sdk::{

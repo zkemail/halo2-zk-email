@@ -8,7 +8,7 @@ use halo2_base::halo2_proofs::poly::{commitment::Params, kzg::commitment::Params
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error, SerdeFormat};
 use halo2_base::{gates::range::RangeConfig, utils::PrimeField, Context};
 use halo2_dynamic_sha256::Field;
-use halo2_regex::{RegexDef, SubstrDef};
+use halo2_regex::defs::{AllstrRegexDef, SubstrRegexDef};
 use halo2_rsa::{RSAPubE, RSAPublicKey, RSASignature};
 use rand::rngs::OsRng;
 use snark_verifier_sdk::{
@@ -24,6 +24,7 @@ use std::{
 
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use cfdkim::*;
+use fancy_regex::Regex;
 use halo2_base::halo2_proofs::{
     circuit::{floor_planner::V1, Cell, Value},
     dev::{CircuitCost, FailureLocation, MockProver, VerifyFailure},
@@ -51,12 +52,12 @@ impl_email_verify_circuit!(
     "./test_data/regex_body_test1.txt",
     vec!["./test_data/substr_body_bench1_1.txt"],
     2048,
-    70,
-    5,
-    15
+    60,
+    4,
+    13
 );
 
-const K1: usize = 23;
+const K1: usize = 22;
 
 impl_aggregation_email_verify!(
     Bench1EmailVerifyConfig,
@@ -159,17 +160,48 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
     BASE64_STANDARD
         .encode_slice(&hash, &mut expected_output)
         .unwrap();
-    let substrings = vec![
+    // let substrings = vec![
+    //     String::from_utf8(expected_output).unwrap(),
+    //     "alice@zkemail.com".to_string(),
+    //     "zkemailverify".to_string(),
+    // ];
+    let bodyhash_regex = Regex::new(r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)").unwrap();
+    let canonicalized_header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
+    let bodyhash_match = bodyhash_regex
+        .find(&canonicalized_header_str)
+        .unwrap()
+        .unwrap();
+    let bodyhash = (
+        bodyhash_match.start(),
         String::from_utf8(expected_output).unwrap(),
-        "alice@zkemail.com".to_string(),
-        "zkemailverify".to_string(),
-    ];
+    );
+    let header_substr1_regex = Regex::new(r"(?<=from:)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+@(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_|.)+(?=\r)").unwrap();
+    let header_substr1_match = header_substr1_regex
+        .find(&canonicalized_header_str)
+        .unwrap()
+        .unwrap();
+    let body_substr1_regex = Regex::new(r"(?<=email was meant for @)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+(?=.)").unwrap();
+    let canonicalized_body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
+    let body_substr1_match = body_substr1_regex
+        .find(&canonicalized_body_str)
+        .unwrap()
+        .unwrap();
+    let header_substrings = vec![(
+        header_substr1_match.start(),
+        header_substr1_match.as_str().to_string(),
+    )];
+    let body_substrings = vec![(
+        body_substr1_match.start(),
+        body_substr1_match.as_str().to_string(),
+    )];
     let circuit = Bench1EmailVerifyCircuit {
         header_bytes: canonicalized_header,
         body_bytes: canonicalized_body,
         public_key,
         signature,
-        substrings,
+        bodyhash,
+        header_substrings,
+        body_substrings,
     };
     let mock = start_timer!(|| "app pk generation");
     let app_pk = gen_bench1_email_pk(&app_params, circuit.clone());

@@ -17,7 +17,10 @@ use halo2_base::{
     Context,
 };
 use halo2_dynamic_sha256::Field;
-use halo2_regex::{AssignedSubstrsResult, RegexDef, SubstrDef};
+use halo2_regex::{
+    defs::{AllstrRegexDef, SubstrRegexDef},
+    AssignedRegexResult,
+};
 use halo2_rsa::{
     AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstructions, RSAPublicKey,
     RSASignature,
@@ -31,8 +34,9 @@ macro_rules! impl_email_verify_circuit {
         #[derive(Debug, Clone)]
         pub struct $config_name<F: Field> {
             inner: EmailVerifyConfig<F>,
-            substr_bytes_instance: Column<Instance>,
-            substr_lens_instance: Column<Instance>,
+            encoded_bodyhash_instance: Column<Instance>,
+            masked_str_instance: Column<Instance>,
+            substr_ids_instance: Column<Instance>
         }
 
         #[derive(Debug, Clone)]
@@ -41,7 +45,9 @@ macro_rules! impl_email_verify_circuit {
             body_bytes: Vec<u8>,
             public_key: RSAPublicKey<F>,
             signature: RSASignature<F>,
-            substrings: Vec<String>,
+            bodyhash: (usize, String),
+            header_substrings: Vec<(usize,String)>,
+            body_substrings: Vec<(usize,String)>,
         }
 
         impl<F: Field> Circuit<F> for $circuit_name<F> {
@@ -54,7 +60,9 @@ macro_rules! impl_email_verify_circuit {
                     body_bytes: vec![],
                     public_key: RSAPublicKey::without_witness(BigUint::from(Self::DEFAULT_E)),
                     signature: RSASignature::without_witness(),
-                    substrings: vec![],
+                    bodyhash: (0, "".to_string()),
+                    header_substrings: vec![],
+                    body_substrings: vec![]
                 }
             }
 
@@ -69,11 +77,11 @@ macro_rules! impl_email_verify_circuit {
                     0,
                     $k,
                 );
-                let header_regex_def = RegexDef::read_from_text($header_regex_filepath);
-                let body_regex_def = RegexDef::read_from_text($body_regex_filepath);
-                let header_substr_defs = $header_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
-                let body_hash_substr_def = SubstrDef::read_from_text($body_hash_substr_filepath);
-                let body_substr_defs = $body_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
+                let header_regex_def = AllstrRegexDef::read_from_text($header_regex_filepath);
+                let body_regex_def = AllstrRegexDef::read_from_text($body_regex_filepath);
+                let header_substr_defs = $header_substr_filepathes.into_iter().map(|path| SubstrRegexDef::read_from_text(path)).collect::<Vec<SubstrRegexDef>>();
+                let body_hash_substr_def = SubstrRegexDef::read_from_text($body_hash_substr_filepath);
+                let body_substr_defs = $body_substr_filepathes.into_iter().map(|path| SubstrRegexDef::read_from_text(path)).collect::<Vec<SubstrRegexDef>>();
                 let inner = EmailVerifyConfig::configure(
                     meta,
                     $num_sha2_compression_per_column,
@@ -87,14 +95,17 @@ macro_rules! impl_email_verify_circuit {
                     body_substr_defs,
                     $public_key_bits,
                 );
-                let substr_bytes_instance = meta.instance_column();
-                meta.enable_equality(substr_bytes_instance);
-                let substr_lens_instance = meta.instance_column();
-                meta.enable_equality(substr_lens_instance);
+                let encoded_bodyhash_instance = meta.instance_column();
+                meta.enable_equality(encoded_bodyhash_instance);
+                let masked_str_instance = meta.instance_column();
+                meta.enable_equality(masked_str_instance);
+                let substr_ids_instance = meta.instance_column();
+                meta.enable_equality(substr_ids_instance);
                 $config_name {
                     inner,
-                    substr_bytes_instance,
-                    substr_lens_instance,
+                    encoded_bodyhash_instance,
+                    masked_str_instance,
+                    substr_ids_instance,
                 }
             }
 
@@ -106,8 +117,9 @@ macro_rules! impl_email_verify_circuit {
                 config.inner.load(&mut layouter)?;
                 config.inner.range().load_lookup_table(&mut layouter)?;
                 let mut first_pass = SKIP_FIRST_PASS;
-                let mut substr_bytes = Vec::<Cell>::new();
-                let mut substr_lens = Vec::<Cell>::new();
+                let mut encoded_bodyhash_cell = vec![];
+                let mut masked_str_cell = vec![];
+                let mut substr_id_cell = vec![];
                 layouter.assign_region(
                     || "zkemail",
                     |region| {
@@ -121,7 +133,7 @@ macro_rules! impl_email_verify_circuit {
                             .assign_public_key(ctx, self.public_key.clone())?;
                         let assigned_signature =
                             config.inner.assign_signature(ctx, self.signature.clone())?;
-                        let (header_substrs, body_substrs) = config.inner.verify_email(
+                        let (encoded_bodyhash,header_regex, body_regex) = config.inner.verify_email(
                             ctx,
                             &self.header_bytes,
                             &self.body_bytes,
@@ -129,29 +141,22 @@ macro_rules! impl_email_verify_circuit {
                             &assigned_signature,
                         )?;
                         config.inner.finalize(ctx);
-                        let mut bytes_cells =
-                            vec![header_substrs.substrs_bytes, body_substrs.substrs_bytes]
-                                .concat()
-                                .into_iter()
-                                .flatten()
-                                .map(|val| val.cell())
-                                .collect();
-                        substr_bytes.append(&mut bytes_cells);
-                        let mut lens_cells =
-                            vec![header_substrs.substrs_length, body_substrs.substrs_length]
-                                .concat()
-                                .into_iter()
-                                .map(|val| val.cell())
-                                .collect();
-                        substr_lens.append(&mut lens_cells);
+                        encoded_bodyhash_cell.append(&mut encoded_bodyhash.into_iter().map(|v| v.cell()).collect::<Vec<Cell>>());
+                        masked_str_cell.append(&mut header_regex.masked_characters.into_iter().map(|v| v.cell()).collect::<Vec<Cell>>());
+                        masked_str_cell.append(&mut body_regex.masked_characters.into_iter().map(|v| v.cell()).collect::<Vec<Cell>>());
+                        substr_id_cell.append(&mut header_regex.all_substr_ids.into_iter().map(|v| v.cell()).collect::<Vec<Cell>>());
+                        substr_id_cell.append(&mut body_regex.all_substr_ids.into_iter().map(|v| v.cell()).collect::<Vec<Cell>>());
                         Ok(())
                     },
                 )?;
-                for (idx, cell) in substr_bytes.into_iter().enumerate() {
-                    layouter.constrain_instance(cell, config.substr_bytes_instance, idx)?;
+                for (idx, cell) in encoded_bodyhash_cell.into_iter().enumerate() {
+                    layouter.constrain_instance(cell, config.encoded_bodyhash_instance, idx)?;
                 }
-                for (idx, cell) in substr_lens.into_iter().enumerate() {
-                    layouter.constrain_instance(cell, config.substr_lens_instance, idx)?;
+                for (idx, cell) in masked_str_cell.into_iter().enumerate() {
+                    layouter.constrain_instance(cell, config.masked_str_instance, idx)?;
+                }
+                for (idx, cell) in substr_id_cell.into_iter().enumerate() {
+                    layouter.constrain_instance(cell, config.substr_ids_instance, idx)?;
                 }
                 Ok(())
             }
@@ -159,43 +164,64 @@ macro_rules! impl_email_verify_circuit {
 
         impl<F:Field> CircuitExt<F> for $circuit_name<F> {
             fn num_instance(&self) -> Vec<usize> {
-                let header_substr_defs = $header_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
-                let body_hash_substr_def = SubstrDef::read_from_text($body_hash_substr_filepath);
-                let body_substr_defs = $body_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
-                let num_subst_defs = 1 + header_substr_defs.len() + body_substr_defs.len();
-                let mut substr_bytes_sum = body_hash_substr_def.max_length;
-                for substr_def in header_substr_defs.iter() {
-                    substr_bytes_sum += substr_def.max_length;
-                }
-                for substr_def in body_substr_defs.iter() {
-                    substr_bytes_sum += substr_def.max_length;
-                }
-                vec![substr_bytes_sum, num_subst_defs]
+                // let header_substr_defs = $header_substr_filepathes.into_iter().map(|path| SubstrRegexDef::read_from_text(path)).collect::<Vec<SubstrRegexDef>>();
+                // let body_hash_substr_def = SubstrRegexDef::read_from_text($body_hash_substr_filepath);
+                // let body_substr_defs = $body_substr_filepathes.into_iter().map(|path| SubstrRegexDef::read_from_text(path)).collect::<Vec<SubstrRegexDef>>();
+                let max_len = $header_max_byte_size + $body_max_byte_size;
+
+                // let num_subst_defs = 1 + header_substr_defs.len() + body_substr_defs.len();
+                // let mut substr_bytes_sum = body_hash_substr_def.max_length;
+                // for substr_def in header_substr_defs.iter() {
+                //     substr_bytes_sum += substr_def.max_length;
+                // }
+                // for substr_def in body_substr_defs.iter() {
+                //     substr_bytes_sum += substr_def.max_length;
+                // }
+                vec![44,max_len,max_len]
             }
 
             fn instances(&self) -> Vec<Vec<F>> {
-                let header_substr_defs = $header_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
-                let body_hash_substr_def = SubstrDef::read_from_text($body_hash_substr_filepath);
-                let body_substr_defs = $body_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
-                let mut max_lens = vec![body_hash_substr_def.max_length];
-                for substr_def in header_substr_defs.iter() {
-                    max_lens.push(substr_def.max_length);
-                }
-                for substr_def in body_substr_defs.iter() {
-                    max_lens.push(substr_def.max_length);
-                }
-                let bytes_frs = self.substrings.iter().enumerate().flat_map(|(idx,chars)| {
-                    let mut frs = Vec::new();
-                    for _char in chars.as_bytes().into_iter() {
-                        frs.push(F::from(*_char as u64));
+                let max_len = $header_max_byte_size + $body_max_byte_size;
+                let hash_fs = self.bodyhash.1.as_bytes().into_iter().map(|byte| F::from(*byte as u64)).collect::<Vec<F>>();
+                let header_substrings = vec![&[self.bodyhash.clone()][..], &self.header_substrings].concat();
+                let mut expected_masked_chars = vec![F::from(0); max_len];
+                let mut expected_substr_ids = vec![F::from(0); max_len];
+                for (substr_idx, (start, chars)) in header_substrings.iter().enumerate() {
+                    for (idx, char) in chars.as_bytes().iter().enumerate() {
+                        expected_masked_chars[start + idx] = F::from(*char as u64);
+                        expected_substr_ids[start + idx] = F::from(substr_idx as u64 + 1);
                     }
-                    for _ in chars.len() .. max_lens[idx] {
-                        frs.push(F::from(0));
+                }
+                for (substr_idx, (start, chars)) in self.body_substrings.iter().enumerate() {
+                    for (idx, char) in chars.as_bytes().iter().enumerate() {
+                        expected_masked_chars[$header_max_byte_size+ start + idx] = F::from(*char as u64);
+                        expected_substr_ids[$header_max_byte_size+ start + idx] = F::from(substr_idx as u64 + 1);
                     }
-                    frs
-                }).collect::<Vec<F>>();
-                let lens = self.substrings.iter().map(|chars| F::from(chars.len() as u64)).collect::<Vec<F>>();
-                vec![bytes_frs,lens]
+                }
+
+
+                // let header_substr_defs = $header_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
+                // let body_hash_substr_def = SubstrDef::read_from_text($body_hash_substr_filepath);
+                // let body_substr_defs = $body_substr_filepathes.into_iter().map(|path| SubstrDef::read_from_text(path)).collect::<Vec<SubstrDef>>();
+                // let mut max_lens = vec![body_hash_substr_def.max_length];
+                // for substr_def in header_substr_defs.iter() {
+                //     max_lens.push(substr_def.max_length);
+                // }
+                // for substr_def in body_substr_defs.iter() {
+                //     max_lens.push(substr_def.max_length);
+                // }
+                // let bytes_frs = self.substrings.iter().enumerate().flat_map(|(idx,chars)| {
+                //     let mut frs = Vec::new();
+                //     for _char in chars.as_bytes().into_iter() {
+                //         frs.push(F::from(*_char as u64));
+                //     }
+                //     for _ in chars.len() .. max_lens[idx] {
+                //         frs.push(F::from(0));
+                //     }
+                //     frs
+                // }).collect::<Vec<F>>();
+                // let lens = self.substrings.iter().map(|chars| F::from(chars.len() as u64)).collect::<Vec<F>>();
+                vec![hash_fs, expected_masked_chars, expected_substr_ids]
             }
 
         }
