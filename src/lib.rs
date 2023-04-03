@@ -1,5 +1,8 @@
 mod macros;
-mod recursion;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod recursion;
+
 pub mod regex_sha2;
 pub mod regex_sha2_base64;
 use crate::regex_sha2::RegexSha2Config;
@@ -22,7 +25,6 @@ use halo2_rsa::{
     RSASignature,
 };
 pub use macros::*;
-pub use recursion::*;
 use regex_sha2_base64::RegexSha2Base64Config;
 
 #[derive(Debug, Clone)]

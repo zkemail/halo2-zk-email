@@ -41,8 +41,9 @@ use halo2_base::halo2_proofs::{
     plonk::{Any, Column, Instance, ProvingKey, VerifyingKey},
 };
 use halo2_base::SKIP_FIRST_PASS;
+use halo2_zk_email::impl_email_verify_circuit;
+use halo2_zk_email::recursion::*;
 use halo2_zk_email::EmailVerifyConfig;
-use halo2_zk_email::{impl_aggregation_email_verify, impl_email_verify_circuit};
 use mailparse::parse_mail;
 use num_bigint::BigUint;
 use rand::thread_rng;
@@ -338,28 +339,30 @@ impl<F: Field> Circuit<F> for EmailVerifyNoSha2Circuit<F> {
 }
 
 impl<F: Field> EmailVerifyNoSha2Circuit<F> {
-    const NUM_ADVICE: usize = 60;
+    const NUM_ADVICE: usize = 14;
     const NUM_FIXED: usize = 1;
-    const NUM_LOOKUP_ADVICE: usize = 4;
+    const NUM_LOOKUP_ADVICE: usize = 1;
     const LOOKUP_BITS: usize = 12;
     const BITS_LEN: usize = 2048;
     const DEFAULT_E: u128 = 65537;
     const HEADER_MAX_BYTE_SIZE: usize = 1024;
     const BODY_MAX_BYTE_SIZE: usize = 1024;
-    const K: usize = 13;
+    const K: usize = APP_K1;
 }
 
-const K1: usize = 22;
+const APP_K1: usize = 15;
+const APP_TO_AGG_K1: usize = 22;
+const AGG_TO_AGG_K1: usize = 22;
 
-impl_aggregation_email_verify!(
-    EmailVerifyNoSha2Config,
-    EmailVerifyNoSha2Circuit,
-    gen_bench1_email_pk,
-    gen_bench1_email_snark,
-    gen_bench1_agg_pk,
-    gen_bench1_agg_proof,
-    K1
-);
+// impl_aggregation_email_verify!(
+//     EmailVerifyNoSha2Config,
+//     EmailVerifyNoSha2Circuit,
+//     gen_bench1_email_pk,
+//     gen_bench1_email_snark,
+//     gen_bench1_agg_pk,
+//     gen_bench1_agg_proof,
+//     K1
+// );
 
 fn gen_or_get_params(k: usize) -> ParamsKZG<Bn256> {
     let path = format!("params_{}.bin", k);
@@ -378,38 +381,43 @@ fn gen_or_get_params(k: usize) -> ParamsKZG<Bn256> {
     }
 }
 
-fn gen_or_get_pk1(agg_params: &ParamsKZG<Bn256>, snarks: &[Snark]) -> ProvingKey<G1Affine> {
-    let path = "proving_key_1.pk";
-    match File::open(&path) {
-        Ok(f) => {
-            let mut reader = BufReader::new(f);
-            ProvingKey::<G1Affine>::read::<_, AggregationCircuit>(
-                &mut reader,
-                SerdeFormat::RawBytes,
-            )
-            .unwrap()
-        }
-        Err(_) => {
-            let agg_pk = gen_bench1_agg_pk(&agg_params, snarks.to_vec(), &mut OsRng);
-            agg_pk
-                .write(
-                    &mut BufWriter::new(File::create(&path).unwrap()),
-                    SerdeFormat::RawBytes,
-                )
-                .unwrap();
-            agg_pk
-        }
-    }
-}
+// fn gen_or_get_pk1(agg_params: &ParamsKZG<Bn256>, snarks: &[Snark]) -> ProvingKey<G1Affine> {
+//     let path = "proving_key_1.pk";
+//     match File::open(&path) {
+//         Ok(f) => {
+//             let mut reader = BufReader::new(f);
+//             ProvingKey::<G1Affine>::read::<_, AggregationCircuit>(
+//                 &mut reader,
+//                 SerdeFormat::RawBytes,
+//             )
+//             .unwrap()
+//         }
+//         Err(_) => {
+//             let agg_pk = gen_bench1_agg_pk(&agg_params, snarks.to_vec(), &mut OsRng);
+//             agg_pk
+//                 .write(
+//                     &mut BufWriter::new(File::create(&path).unwrap()),
+//                     SerdeFormat::RawBytes,
+//                 )
+//                 .unwrap();
+//             agg_pk
+//         }
+//     }
+// }
 
 fn bench_email_verify_recursion1(c: &mut Criterion) {
     let mut group = c.benchmark_group("email bench1 with recursion");
     group.sample_size(10);
-    let agg_params = gen_or_get_params(K1);
+    let agg_to_agg_params = gen_or_get_params(AGG_TO_AGG_K1);
     println!("gen_params");
+    let app_to_agg_params = {
+        let mut params = agg_to_agg_params.clone();
+        params.downsize(APP_TO_AGG_K1 as u32);
+        params
+    };
     let app_params = {
-        let mut params = agg_params.clone();
-        params.downsize(15);
+        let mut params = agg_to_agg_params.clone();
+        params.downsize(APP_K1 as u32);
         params
     };
     let mut rng = thread_rng();
@@ -495,21 +503,36 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
         header_substrings,
         body_substrings,
     };
-    let mock = start_timer!(|| "app pk generation");
-    let app_pk = gen_bench1_email_pk(&app_params, circuit.clone());
-    end_timer!(mock);
-    println!("application proving key is generated.");
-    let mock = start_timer!(|| "app snarks generation");
-    let snarks = [(); 2].map(|_| gen_bench1_email_snark(&app_params, circuit.clone(), &app_pk));
-    end_timer!(mock);
-    println!("application snarks are generated.");
-    // let agg_pk = gen_bench1_agg_pk(&agg_params, snarks.to_vec(), &mut OsRng);
-    let mock = start_timer!(|| "aggregation pk generation");
-    let agg_pk = gen_or_get_pk1(&agg_params, &snarks);
-    end_timer!(mock);
-    println!("aggregation proving key is generated.");
+    let (app_pk, app_to_agg_pk, agg_to_agg_pk) =
+        gen_multi_layer_proving_keys(&agg_to_agg_params, &circuit);
+    // let mock = start_timer!(|| "app pk generation");
+    // let app_pk = gen_bench1_email_pk(&app_params, circuit.clone());
+    // end_timer!(mock);
+    // println!("application proving key is generated.");
+    // let mock = start_timer!(|| "app snarks generation");
+    // let snarks = [(); 2].map(|_| gen_bench1_email_snark(&app_params, circuit.clone(), &app_pk));
+    // end_timer!(mock);
+    // println!("application snarks are generated.");
+    // // let agg_pk = gen_bench1_agg_pk(&agg_params, snarks.to_vec(), &mut OsRng);
+    // let mock = start_timer!(|| "aggregation pk generation");
+    // let agg_pk = gen_or_get_pk1(&agg_params, &snarks);
+    // end_timer!(mock);
+    // println!("aggregation proving key is generated.");
+    // group.bench_function("bench 1", |b| {
+    //     b.iter(|| gen_bench1_agg_proof(&agg_params, &agg_pk, snarks.to_vec(), &mut OsRng))
+    // });
+    let circuits = vec![circuit; 4];
     group.bench_function("bench 1", |b| {
-        b.iter(|| gen_bench1_agg_proof(&agg_params, &agg_pk, snarks.to_vec(), &mut OsRng))
+        b.iter(|| {
+            gen_multi_layer_proof(
+                &agg_to_agg_params,
+                &circuits,
+                &app_pk,
+                &app_to_agg_pk,
+                &agg_to_agg_pk,
+                2,
+            )
+        })
     });
     group.finish();
 }

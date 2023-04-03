@@ -33,8 +33,8 @@ use halo2_base::halo2_proofs::{
     plonk::{Any, Column, Instance, ProvingKey, VerifyingKey},
 };
 use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
+use halo2_zk_email::impl_email_verify_circuit;
 use halo2_zk_email::EmailVerifyConfig;
-use halo2_zk_email::{impl_aggregation_email_verify, impl_email_verify_circuit};
 use mailparse::parse_mail;
 use num_bigint::BigUint;
 use rand::thread_rng;
