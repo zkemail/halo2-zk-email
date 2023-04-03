@@ -59,8 +59,10 @@ impl_email_verify_circuit!(
 );
 
 const APP_K1: usize = 13;
-const APP_TO_AGG_K1: usize = 22;
-const AGG_TO_AGG_K1: usize = 22;
+const AGG_K1: usize = 22;
+
+// const APP_TO_AGG_K1: usize = 22;
+// const AGG_TO_AGG_K1: usize = 22;
 
 // impl_aggregation_email_verify!(
 //     Bench1EmailVerifyConfig,
@@ -116,18 +118,28 @@ fn gen_or_get_params(k: usize) -> ParamsKZG<Bn256> {
 fn bench_email_verify_recursion1(c: &mut Criterion) {
     let mut group = c.benchmark_group("email bench1 with recursion");
     group.sample_size(10);
-    let agg_to_agg_params = gen_or_get_params(AGG_TO_AGG_K1);
-    println!("gen_params");
-    let app_to_agg_params = {
-        let mut params = agg_to_agg_params.clone();
-        params.downsize(APP_TO_AGG_K1 as u32);
-        params
-    };
+    let params = gen_or_get_params(AGG_K1);
     let app_params = {
-        let mut params = agg_to_agg_params.clone();
+        let mut params = params.clone();
         params.downsize(APP_K1 as u32);
         params
     };
+    // let app_to_agg_params = {
+    //     let mut params = params.clone();
+    //     params.downsize(APP_TO_AGG_K1 as u32);
+    //     params
+    // };
+    println!("gen_params");
+    // let app_to_agg_params = {
+    //     let mut params = agg_to_agg_params.clone();
+    //     params.downsize(APP_TO_AGG_K1 as u32);
+    //     params
+    // };
+    // let app_params = {
+    //     let mut params = agg_to_agg_params.clone();
+    //     params.downsize(APP_K1 as u32);
+    //     params
+    // };
     let mut rng = thread_rng();
     let _private_key = RsaPrivateKey::new(&mut rng, Bench1EmailVerifyCircuit::<Fr>::BITS_LEN)
         .expect("failed to generate a key");
@@ -211,34 +223,13 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
         header_substrings,
         body_substrings,
     };
-    let (app_pk, app_to_agg_pk, agg_to_agg_pk) =
-        gen_multi_layer_proving_keys(&agg_to_agg_params, &circuit);
-
-    // let mock = start_timer!(|| "app pk generation");
-    // let app_pk = gen_bench1_email_pk(&app_params, circuit.clone());
-    // end_timer!(mock);
-    // println!("application proving key is generated.");
-    // let mock = start_timer!(|| "app snarks generation");
-    // let snarks = [(); 2].map(|_| gen_bench1_email_snark(&app_params, circuit.clone(), &app_pk));
-    // end_timer!(mock);
-    // println!("application snarks are generated.");
-    // // let agg_pk = gen_bench1_agg_pk(&agg_params, snarks.to_vec(), &mut OsRng);
-    // let mock = start_timer!(|| "aggregation pk generation");
-    // let agg_pk = gen_or_get_pk1(&agg_params, &snarks);
-    // end_timer!(mock);
-    // println!("aggregation proving key is generated.");
+    let (pks, verifier_code) = setup_multi_layer(&app_params, &params, &params, &circuit, 2);
     let circuits = vec![circuit; 4];
+    let (proof, instances) =
+        evm_prove_multi_layer(&app_params, &params, &params, &circuits, &pks, 2);
+    evm_verify_multi_layer(verifier_code, instances, proof);
     group.bench_function("bench 1", |b| {
-        b.iter(|| {
-            gen_multi_layer_proof(
-                &agg_to_agg_params,
-                &circuits,
-                &app_pk,
-                &app_to_agg_pk,
-                &agg_to_agg_pk,
-                2,
-            )
-        })
+        b.iter(|| evm_prove_multi_layer(&app_params, &params, &params, &circuits, &pks, 2))
     });
     group.finish();
 }
