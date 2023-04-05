@@ -21,8 +21,14 @@ use halo2_regex::defs::{AllstrRegexDef, SubstrRegexDef};
 use halo2_regex::RegexVerifyConfig;
 use halo2_rsa::{RSAConfig, RSAInstructions, RSAPubE, RSAPublicKey, RSASignature};
 use rand::rngs::OsRng;
+use snark_verifier::{
+    loader::evm::{self, encode_calldata, EvmLoader, ExecutorBuilder},
+    pcs::kzg::{Gwc19, Kzg},
+    system::halo2::{compile, transcript::evm::EvmTranscript, Config},
+    verifier::{self, PlonkVerifier},
+};
 use snark_verifier_sdk::{
-    evm::{encode_calldata, gen_evm_proof_shplonk, gen_evm_verifier_shplonk},
+    evm::{gen_evm_proof_shplonk, gen_evm_verifier_shplonk},
     gen_pk,
     halo2::{aggregation::AggregationCircuit, gen_proof_shplonk, gen_snark_shplonk},
     CircuitExt, Snark,
@@ -35,6 +41,7 @@ use std::{
 
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use cfdkim::*;
+use ethereum_types::Address;
 use fancy_regex::Regex;
 use halo2_base::halo2_proofs::{
     circuit::{floor_planner::V1, Cell, Value},
@@ -43,7 +50,7 @@ use halo2_base::halo2_proofs::{
 };
 use halo2_base::SKIP_FIRST_PASS;
 use halo2_zk_email::impl_email_verify_circuit;
-use halo2_zk_email::recursion::*;
+use halo2_zk_email::recursion_and_evm::*;
 use halo2_zk_email::EmailVerifyConfig;
 use mailparse::parse_mail;
 use num_bigint::BigUint;
@@ -128,8 +135,8 @@ impl<F: Field> Circuit<F> for EmailVerifyNoSha2Circuit<F> {
         Self {
             header_bytes: vec![],
             body_bytes: vec![],
-            public_key: RSAPublicKey::without_witness(BigUint::from(Self::DEFAULT_E)),
-            signature: RSASignature::without_witness(),
+            public_key: self.public_key.clone(),
+            signature: self.signature.clone(),
             bodyhash: (0, "".to_string()),
             header_substrings: vec![],
             body_substrings: vec![],
@@ -499,12 +506,9 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
         header_substrings,
         body_substrings,
     };
-    let (pks, verifier_code) = setup_multi_layer(&app_params, &params, &params, &circuit, 2);
-
+    let emp_circuit = circuit.without_witnesses();
+    let (pks, _) = setup_multi_layer(&app_params, &params, &params, &emp_circuit, 2);
     let circuits = vec![circuit; 4];
-    let (proof, instances) =
-        evm_prove_multi_layer(&app_params, &params, &params, &circuits, &pks, 2);
-    evm_verify_multi_layer(verifier_code, instances, proof);
     group.bench_function("bench 1", |b| {
         b.iter(|| evm_prove_multi_layer(&app_params, &params, &params, &circuits, &pks, 2))
     });

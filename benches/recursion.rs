@@ -32,7 +32,7 @@ use halo2_base::halo2_proofs::{
 };
 use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
 use halo2_zk_email::impl_email_verify_circuit;
-use halo2_zk_email::recursion::*;
+use halo2_zk_email::recursion_and_evm::*;
 use halo2_zk_email::EmailVerifyConfig;
 use mailparse::parse_mail;
 use num_bigint::BigUint;
@@ -223,11 +223,9 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
         header_substrings,
         body_substrings,
     };
-    let (pks, verifier_code) = setup_multi_layer(&app_params, &params, &params, &circuit, 2);
+    let emp_circuit = circuit.without_witnesses();
+    let (pks, _) = setup_multi_layer(&app_params, &params, &params, &emp_circuit, 2);
     let circuits = vec![circuit; 4];
-    let (proof, instances) =
-        evm_prove_multi_layer(&app_params, &params, &params, &circuits, &pks, 2);
-    evm_verify_multi_layer(verifier_code, instances, proof);
     group.bench_function("bench 1", |b| {
         b.iter(|| evm_prove_multi_layer(&app_params, &params, &params, &circuits, &pks, 2))
     });

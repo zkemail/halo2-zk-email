@@ -1,7 +1,7 @@
 mod macros;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub mod recursion;
+pub mod recursion_and_evm;
 
 pub mod regex_sha2;
 pub mod regex_sha2_base64;

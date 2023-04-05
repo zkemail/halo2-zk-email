@@ -11,10 +11,10 @@ use halo2_dynamic_sha256::Field;
 use halo2_regex::defs::{AllstrRegexDef, SubstrRegexDef};
 use halo2_rsa::{RSAPublicKey, RSASignature};
 use rand::rngs::OsRng;
-use snark_verifier_sdk::evm::{evm_verify, gen_evm_proof_shplonk, gen_evm_verifier_shplonk};
+use snark_verifier_sdk::evm::{evm_verify, gen_evm_proof_gwc, gen_evm_verifier_gwc};
 use snark_verifier_sdk::{
     gen_pk,
-    halo2::{aggregation::AggregationCircuit, gen_snark_shplonk},
+    halo2::{aggregation::AggregationCircuit, gen_snark_gwc},
     CircuitExt, Snark,
 };
 use std::env::set_var;
@@ -44,7 +44,7 @@ pub fn gen_snark<C: CircuitExt<Fr>>(
     circuit: C,
     pk: &ProvingKey<G1Affine>,
 ) -> Snark {
-    gen_snark_shplonk(params, pk, circuit, &mut OsRng, None::<&str>)
+    gen_snark_gwc(params, pk, circuit, &mut OsRng, None::<&str>)
 }
 
 pub fn gen_aggregation_proving_key(
@@ -134,16 +134,16 @@ pub fn setup_multi_layer<C: CircuitExt<Fr> + Clone>(
         }
     }
     let verifier = if log2_proofs == 0 {
-        gen_evm_verifier_shplonk::<C>(app_params, &pks[0].get_vk(), circuit.num_instance(), None)
+        gen_evm_verifier_gwc::<C>(app_params, &pks[0].get_vk(), circuit.num_instance(), None)
     } else if log2_proofs == 1 {
-        gen_evm_verifier_shplonk::<C>(
+        gen_evm_verifier_gwc::<AggregationCircuit>(
             app_to_agg_params,
             &pks[1].get_vk(),
             last_circuit.unwrap().num_instance(),
             None,
         )
     } else {
-        gen_evm_verifier_shplonk::<AggregationCircuit>(
+        gen_evm_verifier_gwc::<AggregationCircuit>(
             agg_to_agg_params,
             &pks[pks.len() - 1].get_vk(),
             last_circuit.unwrap().num_instance(),
@@ -176,7 +176,7 @@ pub fn evm_prove_multi_layer<C: CircuitExt<Fr> + Clone>(
     if log2_proofs == 0 {
         let instances = circuits[0].instances();
         let mock = start_timer!(|| format!("{} app evm proof generation", n_proof));
-        let evm_proof = gen_evm_proof_shplonk(
+        let evm_proof = gen_evm_proof_gwc(
             app_params,
             &pks[0],
             circuits[0].clone(),
@@ -196,7 +196,7 @@ pub fn evm_prove_multi_layer<C: CircuitExt<Fr> + Clone>(
         let circuit = AggregationCircuit::new(&app_to_agg_params, app_snarks, &mut OsRng);
         let instances = circuit.instances();
         let mock = start_timer!(|| format!("{} app_to_agg evm proof generation", n_proof));
-        let evm_proof = gen_evm_proof_shplonk(
+        let evm_proof = gen_evm_proof_gwc(
             app_to_agg_params,
             &pks[1],
             circuit,
@@ -244,7 +244,7 @@ pub fn evm_prove_multi_layer<C: CircuitExt<Fr> + Clone>(
         );
         let instances = circuit.instances();
         let mock = start_timer!(|| format!("{} agg_to_agg evm proof generation", n_proof));
-        let evm_proof = gen_evm_proof_shplonk(
+        let evm_proof = gen_evm_proof_gwc(
             agg_to_agg_params,
             &pks[pk_idx],
             circuit,
@@ -256,6 +256,6 @@ pub fn evm_prove_multi_layer<C: CircuitExt<Fr> + Clone>(
     }
 }
 
-pub fn evm_verify_multi_layer(verifier_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>) {
-    evm_verify(verifier_code, instances, proof)
-}
+// pub fn evm_verify_multi_layer(verifier_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>) {
+//     evm_verify(verifier_code, instances, proof)
+// }

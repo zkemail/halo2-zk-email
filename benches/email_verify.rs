@@ -4,13 +4,17 @@ use halo2_base::halo2_proofs;
 use halo2_base::halo2_proofs::circuit::SimpleFloorPlanner;
 use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, Fr, G1Affine};
 use halo2_base::halo2_proofs::plonk::{
-    create_proof, keygen_pk, keygen_vk, Circuit, ConstraintSystem,
+    create_proof, keygen_pk, keygen_vk, verify_proof, Circuit, ConstraintSystem,
 };
 use halo2_base::halo2_proofs::poly::kzg::commitment::KZGCommitmentScheme;
-use halo2_base::halo2_proofs::poly::kzg::multiopen::ProverGWC;
-use halo2_base::halo2_proofs::poly::{commitment::Params, kzg::commitment::ParamsKZG};
+use halo2_base::halo2_proofs::poly::kzg::multiopen::{ProverGWC, VerifierGWC};
+use halo2_base::halo2_proofs::poly::kzg::strategy::SingleStrategy;
+use halo2_base::halo2_proofs::poly::{
+    commitment::{Params, ParamsProver, ParamsVerifier},
+    kzg::commitment::ParamsKZG,
+};
 use halo2_base::halo2_proofs::transcript::{
-    Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
+    Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
 };
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error, SerdeFormat};
 use halo2_base::{gates::range::RangeConfig, utils::PrimeField, Context};
@@ -18,7 +22,7 @@ use halo2_dynamic_sha256::Field;
 use halo2_regex::defs::{AllstrRegexDef, SubstrRegexDef};
 use halo2_rsa::{RSAPubE, RSAPublicKey, RSASignature};
 use rand::rngs::OsRng;
-use snark_verifier_sdk::CircuitExt;
+use snark_verifier_sdk::{evm::gen_evm_proof_gwc, CircuitExt};
 use std::{
     fs::File,
     io::{prelude::*, BufReader, BufWriter},
@@ -35,6 +39,7 @@ use halo2_base::halo2_proofs::{
 use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
 use halo2_zk_email::impl_email_verify_circuit;
 use halo2_zk_email::EmailVerifyConfig;
+use itertools::Itertools;
 use mailparse::parse_mail;
 use num_bigint::BigUint;
 use rand::thread_rng;
@@ -159,9 +164,15 @@ fn bench_email_verify1(c: &mut Criterion) {
         header_substrings,
         body_substrings,
     };
-    let vk = keygen_vk(&params, &circuit).unwrap();
-    let pk = keygen_pk(&params, vk, &circuit).unwrap();
+    MockProver::run(params.k(), &circuit, circuit.instances())
+        .unwrap()
+        .assert_satisfied();
+    let emp_circuit = circuit.without_witnesses();
+    let vk = keygen_vk(&params, &emp_circuit).unwrap();
+    let pk = keygen_pk(&params, vk.clone(), &emp_circuit).unwrap();
     let instances = circuit.instances();
+    let evm_proof = gen_evm_proof_gwc(&params, &pk, circuit.clone(), instances.clone(), &mut OsRng);
+
     group.bench_function("bench 1", |b| {
         b.iter(|| {
             let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);

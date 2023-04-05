@@ -58,8 +58,8 @@ macro_rules! impl_email_verify_circuit {
                 Self {
                     header_bytes: vec![],
                     body_bytes: vec![],
-                    public_key: RSAPublicKey::without_witness(BigUint::from(Self::DEFAULT_E)),
-                    signature: RSASignature::without_witness(),
+                    public_key: self.public_key.clone(),
+                    signature: self.signature.clone(),
                     bodyhash: (0, "".to_string()),
                     header_substrings: vec![],
                     body_substrings: vec![]
