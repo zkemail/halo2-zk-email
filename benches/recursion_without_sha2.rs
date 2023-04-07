@@ -506,10 +506,20 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
         body_substrings,
     };
     let emp_circuit = circuit.without_witnesses();
-    let (pks, _) = setup_multi_layer(&app_params, &params, &params, &emp_circuit, 2);
+    let (pks, _) =
+        gen_multi_layer_proving_keys(&app_params, Some(&params), Some(&params), &emp_circuit, 2);
     let circuits = vec![circuit; 4];
     group.bench_function("bench 1", |b| {
-        b.iter(|| evm_prove_multi_layer(&app_params, &params, &params, &circuits, &pks, 2))
+        b.iter(|| {
+            prove_multi_layer_evm(
+                &app_params,
+                Some(&params),
+                Some(&params),
+                &circuits,
+                &pks,
+                2,
+            )
+        })
     });
     group.finish();
 }

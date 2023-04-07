@@ -1,12 +1,14 @@
 #[cfg(not(target_arch = "wasm32"))]
-pub mod cli;
+mod helpers;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod recursion_and_evm;
 
 pub mod regex_sha2;
 pub mod regex_sha2_base64;
+pub use crate::helpers::*;
 use crate::regex_sha2::RegexSha2Config;
-use halo2_base::halo2_proofs::circuit::{AssignedCell, Cell, Region, SimpleFloorPlanner};
+use fancy_regex::Regex;
+use halo2_base::halo2_proofs::circuit::{AssignedCell, Cell, Region, SimpleFloorPlanner, Value};
 use halo2_base::halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
 use halo2_base::{gates::range::RangeStrategy::Vertical, ContextParams, SKIP_FIRST_PASS};
@@ -22,9 +24,12 @@ use halo2_regex::{
     AssignedRegexResult,
 };
 use halo2_rsa::{
-    AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstructions, RSAPublicKey,
+    AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstructions, RSAPubE, RSAPublicKey,
     RSASignature,
 };
+use num_bigint::BigUint;
+use num_traits::FromPrimitive;
+use rand::thread_rng;
 use regex_sha2_base64::RegexSha2Base64Config;
 use serde_json;
 use snark_verifier_sdk::CircuitExt;
@@ -203,6 +208,8 @@ pub struct DefaultEmailVerifyConfigParams {
     pub header_max_byte_size: usize,
     pub body_max_byte_size: usize,
     pub public_key_bits: usize,
+    pub header_substr_regexes: Vec<String>,
+    pub body_substr_regexes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -219,9 +226,9 @@ pub struct DefaultEmailVerifyCircuit<F: Field> {
     pub body_bytes: Vec<u8>,
     pub public_key: RSAPublicKey<F>,
     pub signature: RSASignature<F>,
-    pub bodyhash: (usize, String),
-    pub header_substrings: Vec<(usize, String)>,
-    pub body_substrings: Vec<(usize, String)>,
+    // pub bodyhash: (usize, String),
+    // pub header_substrings: Vec<(usize, String)>,
+    // pub body_substrings: Vec<(usize, String)>,
 }
 
 impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
@@ -234,9 +241,9 @@ impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
             body_bytes: vec![],
             public_key: self.public_key.clone(),
             signature: self.signature.clone(),
-            bodyhash: (0, "".to_string()),
-            header_substrings: vec![],
-            body_substrings: vec![],
+            // bodyhash: (0, "".to_string()),
+            // header_substrings: vec![],
+            // body_substrings: vec![],
         }
     }
 
@@ -385,15 +392,13 @@ impl<F: Field> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
     fn instances(&self) -> Vec<Vec<F>> {
         let params = Self::read_config_params();
         let max_len = params.header_max_byte_size + params.body_max_byte_size;
-        let hash_fs = self
-            .bodyhash
+        let (header_substrings, body_substrings) = self.get_substrs();
+        let hash_fs = header_substrings[0]
             .1
             .as_bytes()
             .into_iter()
             .map(|byte| F::from(*byte as u64))
             .collect::<Vec<F>>();
-        let header_substrings =
-            vec![&[self.bodyhash.clone()][..], &self.header_substrings].concat();
         let mut expected_masked_chars = vec![F::from(0); max_len];
         let mut expected_substr_ids = vec![F::from(0); max_len];
         for (substr_idx, (start, chars)) in header_substrings.iter().enumerate() {
@@ -402,7 +407,7 @@ impl<F: Field> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
                 expected_substr_ids[start + idx] = F::from(substr_idx as u64 + 1);
             }
         }
-        for (substr_idx, (start, chars)) in self.body_substrings.iter().enumerate() {
+        for (substr_idx, (start, chars)) in body_substrings.iter().enumerate() {
             for (idx, char) in chars.as_bytes().iter().enumerate() {
                 expected_masked_chars[params.header_max_byte_size + start + idx] =
                     F::from(*char as u64);
@@ -425,6 +430,67 @@ impl<F: Field> DefaultEmailVerifyCircuit<F> {
         )
         .expect("File is found but invalid.");
         params
+    }
+
+    pub fn random() -> Self {
+        use num_bigint::RandomBits;
+        use rand::Rng;
+        let mut rng = thread_rng();
+        let params = Self::read_config_params();
+        let mut n = BigUint::default();
+        while n.bits() != params.public_key_bits as u64 {
+            n = rng.sample(RandomBits::new(params.public_key_bits as u64));
+        }
+        let public_key = RSAPublicKey::new(
+            Value::known(n),
+            RSAPubE::Fix(BigUint::from_u128(Self::DEFAULT_E).unwrap()),
+        );
+        let mut c = BigUint::default();
+        while c.bits() != params.public_key_bits as u64 {
+            c = rng.sample(RandomBits::new(params.public_key_bits as u64));
+        }
+        let signature = RSASignature::new(Value::known(c));
+        Self {
+            header_bytes: vec![],
+            body_bytes: vec![],
+            public_key,
+            signature,
+        }
+    }
+
+    pub fn get_substrs(&self) -> (Vec<(usize, String)>, Vec<(usize, String)>) {
+        let params = Self::read_config_params();
+        let bodyhash_regex = Regex::new(r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)").unwrap();
+        let header_str = String::from_utf8(self.header_bytes.clone())
+            .expect("fail to encode header bytes to utf8 string");
+        let bodyhash_match = bodyhash_regex
+            .find(&header_str)
+            .expect("bodyhash is not found")
+            .unwrap();
+        let mut header_substrings =
+            vec![(bodyhash_match.start(), bodyhash_match.as_str().to_string())];
+        for (idx, header_substr) in params.header_substr_regexes.iter().enumerate() {
+            let regex = Regex::new(&format!(r"{}", header_substr))
+                .expect(&format!("{}-th header substring is invalid.", idx));
+            let regex_match = regex
+                .find(&header_str)
+                .unwrap()
+                .expect(&format!("{}-th header substring is not found.", idx));
+            header_substrings.push((regex_match.start(), regex_match.as_str().to_string()));
+        }
+        let body_str = String::from_utf8(self.body_bytes.clone())
+            .expect("fail to encode body bytes to utf8 string");
+        let mut body_substrings = vec![];
+        for (idx, body_substr) in params.body_substr_regexes.iter().enumerate() {
+            let regex = Regex::new(&format!(r"{}", body_substr))
+                .expect(&format!("{}-th body substring is invalid.", idx));
+            let regex_match = regex
+                .find(&body_str)
+                .unwrap()
+                .expect(&format!("{}-th body substring is not found.", idx));
+            body_substrings.push((regex_match.start(), regex_match.as_str().to_string()));
+        }
+        (header_substrings, body_substrings)
     }
 }
 
@@ -453,6 +519,7 @@ mod test {
     use hex;
     use rsa::{pkcs1::DecodeRsaPrivateKey, PublicKeyParts, RsaPrivateKey};
     use snark_verifier_sdk::CircuitExt;
+    use temp_env;
 
     // impl_email_verify_circuit!(
     //     Test1EmailVerifyConfig,
@@ -473,121 +540,119 @@ mod test {
 
     #[test]
     fn test_generated_email1() {
-        // let private_key = include_str!("../test_data/test_rsa_key.pem");
-        // let pk_rsa = RsaKey::<mail_auth::common::crypto::Sha256>::from_rsa_pem(private_key).unwrap();
-        set_var(
+        temp_env::with_var(
             EMAIL_VERIFY_CONFIG_ENV,
-            "./configs/test1_email_verify.config",
-        );
-        let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-        let mut rng = thread_rng();
-        let _private_key =
-            RsaPrivateKey::new(&mut rng, params.public_key_bits).expect("failed to generate a key");
-        let public_key = rsa::RsaPublicKey::from(&_private_key);
-        let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
-        // let body = "email was meant for @zkemailverify.";
-        let message = concat!(
-            "From: alice@zkemail.com\r\n",
-            "\r\n",
-            "email was meant for @zkemailverify.",
-        )
-        .as_bytes();
-        let email = parse_mail(message).unwrap();
-        let logger = slog::Logger::root(slog::Discard, slog::o!());
-        let signer = SignerBuilder::new()
-            .with_signed_headers(&["From"])
-            .unwrap()
-            .with_private_key(private_key)
-            .with_selector("default")
-            .with_signing_domain("zkemail.com")
-            .with_logger(&logger)
-            .with_header_canonicalization(cfdkim::canonicalization::Type::Relaxed)
-            .with_body_canonicalization(cfdkim::canonicalization::Type::Relaxed)
-            .build()
-            .unwrap();
-        let signature = signer.sign(&email).unwrap();
-        println!("signature {}", signature);
-        let new_msg = vec![signature.as_bytes(), b"\r\n", message].concat();
-        let (canonicalized_header, canonicalized_body, signature_bytes) =
-            canonicalize_signed_email(&new_msg).unwrap();
+            Some("./configs/test1_email_verify.config"),
+            || {
+                let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+                let mut rng = thread_rng();
+                let _private_key = RsaPrivateKey::new(&mut rng, params.public_key_bits)
+                    .expect("failed to generate a key");
+                let public_key = rsa::RsaPublicKey::from(&_private_key);
+                let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
+                // let body = "email was meant for @zkemailverify.";
+                let message = concat!(
+                    "From: alice@zkemail.com\r\n",
+                    "\r\n",
+                    "email was meant for @zkemailverify.",
+                )
+                .as_bytes();
+                let email = parse_mail(message).unwrap();
+                let logger = slog::Logger::root(slog::Discard, slog::o!());
+                let signer = SignerBuilder::new()
+                    .with_signed_headers(&["From"])
+                    .unwrap()
+                    .with_private_key(private_key)
+                    .with_selector("default")
+                    .with_signing_domain("zkemail.com")
+                    .with_logger(&logger)
+                    .with_header_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+                    .with_body_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+                    .build()
+                    .unwrap();
+                let signature = signer.sign(&email).unwrap();
+                let new_msg = vec![signature.as_bytes(), b"\r\n", message].concat();
+                println!("email: {}", String::from_utf8(new_msg.clone()).unwrap());
+                let (canonicalized_header, canonicalized_body, signature_bytes) =
+                    canonicalize_signed_email(&new_msg).unwrap();
 
-        println!(
-            "canonicalized_header:\n{}",
-            String::from_utf8(canonicalized_header.clone()).unwrap()
-        );
-        println!(
-            "canonicalized_body:\n{}",
-            String::from_utf8(canonicalized_body.clone()).unwrap()
-        );
+                println!(
+                    "canonicalized_header:\n{}",
+                    String::from_utf8(canonicalized_header.clone()).unwrap()
+                );
+                println!(
+                    "canonicalized_body:\n{}",
+                    String::from_utf8(canonicalized_body.clone()).unwrap()
+                );
 
-        let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-        // let private_key = rsa::RsaPrivateKey::read_pkcs1_pem_file("./test_data/test_rsa_key.pem").unwrap();
-        let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
-        let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
-        let signature =
-            RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-        let hash = Sha256::digest(&canonicalized_body);
-        let mut expected_output = Vec::new();
-        expected_output.resize(44, 0);
-        BASE64_STANDARD
-            .encode_slice(&hash, &mut expected_output)
-            .unwrap();
-        let bodyhash_regex = Regex::new(r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)").unwrap();
-        let canonicalized_header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
-        let bodyhash_match = bodyhash_regex
-            .find(&canonicalized_header_str)
-            .unwrap()
-            .unwrap();
-        println!(
-            "bodyhash {} {}",
-            bodyhash_match.start(),
-            bodyhash_match.as_str()
+                let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
+                // let private_key = rsa::RsaPrivateKey::read_pkcs1_pem_file("./test_data/test_rsa_key.pem").unwrap();
+                let n_big =
+                    BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
+                let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
+                let signature =
+                    RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
+                // let hash = Sha256::digest(&canonicalized_body);
+                // let mut expected_output = Vec::new();
+                // expected_output.resize(44, 0);
+                // BASE64_STANDARD
+                //     .encode_slice(&hash, &mut expected_output)
+                //     .unwrap();
+                // let bodyhash_regex = Regex::new(r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)").unwrap();
+                // let canonicalized_header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
+                // let bodyhash_match = bodyhash_regex
+                //     .find(&canonicalized_header_str)
+                //     .unwrap()
+                //     .unwrap();
+                // println!(
+                //     "bodyhash {} {}",
+                //     bodyhash_match.start(),
+                //     bodyhash_match.as_str()
+                // );
+                // let bodyhash = (
+                //     bodyhash_match.start(),
+                //     String::from_utf8(expected_output).unwrap(),
+                // );
+                // let header_substr1_regex = Regex::new(r"(?<=from:)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+@(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_|.)+(?=\r)").unwrap();
+                // let header_substr1_match = header_substr1_regex
+                //     .find(&canonicalized_header_str)
+                //     .unwrap()
+                //     .unwrap();
+                // println!(
+                //     "from {} {}",
+                //     header_substr1_match.start(),
+                //     header_substr1_match.as_str()
+                // );
+                // let body_substr1_regex = Regex::new(r"(?<=email was meant for @)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+(?=.)").unwrap();
+                // let canonicalized_body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
+                // let body_substr1_match = body_substr1_regex
+                //     .find(&canonicalized_body_str)
+                //     .unwrap()
+                //     .unwrap();
+                // println!(
+                //     "body {} {}",
+                //     body_substr1_match.start(),
+                //     body_substr1_match.as_str()
+                // );
+                // let header_substrings = vec![(
+                //     header_substr1_match.start(),
+                //     header_substr1_match.as_str().to_string(),
+                // )];
+                // let body_substrings = vec![(
+                //     body_substr1_match.start(),
+                //     body_substr1_match.as_str().to_string(),
+                // )];
+                let circuit = DefaultEmailVerifyCircuit {
+                    header_bytes: canonicalized_header,
+                    body_bytes: canonicalized_body,
+                    public_key,
+                    signature,
+                };
+                let instances = circuit.instances();
+                let prover = MockProver::run(13, &circuit, instances).unwrap();
+                assert_eq!(prover.verify(), Ok(()));
+            },
         );
-        let bodyhash = (
-            bodyhash_match.start(),
-            String::from_utf8(expected_output).unwrap(),
-        );
-        let header_substr1_regex = Regex::new(r"(?<=from:)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+@(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_|.)+(?=\r)").unwrap();
-        let header_substr1_match = header_substr1_regex
-            .find(&canonicalized_header_str)
-            .unwrap()
-            .unwrap();
-        println!(
-            "from {} {}",
-            header_substr1_match.start(),
-            header_substr1_match.as_str()
-        );
-        let body_substr1_regex = Regex::new(r"(?<=email was meant for @)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+(?=.)").unwrap();
-        let canonicalized_body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
-        let body_substr1_match = body_substr1_regex
-            .find(&canonicalized_body_str)
-            .unwrap()
-            .unwrap();
-        println!(
-            "body {} {}",
-            body_substr1_match.start(),
-            body_substr1_match.as_str()
-        );
-        let header_substrings = vec![(
-            header_substr1_match.start(),
-            header_substr1_match.as_str().to_string(),
-        )];
-        let body_substrings = vec![(
-            body_substr1_match.start(),
-            body_substr1_match.as_str().to_string(),
-        )];
-        let circuit = DefaultEmailVerifyCircuit {
-            header_bytes: canonicalized_header,
-            body_bytes: canonicalized_body,
-            public_key,
-            signature,
-            bodyhash,
-            header_substrings,
-            body_substrings,
-        };
-        let instances = circuit.instances();
-        let prover = MockProver::run(13, &circuit, instances).unwrap();
-        assert_eq!(prover.verify(), Ok(()));
     }
 
     // impl_email_verify_circuit!(
@@ -618,167 +683,167 @@ mod test {
 
     #[test]
     fn test_generated_email2() {
-        set_var(
+        temp_env::with_var(
             EMAIL_VERIFY_CONFIG_ENV,
-            "./configs/test2_email_verify.config",
-        );
-        let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-        let mut rng = thread_rng();
-        let _private_key =
-            RsaPrivateKey::new(&mut rng, params.public_key_bits).expect("failed to generate a key");
-        let public_key = rsa::RsaPublicKey::from(&_private_key);
-        let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
-        let message = concat!(
-            "From: alice@zkemail.com\r\n",
-            "To: bob@example.com\r\n",
-            "Subject: Hello.\r\n",
-            "\r\n",
-            "email was meant for @zkemailverify and halo.",
-        )
-        .as_bytes();
-        let email = parse_mail(message).unwrap();
-        let logger = slog::Logger::root(slog::Discard, slog::o!());
-        let signer = SignerBuilder::new()
-            .with_signed_headers(&["Subject", "To", "From"])
-            .unwrap()
-            .with_private_key(private_key)
-            .with_selector("default")
-            .with_signing_domain("zkemail.com")
-            .with_logger(&logger)
-            .with_header_canonicalization(cfdkim::canonicalization::Type::Relaxed)
-            .with_body_canonicalization(cfdkim::canonicalization::Type::Relaxed)
-            .build()
-            .unwrap();
-        let signature = signer.sign(&email).unwrap();
-        println!("signature {}", signature);
-        let new_msg = vec![signature.as_bytes(), b"\r\n", message].concat();
-        let (canonicalized_header, canonicalized_body, signature_bytes) =
-            canonicalize_signed_email(&new_msg).unwrap();
+            Some("./configs/test2_email_verify.config"),
+            || {
+                let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+                let mut rng = thread_rng();
+                let _private_key = RsaPrivateKey::new(&mut rng, params.public_key_bits)
+                    .expect("failed to generate a key");
+                let public_key = rsa::RsaPublicKey::from(&_private_key);
+                let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
+                let message = concat!(
+                    "From: alice@zkemail.com\r\n",
+                    "To: bob@example.com\r\n",
+                    "Subject: Hello.\r\n",
+                    "\r\n",
+                    "email was meant for @zkemailverify and halo.",
+                )
+                .as_bytes();
+                let email = parse_mail(message).unwrap();
+                let logger = slog::Logger::root(slog::Discard, slog::o!());
+                let signer = SignerBuilder::new()
+                    .with_signed_headers(&["Subject", "To", "From"])
+                    .unwrap()
+                    .with_private_key(private_key)
+                    .with_selector("default")
+                    .with_signing_domain("zkemail.com")
+                    .with_logger(&logger)
+                    .with_header_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+                    .with_body_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+                    .build()
+                    .unwrap();
+                let signature = signer.sign(&email).unwrap();
+                println!("signature {}", signature);
+                let new_msg = vec![signature.as_bytes(), b"\r\n", message].concat();
+                let (canonicalized_header, canonicalized_body, signature_bytes) =
+                    canonicalize_signed_email(&new_msg).unwrap();
 
-        println!(
-            "canonicalized_header:\n{}",
-            String::from_utf8(canonicalized_header.clone()).unwrap()
-        );
-        println!(
-            "canonicalized_body:\n{}",
-            String::from_utf8(canonicalized_body.clone()).unwrap()
-        );
+                println!(
+                    "canonicalized_header:\n{}",
+                    String::from_utf8(canonicalized_header.clone()).unwrap()
+                );
+                println!(
+                    "canonicalized_body:\n{}",
+                    String::from_utf8(canonicalized_body.clone()).unwrap()
+                );
 
-        let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-        let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
-        let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
-        let signature =
-            RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-        let hash = Sha256::digest(&canonicalized_body);
-        let mut expected_output = Vec::new();
-        expected_output.resize(44, 0);
-        BASE64_STANDARD
-            .encode_slice(&hash, &mut expected_output)
-            .unwrap();
+                let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
+                let n_big =
+                    BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
+                let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
+                let signature =
+                    RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
+                // let hash = Sha256::digest(&canonicalized_body);
+                // let mut expected_output = Vec::new();
+                // expected_output.resize(44, 0);
+                // BASE64_STANDARD
+                //     .encode_slice(&hash, &mut expected_output)
+                //     .unwrap();
 
-        let bodyhash_regex = Regex::new(r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)").unwrap();
-        let canonicalized_header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
-        let bodyhash_match = bodyhash_regex
-            .find(&canonicalized_header_str)
-            .unwrap()
-            .unwrap();
-        println!(
-            "bodyhash {} {}",
-            bodyhash_match.start(),
-            bodyhash_match.as_str()
-        );
-        let bodyhash = (
-            bodyhash_match.start(),
-            String::from_utf8(expected_output).unwrap(),
-        );
-        let header_substr1_regex = Regex::new(r"(?<=from:)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+@(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_|.)+(?=\r)").unwrap();
-        let header_substr1_match = header_substr1_regex
-            .find(&canonicalized_header_str)
-            .unwrap()
-            .unwrap();
-        println!(
-            "from {} {}",
-            header_substr1_match.start(),
-            header_substr1_match.as_str()
-        );
-        let header_substr2_regex = Regex::new(r"(?<=to:)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+@(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_|.)+(?=\r)").unwrap();
-        let header_substr2_match = header_substr2_regex
-            .find(&canonicalized_header_str)
-            .unwrap()
-            .unwrap();
-        println!(
-            "to {} {}",
-            header_substr2_match.start(),
-            header_substr2_match.as_str()
-        );
-        let header_substr3_regex = Regex::new(r"(?<=subject:)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_|.)+(?=\r)").unwrap();
-        let header_substr3_match = header_substr3_regex
-            .find(&canonicalized_header_str)
-            .unwrap()
-            .unwrap();
-        println!(
-            "subject {} {}",
-            header_substr3_match.start(),
-            header_substr3_match.as_str()
-        );
-        let canonicalized_body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
-        let body_substr1_regex = Regex::new(r"(?<=email was meant for @)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+").unwrap();
-        let body_substr1_match = body_substr1_regex
-            .find(&canonicalized_body_str)
-            .unwrap()
-            .unwrap();
-        println!(
-            "body1 {} {}",
-            body_substr1_match.start(),
-            body_substr1_match.as_str()
-        );
-        let body_substr2_regex =
-            Regex::new(r"and (a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z)+").unwrap();
-        let body_substr2_match = body_substr2_regex
-            .find(&canonicalized_body_str)
-            .unwrap()
-            .unwrap();
-        println!(
-            "body2 {} {}",
-            body_substr2_match.start(),
-            body_substr2_match.as_str()
-        );
-        let header_substrings = vec![
-            (
-                header_substr1_match.start(),
-                header_substr1_match.as_str().to_string(),
-            ),
-            (
-                header_substr2_match.start(),
-                header_substr2_match.as_str().to_string(),
-            ),
-            (
-                header_substr3_match.start(),
-                header_substr3_match.as_str().to_string(),
-            ),
-        ];
-        let body_substrings = vec![
-            (
-                body_substr1_match.start(),
-                body_substr1_match.as_str().to_string(),
-            ),
-            (
-                body_substr2_match.start(),
-                body_substr2_match.as_str().to_string(),
-            ),
-        ];
-        let circuit = DefaultEmailVerifyCircuit {
-            header_bytes: canonicalized_header,
-            body_bytes: canonicalized_body,
-            public_key,
-            signature,
-            bodyhash,
-            header_substrings,
-            body_substrings,
-        };
+                // let bodyhash_regex = Regex::new(r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)").unwrap();
+                // let canonicalized_header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
+                // let bodyhash_match = bodyhash_regex
+                //     .find(&canonicalized_header_str)
+                //     .unwrap()
+                //     .unwrap();
+                // println!(
+                //     "bodyhash {} {}",
+                //     bodyhash_match.start(),
+                //     bodyhash_match.as_str()
+                // );
+                // let bodyhash = (
+                //     bodyhash_match.start(),
+                //     String::from_utf8(expected_output).unwrap(),
+                // );
+                // let header_substr1_regex = Regex::new(r"(?<=from:)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+@(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_|.)+(?=\r)").unwrap();
+                // let header_substr1_match = header_substr1_regex
+                //     .find(&canonicalized_header_str)
+                //     .unwrap()
+                //     .unwrap();
+                // println!(
+                //     "from {} {}",
+                //     header_substr1_match.start(),
+                //     header_substr1_match.as_str()
+                // );
+                // let header_substr2_regex = Regex::new(r"(?<=to:)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+@(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_|.)+(?=\r)").unwrap();
+                // let header_substr2_match = header_substr2_regex
+                //     .find(&canonicalized_header_str)
+                //     .unwrap()
+                //     .unwrap();
+                // println!(
+                //     "to {} {}",
+                //     header_substr2_match.start(),
+                //     header_substr2_match.as_str()
+                // );
+                // let header_substr3_regex = Regex::new(r"(?<=subject:)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_|.)+(?=\r)").unwrap();
+                // let header_substr3_match = header_substr3_regex
+                //     .find(&canonicalized_header_str)
+                //     .unwrap()
+                //     .unwrap();
+                // println!(
+                //     "subject {} {}",
+                //     header_substr3_match.start(),
+                //     header_substr3_match.as_str()
+                // );
+                // let canonicalized_body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
+                // let body_substr1_regex = Regex::new(r"(?<=email was meant for @)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+").unwrap();
+                // let body_substr1_match = body_substr1_regex
+                //     .find(&canonicalized_body_str)
+                //     .unwrap()
+                //     .unwrap();
+                // println!(
+                //     "body1 {} {}",
+                //     body_substr1_match.start(),
+                //     body_substr1_match.as_str()
+                // );
+                // let body_substr2_regex =
+                //     Regex::new(r"and (a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z)+").unwrap();
+                // let body_substr2_match = body_substr2_regex
+                //     .find(&canonicalized_body_str)
+                //     .unwrap()
+                //     .unwrap();
+                // println!(
+                //     "body2 {} {}",
+                //     body_substr2_match.start(),
+                //     body_substr2_match.as_str()
+                // );
+                // let header_substrings = vec![
+                //     (
+                //         header_substr1_match.start(),
+                //         header_substr1_match.as_str().to_string(),
+                //     ),
+                //     (
+                //         header_substr2_match.start(),
+                //         header_substr2_match.as_str().to_string(),
+                //     ),
+                //     (
+                //         header_substr3_match.start(),
+                //         header_substr3_match.as_str().to_string(),
+                //     ),
+                // ];
+                // let body_substrings = vec![
+                //     (
+                //         body_substr1_match.start(),
+                //         body_substr1_match.as_str().to_string(),
+                //     ),
+                //     (
+                //         body_substr2_match.start(),
+                //         body_substr2_match.as_str().to_string(),
+                //     ),
+                // ];
+                let circuit = DefaultEmailVerifyCircuit {
+                    header_bytes: canonicalized_header,
+                    body_bytes: canonicalized_body,
+                    public_key,
+                    signature,
+                };
 
-        let instances = circuit.instances();
-        let prover = MockProver::run(13, &circuit, instances).unwrap();
-        assert_eq!(prover.verify(), Ok(()));
+                let instances = circuit.instances();
+                let prover = MockProver::run(13, &circuit, instances).unwrap();
+                assert_eq!(prover.verify(), Ok(()));
+            },
+        );
     }
 }

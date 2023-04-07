@@ -125,49 +125,46 @@ fn bench_email_verify1(c: &mut Criterion) {
     let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
     let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
     let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-    let hash = Sha256::digest(&canonicalized_body);
-    let mut expected_output = Vec::new();
-    expected_output.resize(44, 0);
-    BASE64_STANDARD
-        .encode_slice(&hash, &mut expected_output)
-        .unwrap();
-    let bodyhash_regex = Regex::new(r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)").unwrap();
-    let canonicalized_header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
-    let bodyhash_match = bodyhash_regex
-        .find(&canonicalized_header_str)
-        .unwrap()
-        .unwrap();
-    let bodyhash = (
-        bodyhash_match.start(),
-        String::from_utf8(expected_output).unwrap(),
-    );
-    let header_substr1_regex = Regex::new(r"(?<=from:)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+@(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_|.)+(?=\r)").unwrap();
-    let header_substr1_match = header_substr1_regex
-        .find(&canonicalized_header_str)
-        .unwrap()
-        .unwrap();
-    let body_substr1_regex = Regex::new(r"(?<=email was meant for @)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+(?=.)").unwrap();
-    let canonicalized_body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
-    let body_substr1_match = body_substr1_regex
-        .find(&canonicalized_body_str)
-        .unwrap()
-        .unwrap();
-    let header_substrings = vec![(
-        header_substr1_match.start(),
-        header_substr1_match.as_str().to_string(),
-    )];
-    let body_substrings = vec![(
-        body_substr1_match.start(),
-        body_substr1_match.as_str().to_string(),
-    )];
+    // let hash = Sha256::digest(&canonicalized_body);
+    // let mut expected_output = Vec::new();
+    // expected_output.resize(44, 0);
+    // BASE64_STANDARD
+    //     .encode_slice(&hash, &mut expected_output)
+    //     .unwrap();
+    // let bodyhash_regex = Regex::new(r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)").unwrap();
+    // let canonicalized_header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
+    // let bodyhash_match = bodyhash_regex
+    //     .find(&canonicalized_header_str)
+    //     .unwrap()
+    //     .unwrap();
+    // let bodyhash = (
+    //     bodyhash_match.start(),
+    //     String::from_utf8(expected_output).unwrap(),
+    // );
+    // let header_substr1_regex = Regex::new(r"(?<=from:)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+@(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_|.)+(?=\r)").unwrap();
+    // let header_substr1_match = header_substr1_regex
+    //     .find(&canonicalized_header_str)
+    //     .unwrap()
+    //     .unwrap();
+    // let body_substr1_regex = Regex::new(r"(?<=email was meant for @)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+(?=.)").unwrap();
+    // let canonicalized_body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
+    // let body_substr1_match = body_substr1_regex
+    //     .find(&canonicalized_body_str)
+    //     .unwrap()
+    //     .unwrap();
+    // let header_substrings = vec![(
+    //     header_substr1_match.start(),
+    //     header_substr1_match.as_str().to_string(),
+    // )];
+    // let body_substrings = vec![(
+    //     body_substr1_match.start(),
+    //     body_substr1_match.as_str().to_string(),
+    // )];
     let circuit = DefaultEmailVerifyCircuit {
         header_bytes: canonicalized_header,
         body_bytes: canonicalized_body,
         public_key,
         signature,
-        bodyhash,
-        header_substrings,
-        body_substrings,
     };
     MockProver::run(params.k(), &circuit, circuit.instances())
         .unwrap()
