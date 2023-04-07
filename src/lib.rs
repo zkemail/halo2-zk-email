@@ -1,14 +1,15 @@
-mod macros;
-
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cli;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod recursion_and_evm;
 
 pub mod regex_sha2;
 pub mod regex_sha2_base64;
 use crate::regex_sha2::RegexSha2Config;
-use halo2_base::halo2_proofs::circuit::{AssignedCell, Region, SimpleFloorPlanner};
-use halo2_base::halo2_proofs::plonk::{Circuit, ConstraintSystem};
+use halo2_base::halo2_proofs::circuit::{AssignedCell, Cell, Region, SimpleFloorPlanner};
+use halo2_base::halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
+use halo2_base::{gates::range::RangeStrategy::Vertical, ContextParams, SKIP_FIRST_PASS};
 use halo2_base::{
     gates::{flex_gate::FlexGateConfig, range::RangeConfig, GateInstructions},
     utils::PrimeField,
@@ -24,8 +25,11 @@ use halo2_rsa::{
     AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstructions, RSAPublicKey,
     RSASignature,
 };
-pub use macros::*;
 use regex_sha2_base64::RegexSha2Base64Config;
+use serde_json;
+use snark_verifier_sdk::CircuitExt;
+use std::env::set_var;
+use std::fs::File;
 
 #[derive(Debug, Clone)]
 pub struct EmailVerifyConfig<F: Field> {
@@ -181,40 +185,248 @@ impl<F: Field> EmailVerifyConfig<F> {
         self.header_processer.gate()
     }
 }
-// macro_rules!  {
-//     () => {
 
-//     };
-// }
+pub const EMAIL_VERIFY_CONFIG_ENV: &'static str = "EMAIL_VERIFY_CONFIG";
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct DefaultEmailVerifyConfigParams {
+    pub degree: u32,
+    pub num_advice: usize,
+    pub num_lookup_advice: usize,
+    pub num_fixed: usize,
+    pub lookup_bits: usize,
+    pub header_regex_filepath: String,
+    pub body_regex_filepath: String,
+    pub header_substr_filepathes: Vec<String>,
+    pub body_hash_substr_filepath: String,
+    pub body_substr_filepathes: Vec<String>,
+    pub num_sha2_compression_per_column: usize,
+    pub header_max_byte_size: usize,
+    pub body_max_byte_size: usize,
+    pub public_key_bits: usize,
+}
 
-// #[derive(Debug, Clone)]
-// pub struct EmailVerifyCircuit<F: Field> {
-//     max_byte_size: usize,
-//     num_sha2_compression_per_column: usize,
-//     range_config: RangeConfig<F>,
-//     header_state_lookup: HashMap<(u8, u64), u64>,
-//     header_first_state: u64,
-//     header_accepted_state_vals: Vec<u64>,
-//     header_substr_defs: Vec<SubstrDef>,
-//     body_state_lookup: HashMap<(u8, u64), u64>,
-//     body_first_state: u64,
-//     body_accepted_state_vals: Vec<u64>,
-//     body_substr_defs: Vec<SubstrDef>,
-//     public_key_bits: usize,
-// }
+#[derive(Debug, Clone)]
+pub struct DefaultEmailVerifyConfig<F: Field> {
+    inner: EmailVerifyConfig<F>,
+    encoded_bodyhash_instance: Column<Instance>,
+    masked_str_instance: Column<Instance>,
+    substr_ids_instance: Column<Instance>,
+}
 
-// impl<F: Field> Circuit<F> for EmailVerifyCircuit<F> {
-//     type Config = EmailVerifyConfig<F>;
-//     type FloorPlanner = SimpleFloorPlanner;
+#[derive(Debug, Clone)]
+pub struct DefaultEmailVerifyCircuit<F: Field> {
+    pub header_bytes: Vec<u8>,
+    pub body_bytes: Vec<u8>,
+    pub public_key: RSAPublicKey<F>,
+    pub signature: RSASignature<F>,
+    pub bodyhash: (usize, String),
+    pub header_substrings: Vec<(usize, String)>,
+    pub body_substrings: Vec<(usize, String)>,
+}
 
-//     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-//         Self::Config::configure()
-//     }
-// }
+impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
+    type Config = DefaultEmailVerifyConfig<F>;
+    type FloorPlanner = SimpleFloorPlanner;
 
-// impl<F: Field> EmailVerifyCircuit<F> {
-//     const HEADER_REGEX_FILEPATH: &'static str = "./test_regexes/email_header"
-// }
+    fn without_witnesses(&self) -> Self {
+        Self {
+            header_bytes: vec![],
+            body_bytes: vec![],
+            public_key: self.public_key.clone(),
+            signature: self.signature.clone(),
+            bodyhash: (0, "".to_string()),
+            header_substrings: vec![],
+            body_substrings: vec![],
+        }
+    }
+
+    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+        let params = Self::read_config_params();
+        let range_config = RangeConfig::configure(
+            meta,
+            Vertical,
+            &[params.num_advice],
+            &[params.num_lookup_advice],
+            params.num_fixed,
+            params.lookup_bits,
+            0,
+            params.degree as usize,
+        );
+        let header_regex_def = AllstrRegexDef::read_from_text(&params.header_regex_filepath);
+        let body_regex_def = AllstrRegexDef::read_from_text(&params.body_regex_filepath);
+        let header_substr_defs = params
+            .header_substr_filepathes
+            .into_iter()
+            .map(|path| SubstrRegexDef::read_from_text(&path))
+            .collect::<Vec<SubstrRegexDef>>();
+        let body_hash_substr_def =
+            SubstrRegexDef::read_from_text(&params.body_hash_substr_filepath);
+        let body_substr_defs = params
+            .body_substr_filepathes
+            .into_iter()
+            .map(|path| SubstrRegexDef::read_from_text(&path))
+            .collect::<Vec<SubstrRegexDef>>();
+        let inner = EmailVerifyConfig::configure(
+            meta,
+            params.num_sha2_compression_per_column,
+            range_config,
+            params.header_max_byte_size,
+            header_regex_def,
+            body_hash_substr_def,
+            header_substr_defs,
+            params.body_max_byte_size,
+            body_regex_def,
+            body_substr_defs,
+            params.public_key_bits,
+        );
+        let encoded_bodyhash_instance = meta.instance_column();
+        meta.enable_equality(encoded_bodyhash_instance);
+        let masked_str_instance = meta.instance_column();
+        meta.enable_equality(masked_str_instance);
+        let substr_ids_instance = meta.instance_column();
+        meta.enable_equality(substr_ids_instance);
+        DefaultEmailVerifyConfig {
+            inner,
+            encoded_bodyhash_instance,
+            masked_str_instance,
+            substr_ids_instance,
+        }
+    }
+
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        mut layouter: impl Layouter<F>,
+    ) -> Result<(), Error> {
+        config.inner.load(&mut layouter)?;
+        config.inner.range().load_lookup_table(&mut layouter)?;
+        let mut first_pass = SKIP_FIRST_PASS;
+        let mut encoded_bodyhash_cell = vec![];
+        let mut masked_str_cell = vec![];
+        let mut substr_id_cell = vec![];
+        layouter.assign_region(
+            || "zkemail",
+            |region| {
+                if first_pass {
+                    first_pass = false;
+                    return Ok(());
+                }
+                let ctx = &mut config.inner.new_context(region);
+                let assigned_public_key = config
+                    .inner
+                    .assign_public_key(ctx, self.public_key.clone())?;
+                let assigned_signature =
+                    config.inner.assign_signature(ctx, self.signature.clone())?;
+                let (encoded_bodyhash, header_regex, body_regex) = config.inner.verify_email(
+                    ctx,
+                    &self.header_bytes,
+                    &self.body_bytes,
+                    &assigned_public_key,
+                    &assigned_signature,
+                )?;
+                config.inner.finalize(ctx);
+                encoded_bodyhash_cell.append(
+                    &mut encoded_bodyhash
+                        .into_iter()
+                        .map(|v| v.cell())
+                        .collect::<Vec<Cell>>(),
+                );
+                masked_str_cell.append(
+                    &mut header_regex
+                        .masked_characters
+                        .into_iter()
+                        .map(|v| v.cell())
+                        .collect::<Vec<Cell>>(),
+                );
+                masked_str_cell.append(
+                    &mut body_regex
+                        .masked_characters
+                        .into_iter()
+                        .map(|v| v.cell())
+                        .collect::<Vec<Cell>>(),
+                );
+                substr_id_cell.append(
+                    &mut header_regex
+                        .all_substr_ids
+                        .into_iter()
+                        .map(|v| v.cell())
+                        .collect::<Vec<Cell>>(),
+                );
+                substr_id_cell.append(
+                    &mut body_regex
+                        .all_substr_ids
+                        .into_iter()
+                        .map(|v| v.cell())
+                        .collect::<Vec<Cell>>(),
+                );
+                Ok(())
+            },
+        )?;
+        for (idx, cell) in encoded_bodyhash_cell.into_iter().enumerate() {
+            layouter.constrain_instance(cell, config.encoded_bodyhash_instance, idx)?;
+        }
+        for (idx, cell) in masked_str_cell.into_iter().enumerate() {
+            layouter.constrain_instance(cell, config.masked_str_instance, idx)?;
+        }
+        for (idx, cell) in substr_id_cell.into_iter().enumerate() {
+            layouter.constrain_instance(cell, config.substr_ids_instance, idx)?;
+        }
+        Ok(())
+    }
+}
+
+impl<F: Field> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
+    fn num_instance(&self) -> Vec<usize> {
+        let params = Self::read_config_params();
+        let max_len = params.header_max_byte_size + params.body_max_byte_size;
+        vec![44, max_len, max_len]
+    }
+
+    fn instances(&self) -> Vec<Vec<F>> {
+        let params = Self::read_config_params();
+        let max_len = params.header_max_byte_size + params.body_max_byte_size;
+        let hash_fs = self
+            .bodyhash
+            .1
+            .as_bytes()
+            .into_iter()
+            .map(|byte| F::from(*byte as u64))
+            .collect::<Vec<F>>();
+        let header_substrings =
+            vec![&[self.bodyhash.clone()][..], &self.header_substrings].concat();
+        let mut expected_masked_chars = vec![F::from(0); max_len];
+        let mut expected_substr_ids = vec![F::from(0); max_len];
+        for (substr_idx, (start, chars)) in header_substrings.iter().enumerate() {
+            for (idx, char) in chars.as_bytes().iter().enumerate() {
+                expected_masked_chars[start + idx] = F::from(*char as u64);
+                expected_substr_ids[start + idx] = F::from(substr_idx as u64 + 1);
+            }
+        }
+        for (substr_idx, (start, chars)) in self.body_substrings.iter().enumerate() {
+            for (idx, char) in chars.as_bytes().iter().enumerate() {
+                expected_masked_chars[params.header_max_byte_size + start + idx] =
+                    F::from(*char as u64);
+                expected_substr_ids[params.header_max_byte_size + start + idx] =
+                    F::from(substr_idx as u64 + 1);
+            }
+        }
+        vec![hash_fs, expected_masked_chars, expected_substr_ids]
+    }
+}
+
+impl<F: Field> DefaultEmailVerifyCircuit<F> {
+    pub const DEFAULT_E: u128 = 65537;
+
+    pub fn read_config_params() -> DefaultEmailVerifyConfigParams {
+        let path = std::env::var(EMAIL_VERIFY_CONFIG_ENV)
+            .expect("You should set the configure file path to EMAIL_VERIFY_CONFIG.");
+        let params: DefaultEmailVerifyConfigParams = serde_json::from_reader(
+            File::open(path.as_str()).expect(&format!("{} does not exist.", path)),
+        )
+        .expect("File is found but invalid.");
+        params
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -242,30 +454,35 @@ mod test {
     use rsa::{pkcs1::DecodeRsaPrivateKey, PublicKeyParts, RsaPrivateKey};
     use snark_verifier_sdk::CircuitExt;
 
-    impl_email_verify_circuit!(
-        Test1EmailVerifyConfig,
-        Test1EmailVerifyCircuit,
-        1,
-        1024,
-        "./test_data/regex_header_test1.txt",
-        "./test_data/substr_header_test1_1.txt",
-        vec!["./test_data/substr_header_test1_2.txt"],
-        1024,
-        "./test_data/regex_body_test1.txt",
-        vec!["./test_data/substr_body_test1_1.txt"],
-        2048,
-        60,
-        4,
-        13
-    );
+    // impl_email_verify_circuit!(
+    //     Test1EmailVerifyConfig,
+    //     Test1EmailVerifyCircuit,
+    //     1,
+    //     1024,
+    //     "./test_data/regex_header_test1.txt",
+    //     "./test_data/substr_header_test1_1.txt",
+    //     vec!["./test_data/substr_header_test1_2.txt"],
+    //     1024,
+    //     "./test_data/regex_body_test1.txt",
+    //     vec!["./test_data/substr_body_test1_1.txt"],
+    //     2048,
+    //     60,
+    //     4,
+    //     13
+    // );
 
     #[test]
     fn test_generated_email1() {
         // let private_key = include_str!("../test_data/test_rsa_key.pem");
         // let pk_rsa = RsaKey::<mail_auth::common::crypto::Sha256>::from_rsa_pem(private_key).unwrap();
+        set_var(
+            EMAIL_VERIFY_CONFIG_ENV,
+            "./configs/test1_email_verify.config",
+        );
+        let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
         let mut rng = thread_rng();
-        let _private_key = RsaPrivateKey::new(&mut rng, Test1EmailVerifyCircuit::<Fr>::BITS_LEN)
-            .expect("failed to generate a key");
+        let _private_key =
+            RsaPrivateKey::new(&mut rng, params.public_key_bits).expect("failed to generate a key");
         let public_key = rsa::RsaPublicKey::from(&_private_key);
         let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
         // let body = "email was meant for @zkemailverify.";
@@ -303,7 +520,7 @@ mod test {
             String::from_utf8(canonicalized_body.clone()).unwrap()
         );
 
-        let e = RSAPubE::Fix(BigUint::from(Test1EmailVerifyCircuit::<Fr>::DEFAULT_E));
+        let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
         // let private_key = rsa::RsaPrivateKey::read_pkcs1_pem_file("./test_data/test_rsa_key.pem").unwrap();
         let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
         let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
@@ -359,7 +576,7 @@ mod test {
             body_substr1_match.start(),
             body_substr1_match.as_str().to_string(),
         )];
-        let circuit = Test1EmailVerifyCircuit {
+        let circuit = DefaultEmailVerifyCircuit {
             header_bytes: canonicalized_header,
             body_bytes: canonicalized_body,
             public_key,
@@ -373,37 +590,42 @@ mod test {
         assert_eq!(prover.verify(), Ok(()));
     }
 
-    impl_email_verify_circuit!(
-        Test2EmailVerifyConfig,
-        Test2EmailVerifyCircuit,
-        1,
-        1024,
-        "./test_data/regex_header_test2.txt",
-        "./test_data/substr_header_test2_1.txt",
-        vec![
-            "./test_data/substr_header_test2_2.txt",
-            "./test_data/substr_header_test2_3.txt",
-            "./test_data/substr_header_test2_4.txt"
-        ], // SubstrDef::new(44, 0, 1024 - 1, HashSet::from([(9, 10), (10, 10)])),
-        //vec![SubstrDef::new(40, 0, 1024 - 1, HashSet::from([(38, 39), (39, 39), (39,40), (40,41), (41,41)])),SubstrDef::new(40, 0, 1024 - 1, HashSet::from([(24, 25), (25, 25), (25,29), (29,31), (31,31)])),SubstrDef::new(40, 0, 1024 - 1, HashSet::from([(30, 1), (1, 1)]))],
-        1024,
-        "./test_data/regex_body_test2.txt",
-        vec![
-            "./test_data/substr_body_test2_1.txt",
-            "./test_data/substr_body_test2_2.txt"
-        ],
-        // vec![SubstrDef::new(40, 0, 1024 - 1, HashSet::from([(31, 1), (1, 1)])),SubstrDef::new(40, 0, 1024 - 1, HashSet::from([(13, 15), (15, 15), (4,8), (8,10), (10,12),(12,13)]))],
-        2048,
-        60,
-        4,
-        13
-    );
+    // impl_email_verify_circuit!(
+    //     Test2EmailVerifyConfig,
+    //     Test2EmailVerifyCircuit,
+    //     1,
+    //     1024,
+    //     "./test_data/regex_header_test2.txt",
+    //     "./test_data/substr_header_test2_1.txt",
+    //     vec![
+    //         "./test_data/substr_header_test2_2.txt",
+    //         "./test_data/substr_header_test2_3.txt",
+    //         "./test_data/substr_header_test2_4.txt"
+    //     ], // SubstrDef::new(44, 0, 1024 - 1, HashSet::from([(9, 10), (10, 10)])),
+    //     //vec![SubstrDef::new(40, 0, 1024 - 1, HashSet::from([(38, 39), (39, 39), (39,40), (40,41), (41,41)])),SubstrDef::new(40, 0, 1024 - 1, HashSet::from([(24, 25), (25, 25), (25,29), (29,31), (31,31)])),SubstrDef::new(40, 0, 1024 - 1, HashSet::from([(30, 1), (1, 1)]))],
+    //     1024,
+    //     "./test_data/regex_body_test2.txt",
+    //     vec![
+    //         "./test_data/substr_body_test2_1.txt",
+    //         "./test_data/substr_body_test2_2.txt"
+    //     ],
+    //     // vec![SubstrDef::new(40, 0, 1024 - 1, HashSet::from([(31, 1), (1, 1)])),SubstrDef::new(40, 0, 1024 - 1, HashSet::from([(13, 15), (15, 15), (4,8), (8,10), (10,12),(12,13)]))],
+    //     2048,
+    //     60,
+    //     4,
+    //     13
+    // );
 
     #[test]
     fn test_generated_email2() {
+        set_var(
+            EMAIL_VERIFY_CONFIG_ENV,
+            "./configs/test2_email_verify.config",
+        );
+        let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
         let mut rng = thread_rng();
-        let _private_key = RsaPrivateKey::new(&mut rng, Test1EmailVerifyCircuit::<Fr>::BITS_LEN)
-            .expect("failed to generate a key");
+        let _private_key =
+            RsaPrivateKey::new(&mut rng, params.public_key_bits).expect("failed to generate a key");
         let public_key = rsa::RsaPublicKey::from(&_private_key);
         let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
         let message = concat!(
@@ -442,7 +664,7 @@ mod test {
             String::from_utf8(canonicalized_body.clone()).unwrap()
         );
 
-        let e = RSAPubE::Fix(BigUint::from(Test2EmailVerifyCircuit::<Fr>::DEFAULT_E));
+        let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
         let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
         let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
         let signature =
@@ -545,7 +767,7 @@ mod test {
                 body_substr2_match.as_str().to_string(),
             ),
         ];
-        let circuit = Test2EmailVerifyCircuit {
+        let circuit = DefaultEmailVerifyCircuit {
             header_bytes: canonicalized_header,
             body_bytes: canonicalized_body,
             public_key,

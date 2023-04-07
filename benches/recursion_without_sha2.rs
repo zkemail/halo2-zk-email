@@ -49,7 +49,6 @@ use halo2_base::halo2_proofs::{
     plonk::{Any, Column, Instance, ProvingKey, VerifyingKey},
 };
 use halo2_base::SKIP_FIRST_PASS;
-use halo2_zk_email::impl_email_verify_circuit;
 use halo2_zk_email::recursion_and_evm::*;
 use halo2_zk_email::EmailVerifyConfig;
 use mailparse::parse_mail;

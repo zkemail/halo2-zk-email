@@ -1,4 +1,3 @@
-use crate::impl_email_verify_circuit;
 use ark_std::{end_timer, start_timer};
 use halo2_base::halo2_proofs;
 use halo2_base::halo2_proofs::circuit::SimpleFloorPlanner;

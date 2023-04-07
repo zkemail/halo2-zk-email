@@ -16,6 +16,7 @@ use snark_verifier_sdk::{
     halo2::{aggregation::AggregationCircuit, gen_proof_shplonk, gen_snark_shplonk},
     CircuitExt, Snark,
 };
+use std::env::set_var;
 use std::{
     fs::File,
     io::{prelude::*, BufReader, BufWriter},
@@ -31,9 +32,8 @@ use halo2_base::halo2_proofs::{
     plonk::{Any, Column, Instance, ProvingKey, VerifyingKey},
 };
 use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
-use halo2_zk_email::impl_email_verify_circuit;
-use halo2_zk_email::recursion_and_evm::*;
-use halo2_zk_email::EmailVerifyConfig;
+use halo2_zk_email::{recursion_and_evm::*, EMAIL_VERIFY_CONFIG_ENV};
+use halo2_zk_email::{DefaultEmailVerifyCircuit, EmailVerifyConfig};
 use mailparse::parse_mail;
 use num_bigint::BigUint;
 use rand::thread_rng;
@@ -41,24 +41,24 @@ use rand::Rng;
 use rsa::{PublicKeyParts, RsaPrivateKey};
 use sha2::{self, Digest, Sha256};
 
-impl_email_verify_circuit!(
-    Bench1EmailVerifyConfig,
-    Bench1EmailVerifyCircuit,
-    1,
-    1024,
-    "./test_data/regex_header_test1.txt",
-    "./test_data/substr_header_bench1_1.txt",
-    vec!["./test_data/substr_header_bench1_2.txt"],
-    1024,
-    "./test_data/regex_body_test1.txt",
-    vec!["./test_data/substr_body_bench1_1.txt"],
-    2048,
-    60,
-    4,
-    APP_K1
-);
+// impl_email_verify_circuit!(
+//     Bench1EmailVerifyConfig,
+//     Bench1EmailVerifyCircuit,
+//     1,
+//     1024,
+//     "./test_data/regex_header_test1.txt",
+//     "./test_data/substr_header_bench1_1.txt",
+//     vec!["./test_data/substr_header_bench1_2.txt"],
+//     1024,
+//     "./test_data/regex_body_test1.txt",
+//     vec!["./test_data/substr_body_bench1_1.txt"],
+//     2048,
+//     60,
+//     4,
+//     APP_K1
+// );
 
-const APP_K1: usize = 13;
+const APP_K1: usize = 15;
 const AGG_K1: usize = 22;
 
 // const APP_TO_AGG_K1: usize = 22;
@@ -140,8 +140,13 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
     //     params.downsize(APP_K1 as u32);
     //     params
     // };
+    set_var(
+        EMAIL_VERIFY_CONFIG_ENV,
+        "./configs/bench_agg_email_verify.config",
+    );
+    let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
     let mut rng = thread_rng();
-    let _private_key = RsaPrivateKey::new(&mut rng, Bench1EmailVerifyCircuit::<Fr>::BITS_LEN)
+    let _private_key = RsaPrivateKey::new(&mut rng, config_params.public_key_bits)
         .expect("failed to generate a key");
     let public_key = rsa::RsaPublicKey::from(&_private_key);
     let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
@@ -170,7 +175,7 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
     let (canonicalized_header, canonicalized_body, signature_bytes) =
         canonicalize_signed_email(&new_msg).unwrap();
 
-    let e = RSAPubE::Fix(BigUint::from(Bench1EmailVerifyCircuit::<Fr>::DEFAULT_E));
+    let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
     let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
     let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
     let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
@@ -214,7 +219,7 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
         body_substr1_match.start(),
         body_substr1_match.as_str().to_string(),
     )];
-    let circuit = Bench1EmailVerifyCircuit {
+    let circuit = DefaultEmailVerifyCircuit {
         header_bytes: canonicalized_header,
         body_bytes: canonicalized_body,
         public_key,
