@@ -124,22 +124,7 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
         params.downsize(APP_K1 as u32);
         params
     };
-    // let app_to_agg_params = {
-    //     let mut params = params.clone();
-    //     params.downsize(APP_TO_AGG_K1 as u32);
-    //     params
-    // };
     println!("gen_params");
-    // let app_to_agg_params = {
-    //     let mut params = agg_to_agg_params.clone();
-    //     params.downsize(APP_TO_AGG_K1 as u32);
-    //     params
-    // };
-    // let app_params = {
-    //     let mut params = agg_to_agg_params.clone();
-    //     params.downsize(APP_K1 as u32);
-    //     params
-    // };
     set_var(
         EMAIL_VERIFY_CONFIG_ENV,
         "./configs/bench_agg_email_verify.config",
@@ -179,46 +164,6 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
     let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
     let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
     let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-    // let hash = Sha256::digest(&canonicalized_body);
-    // let mut expected_output = Vec::new();
-    // expected_output.resize(44, 0);
-    // BASE64_STANDARD
-    //     .encode_slice(&hash, &mut expected_output)
-    //     .unwrap();
-    // // let substrings = vec![
-    // //     String::from_utf8(expected_output).unwrap(),
-    // //     "alice@zkemail.com".to_string(),
-    // //     "zkemailverify".to_string(),
-    // // ];
-    // let bodyhash_regex = Regex::new(r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)").unwrap();
-    // let canonicalized_header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
-    // let bodyhash_match = bodyhash_regex
-    //     .find(&canonicalized_header_str)
-    //     .unwrap()
-    //     .unwrap();
-    // let bodyhash = (
-    //     bodyhash_match.start(),
-    //     String::from_utf8(expected_output).unwrap(),
-    // );
-    // let header_substr1_regex = Regex::new(r"(?<=from:)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+@(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_|.)+(?=\r)").unwrap();
-    // let header_substr1_match = header_substr1_regex
-    //     .find(&canonicalized_header_str)
-    //     .unwrap()
-    //     .unwrap();
-    // let body_substr1_regex = Regex::new(r"(?<=email was meant for @)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|_)+(?=.)").unwrap();
-    // let canonicalized_body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
-    // let body_substr1_match = body_substr1_regex
-    //     .find(&canonicalized_body_str)
-    //     .unwrap()
-    //     .unwrap();
-    // let header_substrings = vec![(
-    //     header_substr1_match.start(),
-    //     header_substr1_match.as_str().to_string(),
-    // )];
-    // let body_substrings = vec![(
-    //     body_substr1_match.start(),
-    //     body_substr1_match.as_str().to_string(),
-    // )];
     let circuit = DefaultEmailVerifyCircuit {
         header_bytes: canonicalized_header,
         body_bytes: canonicalized_body,
@@ -226,8 +171,15 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
         signature,
     };
     let emp_circuit = circuit.without_witnesses();
-    let (pks, _) =
-        gen_multi_layer_proving_keys(&app_params, Some(&params), Some(&params), &emp_circuit, 2);
+    let (pks, _) = gen_multi_layer_proving_keys(
+        &app_params,
+        Some(&params),
+        Some(&params),
+        "./configs/app_to_agg.config",
+        "./configs/agg_to_agg.config",
+        &emp_circuit,
+        2,
+    );
     let circuits = vec![circuit; 4];
     group.bench_function("bench 1", |b| {
         b.iter(|| {
@@ -235,6 +187,8 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
                 &app_params,
                 Some(&params),
                 Some(&params),
+                "./configs/app_to_agg.config",
+                "./configs/agg_to_agg.config",
                 &circuits,
                 &pks,
                 2,

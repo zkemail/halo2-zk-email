@@ -20,7 +20,9 @@ use rand::thread_rng;
 use rsa::PublicKeyParts;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use snark_verifier_sdk::evm::encode_calldata;
 use snark_verifier_sdk::halo2::aggregation::AggregationCircuit;
+use snark_verifier_sdk::{CircuitExt, LIMBS};
 use std::env::set_var;
 use std::fmt::format;
 use std::fs::{self, File};
@@ -82,13 +84,14 @@ pub fn gen_params(
 
 pub fn gen_keys(
     params_dir: &str,
-    circuit_config: &str,
+    app_circuit_config: &str,
+    app_to_agg_config_path: &str,
+    agg_to_agg_config_path: &str,
     log2_proofs: u32,
     pks_dir: &str,
     vk: &str,
-    num_instances: &str,
 ) -> Result<(), Error> {
-    set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
+    set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config);
     let circuit = DefaultEmailVerifyCircuit::<Fr>::random();
     let [app_params, app_to_agg_params, agg_to_agg_params] =
         ["app.bin", "app_to_agg.bin", "agg_to_agg.bin"].map(|path| {
@@ -105,6 +108,8 @@ pub fn gen_keys(
         &app_params.expect("app_params should not be null."),
         app_to_agg_params.as_ref(),
         agg_to_agg_params.as_ref(),
+        app_to_agg_config_path,
+        agg_to_agg_config_path,
         &circuit,
         log2_proofs,
     );
@@ -123,90 +128,98 @@ pub fn gen_keys(
         lask_vk.write(&mut writer, SerdeFormat::RawBytes).unwrap();
         writer.flush().unwrap();
     }
-    {
-        let num_instances_json = serde_json::to_string(&_num_instances).unwrap();
-        let mut f = File::create(num_instances).unwrap();
-        write!(f, "{}", num_instances_json).unwrap();
-        f.flush().unwrap();
-    }
     Ok(())
 }
 
-pub async fn prove_single_email(
-    app_params: &str,
-    circuit_config: &str,
-    email: &str,
-    layer0_pk: &str,
-    is_evm_verified: bool,
-    proof: &str,
-) -> Result<(), Error> {
-    set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
-    let email_bytes = {
-        let mut f = File::open(email).unwrap();
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf).unwrap();
-        buf
-    };
-    let (canonicalized_header, canonicalized_body, signature_bytes) =
-        canonicalize_signed_email(&email_bytes).unwrap();
-    let app_params = {
-        let f = File::open(app_params).expect(&format!("{} does not exist.", app_params));
-        let mut reader = BufReader::new(f);
-        ParamsKZG::<Bn256>::read(&mut reader).unwrap()
-    };
-    let public_key = {
-        let logger = slog::Logger::root(slog::Discard, slog::o!());
-        match resolve_public_key(&logger, &email_bytes).await.unwrap() {
-            cfdkim::DkimPublicKey::Rsa(_pk) => {
-                let n = BigUint::from_radix_le(&_pk.n().clone().to_radix_le(16), 16).unwrap();
-                let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-                RSAPublicKey::<Fr>::new(Value::known(n), e)
-            }
-            _ => {
-                panic!("Only RSA keys are supported.");
-            }
-        }
-    };
-    let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-    let circuit = DefaultEmailVerifyCircuit {
-        header_bytes: canonicalized_header,
-        body_bytes: canonicalized_body,
-        public_key,
-        signature,
-    };
-    let pk = {
-        let f = File::open(layer0_pk).expect(&format!("{} does not exist.", layer0_pk));
-        let mut reader = BufReader::new(f);
-        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(
-            &mut reader,
-            SerdeFormat::RawBytes,
-        )
-        .unwrap()
-    };
-    let _proof = if is_evm_verified {
-        prove_multi_layer_evm(&app_params, None, None, &[circuit], &[pk], 0).0
-    } else {
-        gen_snark(&app_params, circuit, &pk).proof
-    };
-    {
-        let f = File::create(proof).unwrap();
-        let mut writer = BufWriter::new(f);
-        writer.write_all(&_proof).unwrap();
-        writer.flush().unwrap();
-    }
-    Ok(())
-}
+// pub async fn prove_single_email(
+//     app_params: &str,
+//     app_circuit_config: &str,
+//     app_to_agg_circuit_config: &str,
+//     agg_to_agg_circuit_config: &str,
+//     email: &str,
+//     layer0_pk: &str,
+//     is_evm_verified: bool,
+//     proof: &str,
+// ) -> Result<(), Error> {
+//     set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config);
+//     let email_bytes = {
+//         let mut f = File::open(email).unwrap();
+//         let mut buf = Vec::new();
+//         f.read_to_end(&mut buf).unwrap();
+//         buf
+//     };
+//     let (canonicalized_header, canonicalized_body, signature_bytes) =
+//         canonicalize_signed_email(&email_bytes).unwrap();
+//     let app_params = {
+//         let f = File::open(app_params).expect(&format!("{} does not exist.", app_params));
+//         let mut reader = BufReader::new(f);
+//         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
+//     };
+//     let public_key = {
+//         let logger = slog::Logger::root(slog::Discard, slog::o!());
+//         match resolve_public_key(&logger, &email_bytes).await.unwrap() {
+//             cfdkim::DkimPublicKey::Rsa(_pk) => {
+//                 let n = BigUint::from_radix_le(&_pk.n().clone().to_radix_le(16), 16).unwrap();
+//                 let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
+//                 RSAPublicKey::<Fr>::new(Value::known(n), e)
+//             }
+//             _ => {
+//                 panic!("Only RSA keys are supported.");
+//             }
+//         }
+//     };
+//     let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
+//     let circuit = DefaultEmailVerifyCircuit {
+//         header_bytes: canonicalized_header,
+//         body_bytes: canonicalized_body,
+//         public_key,
+//         signature,
+//     };
+//     let pk = {
+//         let f = File::open(layer0_pk).expect(&format!("{} does not exist.", layer0_pk));
+//         let mut reader = BufReader::new(f);
+//         ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(
+//             &mut reader,
+//             SerdeFormat::RawBytes,
+//         )
+//         .unwrap()
+//     };
+//     let _proof = if is_evm_verified {
+//         prove_multi_layer_evm(
+//             &app_params,
+//             None,
+//             None,
+//             app_to_agg_circuit_config,
+//             agg_to_agg_circuit_config,
+//             &[circuit],
+//             &[pk],
+//             0,
+//         )
+//         .0
+//     } else {
+//         gen_snark(&app_params, circuit, &pk).proof
+//     };
+//     {
+//         let f = File::create(proof).unwrap();
+//         let mut writer = BufWriter::new(f);
+//         writer.write_all(&_proof).unwrap();
+//         writer.flush().unwrap();
+//     }
+//     Ok(())
+// }
 
 pub async fn prove_multi_evm(
     params_dir: &str,
-    circuit_config: &str,
+    app_circuit_config: &str,
+    app_to_agg_circuit_config: &str,
+    agg_to_agg_circuit_config: &str,
     pks_dir: &str,
     emails_dir: &str,
     log2_proofs: u32,
     proof: &str,
-    public_inputs: &str,
+    acc: &str,
 ) -> Result<(), Error> {
-    set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
+    set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config);
     let [app_params, app_to_agg_params, agg_to_agg_params] =
         ["app.bin", "app_to_agg.bin", "agg_to_agg.bin"].map(|path| {
             let path = Path::new(params_dir).join(path);
@@ -270,10 +283,12 @@ pub async fn prove_multi_evm(
             .unwrap()
         })
         .collect_vec();
-    let (_proof, _) = prove_multi_layer_evm(
+    let (_proof, _acc) = prove_multi_layer_evm(
         &app_params.expect("app_params should not be null."),
         app_to_agg_params.as_ref(),
         agg_to_agg_params.as_ref(),
+        app_to_agg_circuit_config,
+        agg_to_agg_circuit_config,
         &circuits,
         &pks,
         log2_proofs,
@@ -285,10 +300,11 @@ pub async fn prove_multi_evm(
         writer.flush().unwrap();
     }
     {
-        let substrs_json = serde_json::to_string(&email_substrs).unwrap();
-        let mut f = File::create(public_inputs).unwrap();
-        write!(f, "{}", substrs_json).unwrap();
-        f.flush().unwrap();
+        let encoded = encode_calldata(&[_acc], &[]);
+        let f = File::create(acc).unwrap();
+        let mut writer = BufWriter::new(f);
+        writer.write_all(&encoded).unwrap();
+        writer.flush().unwrap();
     }
     Ok(())
 }
@@ -297,7 +313,6 @@ pub fn gen_evm_verifier(
     params_dir: &str,
     vk: &str,
     log2_proofs: u32,
-    num_instances: &str,
     evm_verifier: &str,
 ) -> Result<(), Error> {
     let params = {
@@ -333,10 +348,14 @@ pub fn gen_evm_verifier(
             .unwrap()
         }
     };
-    let num_instances = {
-        let json =
-            fs::read_to_string(num_instances).expect(&format!("{} is not found", num_instances));
-        serde_json::from_str(&json).unwrap()
+    let num_instances_per_app = {
+        let c = DefaultEmailVerifyCircuit::<Fr>::random();
+        c.num_instance()
+    };
+    let num_instances = if log2_proofs == 0 {
+        num_instances_per_app
+    } else {
+        compute_agg_num_instances(&num_instances_per_app, log2_proofs)
     };
     let verifier = gen_multi_layer_evm_verifier::<DefaultEmailVerifyCircuit<Fr>>(
         &params,

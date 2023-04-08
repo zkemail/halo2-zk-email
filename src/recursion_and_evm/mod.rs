@@ -9,12 +9,13 @@ use halo2_base::{gates::range::RangeConfig, utils::PrimeField, Context};
 use halo2_dynamic_sha256::Field;
 use halo2_regex::defs::{AllstrRegexDef, SubstrRegexDef};
 use halo2_rsa::{RSAPublicKey, RSASignature};
+use num_traits::Pow;
 use rand::rngs::OsRng;
 use snark_verifier_sdk::evm::{evm_verify, gen_evm_proof_gwc, gen_evm_verifier_gwc};
 use snark_verifier_sdk::{
     gen_pk,
-    halo2::{aggregation::AggregationCircuit, gen_snark_gwc},
-    CircuitExt, Snark,
+    halo2::{aggregation::PublicAggregationCircuit, gen_snark_gwc},
+    CircuitExt, Snark, LIMBS,
 };
 use std::env::set_var;
 
@@ -46,41 +47,43 @@ pub fn gen_snark<C: CircuitExt<Fr>>(
     gen_snark_gwc(params, pk, circuit, &mut OsRng, None::<&str>)
 }
 
-pub fn gen_aggregation_proving_key(
-    params: &ParamsKZG<Bn256>,
-    snarks: impl IntoIterator<Item = Snark>,
-    config_filepath: &str,
-) -> ProvingKey<G1Affine> {
-    set_var("VERIFY_CONFIG", config_filepath);
-    let agg_circuit = AggregationCircuit::new(params, snarks, &mut OsRng);
-    gen_pk(params, &agg_circuit, None)
-}
+// pub fn gen_aggregation_proving_key(
+//     params: &ParamsKZG<Bn256>,
+//     snarks: Vec<Snark>,
+//     config_filepath: &str,
+//     has_prev_accumulator: bool,
+// ) -> ProvingKey<G1Affine> {
+//     set_var("VERIFY_CONFIG", config_filepath);
+//     let agg_circuit =
+//         PublicAggregationCircuit::new(params, snarks, has_prev_accumulator, &mut OsRng);
+//     gen_pk(params, &agg_circuit, None)
+// }
 
 pub fn gen_aggregation_snark(
     params: &ParamsKZG<Bn256>,
     pk: &ProvingKey<G1Affine>,
-    snarks: impl IntoIterator<Item = Snark>,
+    snarks: Vec<Snark>,
     config_filepath: &str,
+    has_prev_accumulator: bool,
 ) -> Snark {
     set_var("VERIFY_CONFIG", config_filepath);
-    let agg_circuit = AggregationCircuit::new(params, snarks, &mut OsRng);
+    let agg_circuit =
+        PublicAggregationCircuit::new(params, snarks, has_prev_accumulator, &mut OsRng);
     gen_snark(params, agg_circuit.clone(), pk)
 }
 
-pub fn gen_aggregation_proof(
-    params: &ParamsKZG<Bn256>,
-    pk: &ProvingKey<G1Affine>,
-    snarks: impl IntoIterator<Item = Snark>,
-    config_filepath: &str,
-) -> Vec<u8> {
-    let snark = gen_aggregation_snark(params, pk, snarks, config_filepath);
-    snark.proof
+pub fn compute_agg_num_instances(app_num_instances: &[usize], log2_proofs: u32) -> Vec<usize> {
+    debug_assert!(log2_proofs > 0);
+    let num_instances_per_app = app_num_instances.iter().sum::<usize>();
+    vec![4 * LIMBS + num_instances_per_app * 2usize.pow(log2_proofs)]
 }
 
 pub fn gen_multi_layer_proving_keys<C: CircuitExt<Fr> + Clone>(
     app_params: &ParamsKZG<Bn256>,
     app_to_agg_params: Option<&ParamsKZG<Bn256>>,
     agg_to_agg_params: Option<&ParamsKZG<Bn256>>,
+    app_to_agg_config_path: &str,
+    agg_to_agg_config_path: &str,
     circuit: &C,
     log2_proofs: u32,
 ) -> (Vec<ProvingKey<G1Affine>>, Vec<usize>) {
@@ -114,9 +117,13 @@ pub fn gen_multi_layer_proving_keys<C: CircuitExt<Fr> + Clone>(
             let snarks = (0..2)
                 .map(|_| gen_snark(app_params, circuit.clone(), &pks[0]))
                 .collect::<Vec<Snark>>();
-            set_var("VERIFY_CONFIG", "./configs/app_to_agg.config");
-            let new_circuit =
-                AggregationCircuit::new(&app_to_agg_params.unwrap(), snarks, &mut OsRng);
+            set_var("VERIFY_CONFIG", app_to_agg_config_path);
+            let new_circuit = PublicAggregationCircuit::new(
+                &app_to_agg_params.unwrap(),
+                snarks,
+                false,
+                &mut OsRng,
+            );
             let mock = start_timer!(|| "app_to_agg pk generation");
             let app_to_agg_pk = gen_pk(app_to_agg_params.unwrap(), &new_circuit, None);
             end_timer!(mock);
@@ -132,9 +139,9 @@ pub fn gen_multi_layer_proving_keys<C: CircuitExt<Fr> + Clone>(
                     )
                 })
                 .collect::<Vec<Snark>>();
-            set_var("VERIFY_CONFIG", "./configs/agg_to_agg.config");
+            set_var("VERIFY_CONFIG", agg_to_agg_config_path);
             let new_circuit =
-                AggregationCircuit::new(agg_to_agg_params.unwrap(), snarks, &mut OsRng);
+                PublicAggregationCircuit::new(agg_to_agg_params.unwrap(), snarks, true, &mut OsRng);
             let mock = start_timer!(|| "agg_to_agg pk generation");
             let agg_to_agg_pk = gen_pk(agg_to_agg_params.unwrap(), &new_circuit, None);
             end_timer!(mock);
@@ -158,20 +165,23 @@ pub fn gen_multi_layer_evm_verifier<C: CircuitExt<Fr> + Clone>(
     if log2_proofs == 0 {
         gen_evm_verifier_gwc::<C>(params, &last_vk, num_instance, None)
     } else if log2_proofs == 1 {
-        gen_evm_verifier_gwc::<AggregationCircuit>(params, &last_vk, num_instance, None)
+        gen_evm_verifier_gwc::<PublicAggregationCircuit>(params, &last_vk, num_instance, None)
     } else {
-        gen_evm_verifier_gwc::<AggregationCircuit>(params, &last_vk, num_instance, None)
+        gen_evm_verifier_gwc::<PublicAggregationCircuit>(params, &last_vk, num_instance, None)
     }
 }
 
+/// Reutrn (proof bytes, accumulater values in the instance column)
 pub fn prove_multi_layer_evm<C: CircuitExt<Fr> + Clone>(
     app_params: &ParamsKZG<Bn256>,
     app_to_agg_params: Option<&ParamsKZG<Bn256>>,
     agg_to_agg_params: Option<&ParamsKZG<Bn256>>,
+    app_to_agg_config_path: &str,
+    agg_to_agg_config_path: &str,
     circuits: &[C],
     pks: &[ProvingKey<G1Affine>],
     log2_proofs: u32,
-) -> (Vec<u8>, Vec<Vec<Fr>>) {
+) -> (Vec<u8>, Vec<Fr>) {
     let mut n_proof = circuits.len();
     debug_assert_eq!(2usize.pow(log2_proofs), n_proof);
     debug_assert!(
@@ -203,7 +213,7 @@ pub fn prove_multi_layer_evm<C: CircuitExt<Fr> + Clone>(
             &mut OsRng,
         );
         end_timer!(mock);
-        return (evm_proof, instances);
+        return (evm_proof, vec![]);
     }
     let mock = start_timer!(|| format!("{} app snarks generation", n_proof));
     let app_snarks = (0..n_proof)
@@ -212,7 +222,12 @@ pub fn prove_multi_layer_evm<C: CircuitExt<Fr> + Clone>(
     end_timer!(mock);
     n_proof = n_proof >> 1;
     if log2_proofs == 1 {
-        let circuit = AggregationCircuit::new(&app_to_agg_params.unwrap(), app_snarks, &mut OsRng);
+        let circuit = PublicAggregationCircuit::new(
+            &app_to_agg_params.unwrap(),
+            app_snarks,
+            false,
+            &mut OsRng,
+        );
         let instances = circuit.instances();
         let mock = start_timer!(|| format!("{} app_to_agg evm proof generation", n_proof));
         let evm_proof = gen_evm_proof_gwc(
@@ -223,7 +238,7 @@ pub fn prove_multi_layer_evm<C: CircuitExt<Fr> + Clone>(
             &mut OsRng,
         );
         end_timer!(mock);
-        return (evm_proof, instances);
+        return (evm_proof, instances[0][0..4 * LIMBS].to_vec());
     }
     let mut agg_snarks = (0..n_proof)
         .map(|idx| {
@@ -231,8 +246,9 @@ pub fn prove_multi_layer_evm<C: CircuitExt<Fr> + Clone>(
             let snark = gen_aggregation_snark(
                 app_to_agg_params.unwrap(),
                 &pks[1],
-                [app_snarks[2 * idx].clone(), app_snarks[2 * idx + 1].clone()],
-                "./configs/app_to_agg.config",
+                vec![app_snarks[2 * idx].clone(), app_snarks[2 * idx + 1].clone()],
+                app_to_agg_config_path,
+                false,
             );
             end_timer!(mock);
             snark
@@ -246,8 +262,9 @@ pub fn prove_multi_layer_evm<C: CircuitExt<Fr> + Clone>(
             agg_snarks[idx] = gen_aggregation_snark(
                 agg_to_agg_params.unwrap(),
                 &pks[pk_idx],
-                [agg_snarks[2 * idx].clone(), agg_snarks[2 * idx + 1].clone()],
-                "./configs/agg_to_agg.config",
+                vec![agg_snarks[2 * idx].clone(), agg_snarks[2 * idx + 1].clone()],
+                agg_to_agg_config_path,
+                true,
             );
             end_timer!(mock);
         }
@@ -256,9 +273,10 @@ pub fn prove_multi_layer_evm<C: CircuitExt<Fr> + Clone>(
         n_proof = n_proof >> 1;
     }
     {
-        let circuit = AggregationCircuit::new(
+        let circuit = PublicAggregationCircuit::new(
             agg_to_agg_params.unwrap(),
-            [agg_snarks[0].clone(), agg_snarks[1].clone()],
+            vec![agg_snarks[0].clone(), agg_snarks[1].clone()],
+            true,
             &mut OsRng,
         );
         let instances = circuit.instances();
@@ -271,7 +289,7 @@ pub fn prove_multi_layer_evm<C: CircuitExt<Fr> + Clone>(
             &mut OsRng,
         );
         end_timer!(mock);
-        (evm_proof, instances)
+        (evm_proof, instances[0][0..4 * LIMBS].to_vec())
     }
 }
 

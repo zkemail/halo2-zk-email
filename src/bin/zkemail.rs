@@ -55,9 +55,15 @@ enum Commands {
         /// setup parameters directory
         #[arg(short, long)]
         params_dir: String,
-        /// circuit configure file
+        /// email verification circuit configure file
         #[arg(short, long)]
-        circuit_config: String,
+        app_circuit_config: String,
+        /// app->agg circuit configure file
+        #[arg(short, long)]
+        app_to_agg_circuit_config: String,
+        /// agg->agg circuit configure file
+        #[arg(short, long)]
+        agg_to_agg_circuit_config: String,
         /// log2(the number of aggregated email proofs)
         #[arg(short, long)]
         log2_proofs: u32,
@@ -67,17 +73,20 @@ enum Commands {
         /// verifying key file
         #[arg(long)]
         vk: String,
-        /// The number of instances file
-        #[arg(long)]
-        num_instances: String,
     },
     Prove {
         /// setup parameters directory
         #[arg(short, long)]
         params_dir: String,
-        /// circuit configure file
+        /// email verification circuit configure file
         #[arg(short, long)]
-        circuit_config: String,
+        app_circuit_config: String,
+        /// app->agg circuit configure file
+        #[arg(short, long)]
+        app_to_agg_circuit_config: String,
+        /// agg->agg circuit configure file
+        #[arg(short, long)]
+        agg_to_agg_circuit_config: String,
         /// proving keys directory
         #[arg(long)]
         pks_dir: String,
@@ -87,12 +96,12 @@ enum Commands {
         /// log2(the number of aggregated email proofs)
         #[arg(short, long)]
         log2_proofs: u32,
-        /// proof file
+        /// output proof file
         #[arg(long)]
         proof: String,
-        /// public inputs file
+        /// output accumulator file
         #[arg(long)]
-        public_inputs: String,
+        acc: String,
     },
     GenEVMVerifier {
         /// setup parameters directory
@@ -104,9 +113,6 @@ enum Commands {
         /// log2(the number of aggregated email proofs)
         #[arg(short, long)]
         log2_proofs: u32,
-        /// The number of instances file
-        #[arg(long)]
-        num_instances: String,
         /// evm verifier file
         #[arg(short, long)]
         evm_verifier: String,
@@ -125,36 +131,42 @@ async fn main() {
         } => gen_params(&params_dir, app_k, app_to_agg_k, agg_to_agg_k).unwrap(),
         Commands::GenKeys {
             params_dir,
-            circuit_config,
+            app_circuit_config,
+            app_to_agg_circuit_config,
+            agg_to_agg_circuit_config,
             log2_proofs,
             pks_dir,
             vk,
-            num_instances,
         } => gen_keys(
             &params_dir,
-            &circuit_config,
+            &app_circuit_config,
+            &app_to_agg_circuit_config,
+            &agg_to_agg_circuit_config,
             log2_proofs,
             &pks_dir,
             &vk,
-            &num_instances,
         )
         .unwrap(),
         Commands::Prove {
             params_dir,
-            circuit_config,
+            app_circuit_config,
+            app_to_agg_circuit_config,
+            agg_to_agg_circuit_config,
             pks_dir,
             emails_dir,
             log2_proofs,
             proof,
-            public_inputs,
+            acc,
         } => prove_multi_evm(
             &params_dir,
-            &circuit_config,
+            &app_circuit_config,
+            &app_to_agg_circuit_config,
+            &agg_to_agg_circuit_config,
             &pks_dir,
             &emails_dir,
             log2_proofs,
             &proof,
-            &public_inputs,
+            &acc,
         )
         .await
         .unwrap(),
@@ -162,10 +174,7 @@ async fn main() {
             params_dir,
             vk,
             log2_proofs,
-            num_instances,
             evm_verifier,
-        } => {
-            gen_evm_verifier(&params_dir, &vk, log2_proofs, &num_instances, &evm_verifier).unwrap()
-        }
+        } => gen_evm_verifier(&params_dir, &vk, log2_proofs, &evm_verifier).unwrap(),
     }
 }

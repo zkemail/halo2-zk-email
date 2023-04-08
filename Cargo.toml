@@ -64,17 +64,17 @@ mailparse = "0.14"
 criterion = "0.4"
 temp-env = "0.3.3"
 
-[[bench]]
-name = "email_verify"
-harness = false
+# [[bench]]
+# name = "email_verify"
+# harness = false
 
 # [[bench]]
 # name = "recursion"
 # harness = false
 
-# [[bench]]
-# name = "recursion_without_sha2"
-# harness = false
+[[bench]]
+name = "recursion_without_sha2"
+harness = false
 
 [[bin]]
 name = "zkemail"
