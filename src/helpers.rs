@@ -218,7 +218,7 @@ pub async fn prove_app(
             &params,
             &pk,
             &vec![circuit.clone()],
-            &[&[instances[0].as_slice()]],
+            &[&instances.iter().map(Vec::as_slice).collect_vec()],
             OsRng,
             &mut transcript,
         )
@@ -235,7 +235,7 @@ pub async fn prove_app(
             &params,
             &pk.get_vk(),
             strategy,
-            &[&[instances[0].as_slice()]],
+            &[&instances.iter().map(Vec::as_slice).collect_vec()],
             &mut transcript,
         )
         .unwrap();
