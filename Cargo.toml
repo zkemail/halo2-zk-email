@@ -20,8 +20,8 @@ halo2-ecc = { version = "0.2.2", default-features = false, features = [
 ], git = "https://github.com/axiom-crypto/halo2-lib.git" }
 halo2-dynamic-sha256 = { git = "https://github.com/zkemail/halo2-dynamic-sha256.git", version = "0.1.0", branch = "main" }
 halo2-rsa = { git = "https://github.com/zkemail/halo2-rsa.git", version = "0.1.0", branch = "feat/new_bigint" }
-halo2-regex = { git = "https://github.com/zkemail/halo2-regex.git", version = "0.1.0", branch = "main" }
-# halo2-regex = { path = "../halo2-regex", version = "0.1.0" }
+# halo2-regex = { git = "https://github.com/zkemail/halo2-regex.git", version = "0.1.0", branch = "main" }
+halo2-regex = { path = "../halo2-regex-2", version = "0.1.0" }
 halo2-base64 = { git = "https://github.com/zkemail/halo2-base64.git", version = "0.1.0", branch = "main" }
 num-traits = "0.2.15"
 base64 = "0.21"
@@ -54,7 +54,7 @@ tokio = { version = "1.16", features = [
     "rt-multi-thread",
     "macros",
 ] }
-
+serde_regex = "1.1.0"
 
 [dev-dependencies]
 # mail-parser = "0.8.2"
