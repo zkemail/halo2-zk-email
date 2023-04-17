@@ -796,7 +796,7 @@ mod test {
                 };
 
                 let instances = circuit.instances();
-                let prover = MockProver::run(14, &circuit, instances).unwrap();
+                let prover = MockProver::run(params.degree, &circuit, instances).unwrap();
                 assert_eq!(prover.verify(), Ok(()));
             },
         );

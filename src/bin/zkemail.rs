@@ -36,86 +36,106 @@ struct Cli {
 #[derive(Debug, Subcommand, Clone)]
 enum Commands {
     /// Generate a setup parameter (not for production).
-    GenParams {
+    GenParam {
         /// k parameter for the one email verification circuit.
         #[arg(long)]
-        app_k: u32,
-        /// k parameter for the circuit aggregating the proofs of the one email verification circuit.
-        #[arg(long)]
-        app_to_agg_k: Option<u32>,
-        /// k parameter for the circuit aggregating the proofs of the aggregation circuit.
-        #[arg(long)]
-        agg_to_agg_k: Option<u32>,
-        /// setup parameters directory
-        #[arg(short, long)]
-        params_dir: String,
+        k: u32,
+        /// setup parameters path
+        #[arg(short, long, default_value = "./build/param_app.bin")]
+        param_path: String,
     },
     /// Generate a proving key and a verifying key.
-    GenKeys {
-        /// setup parameters directory
-        #[arg(short, long)]
-        params_dir: String,
+    GenAppKey {
+        /// setup parameters path
+        #[arg(short, long, default_value = "./build/param_app.bin")]
+        param_path: String,
         /// email verification circuit configure file
-        #[arg(short, long)]
-        app_circuit_config: String,
-        /// app->agg circuit configure file
-        #[arg(short, long)]
-        app_to_agg_circuit_config: String,
-        /// agg->agg circuit configure file
-        #[arg(short, long)]
-        agg_to_agg_circuit_config: String,
-        /// log2(the number of aggregated email proofs)
-        #[arg(short, long)]
-        log2_proofs: u32,
-        /// proving keys directory
-        #[arg(long)]
-        pks_dir: String,
+        #[arg(short, long, default_value = "./configs/default_app.config")]
+        circuit_config: String,
+        /// proving key path
+        #[arg(long, default_value = "./build/app.pk")]
+        pk_path: String,
         /// verifying key file
-        #[arg(long)]
-        vk: String,
+        #[arg(long, default_value = "./build/app.vk")]
+        vk_path: String,
     },
-    Prove {
-        /// setup parameters directory
-        #[arg(short, long)]
-        params_dir: String,
+    /// Generate a proving key and a verifying key.
+    GenAggKey {
+        /// setup parameters path
+        #[arg(short, long, default_value = "./build/param_app.bin")]
+        app_param_path: String,
+        /// setup parameters path
+        #[arg(short, long, default_value = "./build/param_agg.bin")]
+        agg_param_path: String,
         /// email verification circuit configure file
-        #[arg(short, long)]
+        #[arg(short, long, default_value = "./configs/default_app.config")]
         app_circuit_config: String,
-        /// app->agg circuit configure file
-        #[arg(short, long)]
-        app_to_agg_circuit_config: String,
-        /// agg->agg circuit configure file
-        #[arg(short, long)]
-        agg_to_agg_circuit_config: String,
-        /// proving keys directory
-        #[arg(long)]
-        pks_dir: String,
-        /// emails directory
-        #[arg(short, long)]
-        emails_dir: String,
-        /// log2(the number of aggregated email proofs)
-        #[arg(short, long)]
-        log2_proofs: u32,
+        /// email verification circuit configure file
+        #[arg(short, long, default_value = "./configs/default_agg.config")]
+        agg_circuit_config: String,
+        /// emails path
+        #[arg(short, long, default_value = "./build/demo.eml")]
+        email_path: String,
+        /// proving key path
+        #[arg(long, default_value = "./build/app.pk")]
+        app_pk_path: String,
+        /// proving key path
+        #[arg(long, default_value = "./build/agg.pk")]
+        agg_pk_path: String,
+        /// verifying key file
+        #[arg(long, default_value = "./build/agg.vk")]
+        agg_vk_path: String,
+    },
+    ProveApp {
+        /// setup parameter path
+        #[arg(short, long, default_value = "./build/param_app.bin")]
+        param_path: String,
+        /// email verification circuit configure file
+        #[arg(short, long, default_value = "./configs/default_app.config")]
+        circuit_config: String,
+        /// proving key path
+        #[arg(long, default_value = "./build/app.pk")]
+        pk_path: String,
+        /// emails path
+        #[arg(short, long, default_value = "./build/demo.eml")]
+        email_path: String,
         /// output proof file
-        #[arg(long)]
-        proof: String,
-        /// output accumulator file
-        #[arg(long)]
-        acc: String,
+        #[arg(long, default_value = "./build/app_proof.bin")]
+        proof_path: String,
+    },
+    EVMProveApp {
+        /// setup parameter path
+        #[arg(short, long, default_value = "./build/param_app.bin")]
+        param_path: String,
+        /// email verification circuit configure file
+        #[arg(short, long, default_value = "./configs/default_app.config")]
+        circuit_config: String,
+        /// proving key path
+        #[arg(long, default_value = "./build/app.pk")]
+        pk_path: String,
+        /// emails path
+        #[arg(short, long, default_value = "./build/demo.eml")]
+        email_path: String,
+        /// output proof file
+        #[arg(long, default_value = "./build/evm_app_proof.hex")]
+        proof_path: String,
     },
     GenEVMVerifier {
-        /// setup parameters directory
-        #[arg(short, long)]
-        params_dir: String,
+        /// setup parameter path
+        #[arg(short, long, default_value = "./build/param_app.bin")]
+        param_path: String,
+        /// email verification circuit configure file
+        #[arg(short, long, default_value = "./configs/default_app.config")]
+        circuit_config: String,
         /// verifying key file
-        #[arg(long)]
-        vk: String,
-        /// log2(the number of aggregated email proofs)
-        #[arg(short, long)]
-        log2_proofs: u32,
+        #[arg(long, default_value = "./build/app.vk")]
+        vk_path: String,
         /// evm verifier file
-        #[arg(short, long)]
-        evm_verifier: String,
+        #[arg(short, long, default_value = "./build/Verifier.sol")]
+        code_path: String,
+        /// is aggregation
+        #[arg(short, long, default_value_t = false)]
+        is_agg: bool,
     },
 }
 
@@ -123,58 +143,70 @@ enum Commands {
 async fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::GenParams {
-            params_dir,
-            app_k,
-            app_to_agg_k,
-            agg_to_agg_k,
-        } => gen_params(&params_dir, app_k, app_to_agg_k, agg_to_agg_k).unwrap(),
-        Commands::GenKeys {
-            params_dir,
+        Commands::GenParam { k, param_path } => gen_param(&param_path, k).unwrap(),
+        Commands::GenAppKey {
+            param_path,
+            circuit_config,
+            pk_path,
+            vk_path,
+        } => gen_app_key(&param_path, &circuit_config, &pk_path, &vk_path).unwrap(),
+        Commands::GenAggKey {
+            app_param_path,
+            agg_param_path,
             app_circuit_config,
-            app_to_agg_circuit_config,
-            agg_to_agg_circuit_config,
-            log2_proofs,
-            pks_dir,
-            vk,
-        } => gen_keys(
-            &params_dir,
+            agg_circuit_config,
+            email_path,
+            app_pk_path,
+            agg_pk_path,
+            agg_vk_path,
+        } => gen_agg_key(
+            &app_param_path,
+            &agg_param_path,
             &app_circuit_config,
-            &app_to_agg_circuit_config,
-            &agg_to_agg_circuit_config,
-            log2_proofs,
-            &pks_dir,
-            &vk,
+            &agg_circuit_config,
+            &email_path,
+            &app_pk_path,
+            &agg_pk_path,
+            &agg_vk_path,
         )
+        .await
         .unwrap(),
-        Commands::Prove {
-            params_dir,
-            app_circuit_config,
-            app_to_agg_circuit_config,
-            agg_to_agg_circuit_config,
-            pks_dir,
-            emails_dir,
-            log2_proofs,
-            proof,
-            acc,
-        } => prove_multi_evm(
-            &params_dir,
-            &app_circuit_config,
-            &app_to_agg_circuit_config,
-            &agg_to_agg_circuit_config,
-            &pks_dir,
-            &emails_dir,
-            log2_proofs,
-            &proof,
-            &acc,
+        Commands::ProveApp {
+            param_path,
+            circuit_config,
+            pk_path,
+            email_path,
+            proof_path,
+        } => prove_app(
+            &param_path,
+            &circuit_config,
+            &pk_path,
+            &email_path,
+            &proof_path,
+        )
+        .await
+        .unwrap(),
+        Commands::EVMProveApp {
+            param_path,
+            circuit_config,
+            pk_path,
+            email_path,
+            proof_path,
+        } => evm_prove_app(
+            &param_path,
+            &circuit_config,
+            &pk_path,
+            &email_path,
+            &proof_path,
         )
         .await
         .unwrap(),
         Commands::GenEVMVerifier {
-            params_dir,
-            vk,
-            log2_proofs,
-            evm_verifier,
-        } => gen_evm_verifier(&params_dir, &vk, log2_proofs, &evm_verifier).unwrap(),
+            param_path,
+            circuit_config,
+            vk_path,
+            code_path,
+            is_agg,
+        } => gen_evm_verifier(&param_path, &circuit_config, &vk_path, &code_path, is_agg).unwrap(),
     }
 }
