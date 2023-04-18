@@ -32,11 +32,11 @@ use snark_verifier::loader::evm::EvmLoader;
 use snark_verifier::pcs::kzg::{Gwc19, Kzg};
 use snark_verifier::system::halo2::transcript::evm::EvmTranscript;
 use snark_verifier::system::halo2::{compile, Config};
-use snark_verifier::verifier::{Plonk, PlonkVerifier};
+use snark_verifier::verifier::PlonkVerifier;
 use snark_verifier_sdk::evm::{encode_calldata, gen_evm_proof, gen_evm_proof_gwc};
 use snark_verifier_sdk::halo2::aggregation::{AggregationCircuit, PublicAggregationCircuit};
 use snark_verifier_sdk::halo2::gen_snark_gwc;
-use snark_verifier_sdk::{gen_pk, CircuitExt, LIMBS};
+use snark_verifier_sdk::{gen_pk, CircuitExt, Plonk, LIMBS};
 use std::env::set_var;
 use std::fmt::format;
 use std::fs::{self, File};
@@ -281,34 +281,7 @@ pub async fn evm_prove_app(
         )
         .unwrap()
     };
-    let email_bytes = {
-        let mut f = File::open(email_path).unwrap();
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf).unwrap();
-        buf
-    };
-    let (canonicalized_header, canonicalized_body, signature_bytes) =
-        canonicalize_signed_email(&email_bytes).unwrap();
-    let public_key = {
-        let logger = slog::Logger::root(slog::Discard, slog::o!());
-        match resolve_public_key(&logger, &email_bytes).await.unwrap() {
-            cfdkim::DkimPublicKey::Rsa(_pk) => {
-                let n = BigUint::from_radix_le(&_pk.n().clone().to_radix_le(16), 16).unwrap();
-                let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-                RSAPublicKey::<Fr>::new(Value::known(n), e)
-            }
-            _ => {
-                panic!("Only RSA keys are supported.");
-            }
-        }
-    };
-    let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-    let circuit = DefaultEmailVerifyCircuit {
-        header_bytes: canonicalized_header,
-        body_bytes: canonicalized_body,
-        public_key,
-        signature,
-    };
+    let circuit = gen_circuit_from_email_path(email_path).await;
     let instances = circuit.instances();
     // let snark = gen_snark_gwc(&app_params, &app_pk, circuit, &mut OsRng, None::<&str>);
     // let agg_circuit = PublicAggregationCircuit::new(&agg_params, vec![snark], false, &mut OsRng);
