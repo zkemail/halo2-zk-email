@@ -22,26 +22,27 @@ pub struct RegexSha2Result<'a, F: Field> {
 
 #[derive(Debug, Clone)]
 pub struct RegexSha2Config<F: Field> {
-    pub(crate) sha256_config: Sha256DynamicConfig<F>,
+    // pub(crate) sha256_config: Sha256DynamicConfig<F>,
     pub(crate) regex_config: RegexVerifyConfig<F>,
+    pub max_byte_size: usize,
 }
 
 impl<F: Field> RegexSha2Config<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         max_byte_size: usize,
-        num_sha2_compression_per_column: usize,
+        // num_sha2_compression_per_column: usize,
         range_config: RangeConfig<F>,
         regex_defs: Vec<(AllstrRegexDef, SubstrRegexDef)>,
     ) -> Self {
-        let sha256_comp_configs = (0..num_sha2_compression_per_column)
-            .map(|_| Sha256CompressionConfig::configure(meta))
-            .collect();
-        let sha256_config = Sha256DynamicConfig::construct(
-            sha256_comp_configs,
-            max_byte_size,
-            range_config.clone(),
-        );
+        // let sha256_comp_configs = (0..num_sha2_compression_per_column)
+        //     .map(|_| Sha256CompressionConfig::configure(meta))
+        //     .collect();
+        // let sha256_config = Sha256DynamicConfig::construct(
+        //     sha256_comp_configs,
+        //     max_byte_size,
+        //     range_config.clone(),
+        // );
         let regex_config = RegexVerifyConfig::configure(
             meta,
             max_byte_size,
@@ -49,24 +50,26 @@ impl<F: Field> RegexSha2Config<F> {
             regex_defs,
         );
         Self {
-            sha256_config,
+            // sha256_config,
             regex_config,
+            max_byte_size,
         }
     }
 
     pub fn match_and_hash<'v: 'a, 'a>(
         &self,
         ctx: &mut Context<'v, F>,
+        sha256_config: &mut Sha256DynamicConfig<F>,
         input: &[u8],
     ) -> Result<RegexSha2Result<'a, F>, Error> {
-        let max_input_size = self.sha256_config.max_byte_size;
+        let max_input_size = self.max_byte_size;
         // 1. Let's match sub strings!
         let regex_result = self.regex_config.match_substrs(ctx, input)?;
 
         // Let's compute the hash!
-        let assigned_hash_result = self.sha256_config.digest(ctx, input)?;
+        let assigned_hash_result = sha256_config.digest(ctx, input)?;
         // Assert that the same input is used in the regex circuit and the sha2 circuit.
-        let gate = self.gate();
+        let gate = &sha256_config.range().gate();
         let mut input_len_sum = gate.load_zero(ctx);
         for idx in 0..max_input_size {
             let flag = &regex_result.all_enable_flags[idx];
@@ -103,13 +106,13 @@ impl<F: Field> RegexSha2Config<F> {
         Ok(result)
     }
 
-    pub fn range(&self) -> &RangeConfig<F> {
-        self.sha256_config.range()
-    }
+    // pub fn range(&self) -> &RangeConfig<F> {
+    //     self.sha256_config.range()
+    // }
 
-    pub fn gate(&self) -> &FlexGateConfig<F> {
-        self.range().gate()
-    }
+    // pub fn gate(&self) -> &FlexGateConfig<F> {
+    //     self.range().gate()
+    // }
 
     pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.regex_config.load(layouter)?;
@@ -117,13 +120,13 @@ impl<F: Field> RegexSha2Config<F> {
         Ok(())
     }
 
-    pub fn new_context<'a, 'b>(&'b self, region: Region<'a, F>) -> Context<'a, F> {
-        self.sha256_config.new_context(region)
-    }
+    // pub fn new_context<'a, 'b>(&'b self, region: Region<'a, F>) -> Context<'a, F> {
+    //     self.sha256_config.new_context(region)
+    // }
 
-    pub fn finalize(&self, ctx: &mut Context<F>) {
-        self.range().finalize(ctx);
-    }
+    // pub fn finalize(&self, ctx: &mut Context<F>) {
+    //     self.range().finalize(ctx);
+    // }
 }
 
 #[cfg(test)]
@@ -163,6 +166,7 @@ mod test {
     #[derive(Debug, Clone)]
     struct TestRegexSha2Config<F: Field> {
         inner: RegexSha2Config<F>,
+        sha256_config: Sha256DynamicConfig<F>,
         hash_instance: Column<Instance>,
         masked_str_instance: Column<Instance>,
         substr_ids_instance: Column<Instance>,
@@ -196,6 +200,14 @@ mod test {
                 0,
                 Self::K as usize,
             );
+            let sha256_comp_configs = (0..Self::NUM_SHA2_COMP)
+                .map(|_| Sha256CompressionConfig::configure(meta))
+                .collect();
+            let sha256_config = Sha256DynamicConfig::construct(
+                sha256_comp_configs,
+                vec![Self::MAX_BYTE_SIZE],
+                range_config.clone(),
+            );
             // let lookup_filepath = "./test_data/regex_test_lookup.txt";
             // let regex_def = AllstrRegexDef::read_from_text("");
             // let substr_def1 = SubstrRegexDef::new(
@@ -228,13 +240,8 @@ mod test {
                     SubstrRegexDef::read_from_text("./test_data/substr_subject.txt"),
                 ),
             ];
-            let inner = RegexSha2Config::configure(
-                meta,
-                Self::MAX_BYTE_SIZE,
-                Self::NUM_SHA2_COMP,
-                range_config,
-                regex_defs,
-            );
+            let inner =
+                RegexSha2Config::configure(meta, Self::MAX_BYTE_SIZE, range_config, regex_defs);
             let hash_instance = meta.instance_column();
             meta.enable_equality(hash_instance);
             let masked_str_instance = meta.instance_column();
@@ -243,6 +250,7 @@ mod test {
             meta.enable_equality(substr_ids_instance);
             Self::Config {
                 inner,
+                sha256_config,
                 hash_instance,
                 masked_str_instance,
                 substr_ids_instance,
@@ -251,11 +259,14 @@ mod test {
 
         fn synthesize(
             &self,
-            config: Self::Config,
+            mut config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
             config.inner.load(&mut layouter)?;
-            config.inner.range().load_lookup_table(&mut layouter)?;
+            config
+                .sha256_config
+                .range()
+                .load_lookup_table(&mut layouter)?;
             let mut first_pass = SKIP_FIRST_PASS;
             let mut hash_bytes_cell = vec![];
             let mut masked_str_cell = vec![];
@@ -268,9 +279,12 @@ mod test {
                         first_pass = false;
                         return Ok(());
                     }
-                    let ctx = &mut config.inner.new_context(region);
-                    let result = config.inner.match_and_hash(ctx, &self.input)?;
-                    config.inner.finalize(ctx);
+                    let ctx = &mut config.sha256_config.new_context(region);
+                    let result =
+                        config
+                            .inner
+                            .match_and_hash(ctx, &mut config.sha256_config, &self.input)?;
+                    config.sha256_config.range().finalize(ctx);
                     hash_bytes_cell.append(
                         &mut result
                             .hash_bytes

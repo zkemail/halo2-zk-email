@@ -20,7 +20,7 @@ use halo2_base::{
     Context,
 };
 use halo2_base::{AssignedValue, QuantumCell};
-use halo2_dynamic_sha256::Field;
+use halo2_dynamic_sha256::{Field, Sha256CompressionConfig, Sha256DynamicConfig};
 use halo2_regex::{
     defs::{AllstrRegexDef, SubstrRegexDef},
     AssignedRegexResult,
@@ -35,10 +35,19 @@ use num_traits::FromPrimitive;
 use rand::thread_rng;
 use regex_sha2_base64::RegexSha2Base64Config;
 use serde_json;
+use sha2::{Digest, Sha256};
 use snark_verifier_sdk::CircuitExt;
 use std::env::set_var;
 use std::fmt::format;
 use std::fs::File;
+
+#[derive(Debug, Clone)]
+pub struct EmailVerifyResult<'a, F: Field> {
+    pub assigned_bodyhash: Vec<AssignedCell<F, F>>,
+    pub header_result: AssignedRegexResult<'a, F>,
+    pub body_result: AssignedRegexResult<'a, F>,
+    pub bodyhash_value: Vec<u8>,
+}
 
 #[derive(Debug, Clone)]
 pub struct EmailVerifyConfig<F: Field> {
@@ -50,7 +59,7 @@ pub struct EmailVerifyConfig<F: Field> {
 impl<F: Field> EmailVerifyConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
-        num_sha2_compression_per_column: usize,
+        // num_sha2_compression_per_column: usize,
         range_config: RangeConfig<F>,
         header_max_byte_size: usize,
         bodyhash_def: (AllstrRegexDef, SubstrRegexDef),
@@ -63,14 +72,14 @@ impl<F: Field> EmailVerifyConfig<F> {
         let header_processer = RegexSha2Config::configure(
             meta,
             header_max_byte_size,
-            num_sha2_compression_per_column,
+            // num_sha2_compression_per_column,
             range_config.clone(),
             header_defs,
         );
         let body_processer = RegexSha2Base64Config::configure(
             meta,
             body_max_byte_size,
-            num_sha2_compression_per_column,
+            // num_sha2_compression_per_column,
             range_config.clone(),
             body_regex_defs,
         );
@@ -102,25 +111,23 @@ impl<F: Field> EmailVerifyConfig<F> {
     pub fn verify_email<'v: 'a, 'a>(
         &self,
         ctx: &mut Context<'v, F>,
+        sha256_config: &mut Sha256DynamicConfig<F>,
         header_bytes: &[u8],
         body_bytes: &[u8],
         public_key: &AssignedRSAPublicKey<'v, F>,
         signature: &AssignedRSASignature<'v, F>,
-    ) -> Result<
-        (
-            Vec<AssignedCell<F, F>>,
-            AssignedRegexResult<'a, F>,
-            AssignedRegexResult<'a, F>,
-        ),
-        Error,
-    > {
-        let gate = self.gate();
+    ) -> Result<EmailVerifyResult<'a, F>, Error> {
+        let gate = sha256_config.range().gate.clone();
 
         // 1. Extract sub strings in the body and compute the base64 encoded hash of the body.
-        let body_result = self.body_processer.match_hash_and_base64(ctx, body_bytes)?;
+        let body_result =
+            self.body_processer
+                .match_hash_and_base64(ctx, sha256_config, body_bytes)?;
 
         // 2. Extract sub strings in the header, which includes the body hash, and compute the raw hash of the header.
-        let header_result = self.header_processer.match_and_hash(ctx, header_bytes)?;
+        let header_result =
+            self.header_processer
+                .match_and_hash(ctx, sha256_config, header_bytes)?;
 
         // 3. Verify the rsa signature.
         let mut hashed_bytes = header_result.hash_bytes;
@@ -160,11 +167,12 @@ impl<F: Field> EmailVerifyConfig<F> {
         //         .constrain_equal(substr_byte.cell(), encoded_byte.cell())?;
         // }
         // gate.assert_is_const(ctx, &header_result.substrs.substrs_length[0], F::from(44));
-        Ok((
-            body_result.encoded_hash,
-            header_result.regex,
-            body_result.regex,
-        ))
+        Ok(EmailVerifyResult {
+            assigned_bodyhash: body_result.encoded_hash,
+            header_result: header_result.regex,
+            body_result: body_result.regex,
+            bodyhash_value: body_result.encoded_hash_value,
+        })
     }
 
     pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
@@ -173,21 +181,21 @@ impl<F: Field> EmailVerifyConfig<F> {
         Ok(())
     }
 
-    pub fn finalize(&self, ctx: &mut Context<F>) {
-        self.header_processer.finalize(ctx);
-    }
+    // pub fn finalize(&self, ctx: &mut Context<F>) {
+    //     self.header_processer.finalize(ctx);
+    // }
 
-    pub fn new_context<'a, 'b>(&'b self, region: Region<'a, F>) -> Context<'a, F> {
-        self.header_processer.new_context(region)
-    }
+    // pub fn new_context<'a, 'b>(&'b self, region: Region<'a, F>) -> Context<'a, F> {
+    //     self.header_processer.new_context(region)
+    // }
 
-    pub fn range(&self) -> &RangeConfig<F> {
-        self.header_processer.range()
-    }
+    // pub fn range(&self) -> &RangeConfig<F> {
+    //     self.header_processer.range()
+    // }
 
-    pub fn gate(&self) -> &FlexGateConfig<F> {
-        self.header_processer.gate()
-    }
+    // pub fn gate(&self) -> &FlexGateConfig<F> {
+    //     self.header_processer.gate()
+    // }
 }
 
 pub const EMAIL_VERIFY_CONFIG_ENV: &'static str = "EMAIL_VERIFY_CONFIG";
@@ -215,9 +223,11 @@ pub struct DefaultEmailVerifyConfigParams {
 #[derive(Debug, Clone)]
 pub struct DefaultEmailVerifyConfig<F: Field> {
     inner: EmailVerifyConfig<F>,
-    encoded_bodyhash_instance: Column<Instance>,
-    masked_str_instance: Column<Instance>,
-    substr_ids_instance: Column<Instance>,
+    sha256_config: Sha256DynamicConfig<F>,
+    public_hash: Column<Instance>,
+    // encoded_bodyhash_instance: Column<Instance>,
+    // masked_str_instance: Column<Instance>,
+    // substr_ids_instance: Column<Instance>,
 }
 
 #[derive(Debug, Clone)]
@@ -293,8 +303,8 @@ impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
             .collect::<Vec<(AllstrRegexDef, SubstrRegexDef)>>();
         let inner = EmailVerifyConfig::configure(
             meta,
-            params.num_sha2_compression_per_column,
-            range_config,
+            // params.num_sha2_compression_per_column,
+            range_config.clone(),
             params.header_max_byte_size,
             (bodyhash_allstr_def, bodyhash_substr_def),
             header_regex_defs,
@@ -302,31 +312,46 @@ impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
             body_regex_defs,
             params.public_key_bits,
         );
-        let encoded_bodyhash_instance = meta.instance_column();
-        meta.enable_equality(encoded_bodyhash_instance);
-        let masked_str_instance = meta.instance_column();
-        meta.enable_equality(masked_str_instance);
-        let substr_ids_instance = meta.instance_column();
-        meta.enable_equality(substr_ids_instance);
+        let sha256_comp_configs = (0..params.num_sha2_compression_per_column)
+            .map(|_| Sha256CompressionConfig::configure(meta))
+            .collect();
+        let sha256_config = Sha256DynamicConfig::construct(
+            sha256_comp_configs,
+            vec![
+                params.body_max_byte_size,
+                params.header_max_byte_size,
+                64 + 2 * (params.header_max_byte_size + params.body_max_byte_size) + 64,
+            ],
+            range_config.clone(),
+        );
+        let public_hash = meta.instance_column();
+        meta.enable_equality(public_hash);
+        // let encoded_bodyhash_instance = meta.instance_column();
+        // meta.enable_equality(encoded_bodyhash_instance);
+        // let masked_str_instance = meta.instance_column();
+        // meta.enable_equality(masked_str_instance);
+        // let substr_ids_instance = meta.instance_column();
+        // meta.enable_equality(substr_ids_instance);
         DefaultEmailVerifyConfig {
             inner,
-            encoded_bodyhash_instance,
-            masked_str_instance,
-            substr_ids_instance,
+            sha256_config,
+            public_hash,
         }
     }
 
     fn synthesize(
         &self,
-        config: Self::Config,
+        mut config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
         config.inner.load(&mut layouter)?;
-        config.inner.range().load_lookup_table(&mut layouter)?;
+        config
+            .sha256_config
+            .range()
+            .load_lookup_table(&mut layouter)?;
         let mut first_pass = SKIP_FIRST_PASS;
-        let mut encoded_bodyhash_cell = vec![];
-        let mut masked_str_cell = vec![];
-        let mut substr_id_cell = vec![];
+        let mut public_hash_cell = vec![];
+        let params = Self::read_config_params();
         layouter.assign_region(
             || "zkemail",
             |region| {
@@ -334,98 +359,153 @@ impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                     first_pass = false;
                     return Ok(());
                 }
-                let ctx = &mut config.inner.new_context(region);
+                let ctx = &mut config.sha256_config.new_context(region);
                 let assigned_public_key = config
                     .inner
                     .assign_public_key(ctx, self.public_key.clone())?;
                 let assigned_signature =
                     config.inner.assign_signature(ctx, self.signature.clone())?;
-                let (encoded_bodyhash, header_regex, body_regex) = config.inner.verify_email(
+                let result = config.inner.verify_email(
                     ctx,
+                    &mut config.sha256_config,
                     &self.header_bytes,
                     &self.body_bytes,
                     &assigned_public_key,
                     &assigned_signature,
                 )?;
-                config.inner.finalize(ctx);
-                encoded_bodyhash_cell.append(
-                    &mut encoded_bodyhash
-                        .into_iter()
-                        .enumerate()
-                        .map(|(idx, v)| {
-                            v.value().map(|v| {
-                                // println!(
-                                //     "idx {} code {} char {}",
-                                //     idx,
-                                //     v.get_lower_32(),
-                                //     (v.get_lower_32() as u8) as char
-                                // )
-                            });
-                            v.cell()
-                        })
-                        .collect::<Vec<Cell>>(),
-                );
-                masked_str_cell.append(
-                    &mut header_regex
-                        .masked_characters
-                        .into_iter()
-                        .enumerate()
-                        .map(|(idx, v)| {
-                            v.value().map(|v| {
-                                // println!(
-                                //     "idx {} code {} char {}",
-                                //     idx,
-                                //     v.get_lower_32(),
-                                //     (v.get_lower_32() as u8) as char
-                                // )
-                            });
-                            v.cell()
-                        })
-                        .collect::<Vec<Cell>>(),
-                );
-                masked_str_cell.append(
-                    &mut body_regex
-                        .masked_characters
-                        .into_iter()
-                        .enumerate()
-                        .map(|(idx, v)| {
-                            v.value().map(|v| {
-                                // println!(
-                                //     "idx {} code {} char {}",
-                                //     idx,
-                                //     v.get_lower_32(),
-                                //     (v.get_lower_32() as u8) as char
-                                // )
-                            });
-                            v.cell()
-                        })
-                        .collect::<Vec<Cell>>(),
-                );
-                substr_id_cell.append(
-                    &mut header_regex
-                        .all_substr_ids
+                let public_hash_input = self.get_public_hash_input();
+                let public_hash_result = config.sha256_config.digest(ctx, &public_hash_input)?;
+                let gate = config.sha256_config.range().gate.clone();
+                let assigned_public_hash_input = vec![
+                    result
+                        .assigned_bodyhash
                         .into_iter()
                         .map(|v| v.cell())
-                        .collect::<Vec<Cell>>(),
-                );
-                substr_id_cell.append(
-                    &mut body_regex
-                        .all_substr_ids
-                        .into_iter()
-                        .map(|v| v.cell())
-                        .collect::<Vec<Cell>>(),
-                );
+                        .collect_vec(),
+                    vec![gate.load_zero(ctx).cell(); 64 - 44],
+                    vec![
+                        result.header_result.masked_characters,
+                        result.body_result.masked_characters,
+                    ]
+                    .concat()
+                    .into_iter()
+                    .map(|v| v.cell())
+                    .collect_vec(),
+                    vec![
+                        result.header_result.all_substr_ids,
+                        result.body_result.all_substr_ids,
+                    ]
+                    .concat()
+                    .into_iter()
+                    .map(|v| v.cell())
+                    .collect_vec(),
+                ]
+                .concat();
+                for (a, b) in public_hash_result
+                    .input_bytes
+                    .into_iter()
+                    .map(|v| v.cell())
+                    .collect_vec()
+                    .into_iter()
+                    .zip(assigned_public_hash_input.into_iter())
+                {
+                    ctx.region.constrain_equal(a, b)?;
+                }
+                debug_assert_eq!(public_hash_result.output_bytes.len(), 32);
+                let packed_public_hash = public_hash_result
+                    .output_bytes
+                    .chunks(16)
+                    .map(|bytes| {
+                        let mut sum = gate.load_zero(ctx);
+                        for (idx, byte) in bytes.into_iter().enumerate() {
+                            sum = gate.mul_add(
+                                ctx,
+                                QuantumCell::Existing(byte),
+                                QuantumCell::Constant(F::from_u128(1u128 << (8 * idx))),
+                                QuantumCell::Existing(&sum),
+                            )
+                        }
+                        sum
+                    })
+                    .collect_vec();
+                config.sha256_config.range().finalize(ctx);
+                public_hash_cell = packed_public_hash
+                    .into_iter()
+                    .map(|v| v.cell())
+                    .collect_vec();
+
+                // encoded_bodyhash_cell.append(
+                //     &mut encoded_bodyhash
+                //         .into_iter()
+                //         .enumerate()
+                //         .map(|(idx, v)| {
+                //             v.value().map(|v| {
+                //                 // println!(
+                //                 //     "idx {} code {} char {}",
+                //                 //     idx,
+                //                 //     v.get_lower_32(),
+                //                 //     (v.get_lower_32() as u8) as char
+                //                 // )
+                //             });
+                //             v.cell()
+                //         })
+                //         .collect::<Vec<Cell>>(),
+                // );
+                // masked_str_cell.append(
+                //     &mut header_regex
+                //         .masked_characters
+                //         .into_iter()
+                //         .enumerate()
+                //         .map(|(idx, v)| {
+                //             v.value().map(|v| {
+                //                 // println!(
+                //                 //     "idx {} code {} char {}",
+                //                 //     idx,
+                //                 //     v.get_lower_32(),
+                //                 //     (v.get_lower_32() as u8) as char
+                //                 // )
+                //             });
+                //             v.cell()
+                //         })
+                //         .collect::<Vec<Cell>>(),
+                // );
+                // masked_str_cell.append(
+                //     &mut body_regex
+                //         .masked_characters
+                //         .into_iter()
+                //         .enumerate()
+                //         .map(|(idx, v)| {
+                //             v.value().map(|v| {
+                //                 // println!(
+                //                 //     "idx {} code {} char {}",
+                //                 //     idx,
+                //                 //     v.get_lower_32(),
+                //                 //     (v.get_lower_32() as u8) as char
+                //                 // )
+                //             });
+                //             v.cell()
+                //         })
+                //         .collect::<Vec<Cell>>(),
+                // );
+                // substr_id_cell.append(
+                //     &mut header_regex
+                //         .all_substr_ids
+                //         .into_iter()
+                //         .map(|v| v.cell())
+                //         .collect::<Vec<Cell>>(),
+                // );
+                // substr_id_cell.append(
+                //     &mut body_regex
+                //         .all_substr_ids
+                //         .into_iter()
+                //         .map(|v| v.cell())
+                //         .collect::<Vec<Cell>>(),
+                // );
                 Ok(())
             },
         )?;
-        for (idx, cell) in encoded_bodyhash_cell.into_iter().enumerate() {
-            layouter.constrain_instance(cell, config.encoded_bodyhash_instance, idx)?;
-        }
-        for (idx, cell) in masked_str_cell.into_iter().enumerate() {
-            layouter.constrain_instance(cell, config.masked_str_instance, idx)?;
-        }
-        for (idx, cell) in substr_id_cell.into_iter().enumerate() {
-            layouter.constrain_instance(cell, config.substr_ids_instance, idx)?;
+        for (idx, cell) in public_hash_cell.into_iter().enumerate() {
+            layouter.constrain_instance(cell, config.public_hash, idx)?;
         }
         Ok(())
     }
@@ -433,38 +513,20 @@ impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
 
 impl<F: Field> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
     fn num_instance(&self) -> Vec<usize> {
-        let params = Self::read_config_params();
-        let max_len = params.header_max_byte_size + params.body_max_byte_size;
-        vec![44, max_len, max_len]
+        // let params = Self::read_config_params();
+        // let max_len = params.header_max_byte_size + params.body_max_byte_size;
+        // vec![44, max_len, max_len]
+        vec![2]
     }
 
     fn instances(&self) -> Vec<Vec<F>> {
-        let params = Self::read_config_params();
-        let max_len = params.header_max_byte_size + params.body_max_byte_size;
-        let (header_substrings, body_substrings) = self.get_substrs();
-        let hash_fs = header_substrings[0]
-            .1
-            .as_bytes()
-            .into_iter()
-            .map(|byte| F::from(*byte as u64))
-            .collect::<Vec<F>>();
-        let mut expected_masked_chars = vec![F::from(0); max_len];
-        let mut expected_substr_ids = vec![F::from(0); max_len];
-        for (substr_idx, (start, chars)) in header_substrings.iter().enumerate() {
-            for (idx, char) in chars.as_bytes().iter().enumerate() {
-                expected_masked_chars[start + idx] = F::from(*char as u64);
-                expected_substr_ids[start + idx] = F::from(substr_idx as u64 + 1);
-            }
-        }
-        for (substr_idx, (start, chars)) in body_substrings.iter().enumerate() {
-            for (idx, char) in chars.as_bytes().iter().enumerate() {
-                expected_masked_chars[params.header_max_byte_size + start + idx] =
-                    F::from(*char as u64);
-                expected_substr_ids[params.header_max_byte_size + start + idx] =
-                    F::from(substr_idx as u64 + 1);
-            }
-        }
-        vec![hash_fs, expected_masked_chars, expected_substr_ids]
+        let public_hash_input = self.get_public_hash_input();
+        let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
+        let public_frs = public_hash
+            .chunks(16)
+            .map(|bytes| F::from_u128(u128::from_le_bytes(bytes.try_into().unwrap())))
+            .collect_vec();
+        vec![public_frs]
     }
 }
 
@@ -505,6 +567,35 @@ impl<F: Field> DefaultEmailVerifyCircuit<F> {
             public_key,
             signature,
         }
+    }
+
+    pub fn get_public_hash_input(&self) -> Vec<u8> {
+        let (header_substrs, body_substrs) = self.get_substrs();
+        let bodyhash = header_substrs[0].1.as_bytes();
+        let params = Self::read_config_params();
+        let max_len = params.header_max_byte_size + params.body_max_byte_size;
+        let mut expected_masked_chars = vec![0u8; max_len];
+        let mut expected_substr_ids = vec![0u8; max_len]; // We only support up to 256 substring patterns.
+        for (substr_idx, (start, chars)) in header_substrs.iter().enumerate() {
+            for (idx, char) in chars.as_bytes().iter().enumerate() {
+                expected_masked_chars[start + idx] = *char;
+                expected_substr_ids[start + idx] = substr_idx as u8 + 1;
+            }
+        }
+        for (substr_idx, (start, chars)) in body_substrs.iter().enumerate() {
+            for (idx, char) in chars.as_bytes().iter().enumerate() {
+                expected_masked_chars[params.header_max_byte_size + start + idx] = *char;
+                expected_substr_ids[params.header_max_byte_size + start + idx] =
+                    substr_idx as u8 + 1;
+            }
+        }
+        vec![
+            bodyhash,
+            &[0u8; (64 - 44)],
+            &expected_masked_chars,
+            &expected_substr_ids,
+        ]
+        .concat()
     }
 
     pub fn get_substrs(&self) -> (Vec<(usize, String)>, Vec<(usize, String)>) {

@@ -11,7 +11,7 @@ use halo2_base::{
     Context,
 };
 use halo2_base64::Base64Config;
-use halo2_dynamic_sha256::Field;
+use halo2_dynamic_sha256::{Field, Sha256DynamicConfig};
 use halo2_regex::{
     defs::{AllstrRegexDef, SubstrRegexDef},
     AssignedRegexResult,
@@ -22,6 +22,7 @@ use sha2::{Digest, Sha256};
 pub struct RegexSha2Base64Result<'a, F: Field> {
     pub regex: AssignedRegexResult<'a, F>,
     pub encoded_hash: Vec<AssignedCell<F, F>>,
+    pub encoded_hash_value: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -34,14 +35,14 @@ impl<F: Field> RegexSha2Base64Config<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         max_byte_size: usize,
-        num_sha2_compression_per_column: usize,
+        // num_sha2_compression_per_column: usize,
         range_config: RangeConfig<F>,
         regex_defs: Vec<(AllstrRegexDef, SubstrRegexDef)>,
     ) -> Self {
         let regex_sha2 = RegexSha2Config::configure(
             meta,
             max_byte_size,
-            num_sha2_compression_per_column,
+            // num_sha2_compression_per_column,
             range_config,
             regex_defs,
         );
@@ -55,9 +56,10 @@ impl<F: Field> RegexSha2Base64Config<F> {
     pub fn match_hash_and_base64<'v: 'a, 'a>(
         &self,
         ctx: &mut Context<'v, F>,
+        sha256_config: &mut Sha256DynamicConfig<F>,
         input: &[u8],
     ) -> Result<RegexSha2Base64Result<'a, F>, Error> {
-        let regex_sha2_result = self.regex_sha2.match_and_hash(ctx, input)?;
+        let regex_sha2_result = self.regex_sha2.match_and_hash(ctx, sha256_config, input)?;
 
         let actual_hash = Sha256::digest(input).to_vec();
         debug_assert_eq!(actual_hash.len(), 32);
@@ -82,17 +84,18 @@ impl<F: Field> RegexSha2Base64Config<F> {
         let result = RegexSha2Base64Result {
             regex: regex_sha2_result.regex,
             encoded_hash: base64_result.encoded,
+            encoded_hash_value: hash_base64,
         };
         Ok(result)
     }
 
-    pub fn range(&self) -> &RangeConfig<F> {
-        self.regex_sha2.range()
-    }
+    // pub fn range(&self) -> &RangeConfig<F> {
+    //     self.regex_sha2.range()
+    // }
 
-    pub fn gate(&self) -> &FlexGateConfig<F> {
-        self.range().gate()
-    }
+    // pub fn gate(&self) -> &FlexGateConfig<F> {
+    //     self.range().gate()
+    // }
 
     pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.regex_sha2.load(layouter)?;
@@ -100,13 +103,13 @@ impl<F: Field> RegexSha2Base64Config<F> {
         Ok(())
     }
 
-    pub fn new_context<'a, 'b>(&'b self, region: Region<'a, F>) -> Context<'a, F> {
-        self.regex_sha2.new_context(region)
-    }
+    // pub fn new_context<'a, 'b>(&'b self, region: Region<'a, F>) -> Context<'a, F> {
+    //     self.regex_sha2.new_context(region)
+    // }
 
-    pub fn finalize(&self, ctx: &mut Context<F>) {
-        self.regex_sha2.finalize(ctx);
-    }
+    // pub fn finalize(&self, ctx: &mut Context<F>) {
+    //     self.regex_sha2.finalize(ctx);
+    // }
 }
 
 // #[cfg(test)]
