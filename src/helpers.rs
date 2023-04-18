@@ -73,29 +73,9 @@ pub async fn gen_app_key(
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    // let agg_params = {
-    //     let f = File::open(Path::new(params_dir).join("agg.bin")).unwrap();
-    //     let mut reader = BufReader::new(f);
-    //     ParamsKZG::<Bn256>::read(&mut reader).unwrap()
-    // };
     let circuit = gen_circuit_from_email_path(email_path).await;
     let pk = gen_pk::<DefaultEmailVerifyCircuit<Fr>>(&params, &circuit, Some(&Path::new(pk_path)));
     println!("app pk generated");
-    // let snark = gen_snark_gwc(
-    //     &app_params,
-    //     &app_pk,
-    //     circuit.clone(),
-    //     &mut OsRng,
-    //     None::<&str>,
-    // );
-    // println!("snark generated");
-    // let agg_circuit = PublicAggregationCircuit::new(&agg_params, vec![snark], false, &mut OsRng);
-    // let agg_pk = gen_pk::<PublicAggregationCircuit>(
-    //     &agg_params,
-    //     &agg_circuit,
-    //     Some(&Path::new(pk_dir).join("agg.pk")),
-    // );
-    // println!("agg pk generated");
 
     let vk = pk.get_vk();
     {
@@ -177,11 +157,6 @@ pub async fn prove_app(
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    // let agg_params = {
-    //     let f = File::open(Path::new(params_dir).join("agg.bin")).unwrap();
-    //     let mut reader = BufReader::new(f);
-    //     ParamsKZG::<Bn256>::read(&mut reader).unwrap()
-    // };
     let pk = {
         let f = File::open(Path::new(pk_path)).unwrap();
         let mut reader = BufReader::new(f);
@@ -193,25 +168,6 @@ pub async fn prove_app(
     };
     let circuit = gen_circuit_from_email_path(email_path).await;
     let instances = circuit.instances();
-    // let snark = gen_snark_gwc(&app_params, &app_pk, circuit, &mut OsRng, None::<&str>);
-    // println!("app snark generated");
-    // let agg_circuit = PublicAggregationCircuit::new(&agg_params, vec![snark], false, &mut OsRng);
-    // println!("agg_circuit created");
-    // let prover = MockProver::run(agg_params.k(), &agg_circuit, agg_circuit.instances()).unwrap();
-    // prover.assert_satisfied();
-    // let agg_pk = {
-    //     let f = File::open(Path::new(pk_dir).join("agg.pk")).unwrap();
-    //     let mut reader = BufReader::new(f);
-    //     ProvingKey::<G1Affine>::read::<_, PublicAggregationCircuit>(
-    //         &mut reader,
-    //         SerdeFormat::RawBytesUnchecked,
-    //     )
-    //     .unwrap()
-    // };
-    // println!("agg_pk extracted");
-    // let acc = agg_circuit.instances()[0][0..4 * LIMBS].to_vec();
-    // let snark = gen_snark_gwc(&agg_params, &agg_pk, agg_circuit, &mut OsRng, None::<&str>);
-    // println!("agg snark generated");
 
     let proof = {
         let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
@@ -231,7 +187,6 @@ pub async fn prove_app(
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
         let verifier_params = params.verifier_params();
         let strategy = SingleStrategy::new(&verifier_params);
-        // let strategy = AccumulatorStrategy::new(verifier_params);
         verify_proof::<_, VerifierGWC<_>, _, _, _>(
             &params,
             &pk.get_vk(),
@@ -258,21 +213,11 @@ pub async fn evm_prove_app(
     proof_path: &str,
 ) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
-    // let params = {
-    //     let f = File::open(params_path).unwrap();
-    //     let mut reader = BufReader::new(f);
-    //     ParamsKZG::<Bn256>::read(&mut reader).unwrap()
-    // };
     let params = {
         let f = File::open(Path::new(param_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    // let agg_params = {
-    //     let f = File::open(Path::new(params_dir).join("agg.bin")).unwrap();
-    //     let mut reader = BufReader::new(f);
-    //     ParamsKZG::<Bn256>::read(&mut reader).unwrap()
-    // };
     let pk = {
         let f = File::open(Path::new(pk_path)).unwrap();
         let mut reader = BufReader::new(f);
@@ -284,37 +229,75 @@ pub async fn evm_prove_app(
     };
     let circuit = gen_circuit_from_email_path(email_path).await;
     let instances = circuit.instances();
-    // let snark = gen_snark_gwc(&app_params, &app_pk, circuit, &mut OsRng, None::<&str>);
-    // let agg_circuit = PublicAggregationCircuit::new(&agg_params, vec![snark], false, &mut OsRng);
-    // let agg_instances = agg_circuit.instances();
-    // let acc = agg_instances[0][0..4 * LIMBS].to_vec();
-    // let agg_pk = {
-    //     let f = File::open(Path::new(pk_dir).join("agg.pk")).unwrap();
-    //     let mut reader = BufReader::new(f);
-    //     ProvingKey::<G1Affine>::read::<_, PublicAggregationCircuit>(
-    //         &mut reader,
-    //         SerdeFormat::RawBytesUnchecked,
-    //     )
-    //     .unwrap()
-    // };
     let proof = gen_evm_proof_gwc(&params, &pk, circuit, instances.clone(), &mut OsRng);
 
-    // let proof = {
-    //     let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
-    //     create_proof::<KZGCommitmentScheme<_>, ProverGWC<_>, _, _, _, _>(
-    //         &params,
-    //         &pk,
-    //         &vec![circuit.clone()],
-    //         &[&instances
-    //             .iter()
-    //             .map(|instances| instances.as_slice())
-    //             .collect_vec()],
-    //         OsRng,
-    //         &mut transcript,
-    //     )
-    //     .unwrap();
-    //     transcript.finalize()
-    // };
+    {
+        let proof_hex = hex::encode(&proof);
+        let mut file = File::create(proof_path)?;
+        write!(file, "0x{}", proof_hex).unwrap();
+        file.flush().unwrap();
+    };
+    Ok(())
+}
+
+pub async fn evm_prove_agg(
+    app_param_path: &str,
+    agg_param_path: &str,
+    app_circuit_config_path: &str,
+    agg_circuit_config_path: &str,
+    email_path: &str,
+    app_pk_path: &str,
+    agg_pk_path: &str,
+    proof_path: &str,
+) -> Result<(), Error> {
+    set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config_path);
+    set_var("VERIFY_CONFIG", agg_circuit_config_path);
+    let app_params = {
+        let f = File::open(Path::new(app_param_path)).unwrap();
+        let mut reader = BufReader::new(f);
+        ParamsKZG::<Bn256>::read(&mut reader).unwrap()
+    };
+    let agg_params = {
+        let f = File::open(Path::new(agg_param_path)).unwrap();
+        let mut reader = BufReader::new(f);
+        ParamsKZG::<Bn256>::read(&mut reader).unwrap()
+    };
+    let app_circuit = gen_circuit_from_email_path(email_path).await;
+    let app_pk = {
+        let f = File::open(Path::new(app_pk_path)).unwrap();
+        let mut reader = BufReader::new(f);
+        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(
+            &mut reader,
+            SerdeFormat::RawBytesUnchecked,
+        )
+        .unwrap()
+    };
+    let snark = gen_snark_gwc(
+        &app_params,
+        &app_pk,
+        app_circuit.clone(),
+        &mut OsRng,
+        None::<&str>,
+    );
+    let agg_circuit = PublicAggregationCircuit::new(&agg_params, vec![snark], false, &mut OsRng);
+    let agg_pk = {
+        let f = File::open(Path::new(agg_pk_path)).unwrap();
+        let mut reader = BufReader::new(f);
+        ProvingKey::<G1Affine>::read::<_, PublicAggregationCircuit>(
+            &mut reader,
+            SerdeFormat::RawBytesUnchecked,
+        )
+        .unwrap()
+    };
+    let instances = agg_circuit.instances();
+    let proof = gen_evm_proof_gwc(
+        &agg_params,
+        &agg_pk,
+        agg_circuit,
+        instances.clone(),
+        &mut OsRng,
+    );
+
     {
         let proof_hex = hex::encode(&proof);
         let mut file = File::create(proof_path)?;
@@ -408,34 +391,12 @@ pub async fn gen_evm_verifier(
     vk_path: &str,
     code_path: &str,
 ) -> Result<(), Error> {
-    // if is_agg {
-    //     set_var("VERIFY_CONFIG", circuit_config);
-    // } else {
-    //     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
-    // }
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
     let params = {
         let f = File::open(Path::new(param_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    // let vk = if is_agg {
-    //     let f = File::open(vk_path).unwrap();
-    //     let mut reader = BufReader::new(f);
-    //     VerifyingKey::<G1Affine>::read::<_, PublicAggregationCircuit>(
-    //         &mut reader,
-    //         SerdeFormat::RawBytesUnchecked,
-    //     )
-    //     .unwrap()
-    // } else {
-    //     let f = File::open(vk_path).unwrap();
-    //     let mut reader = BufReader::new(f);
-    //     VerifyingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(
-    //         &mut reader,
-    //         SerdeFormat::RawBytesUnchecked,
-    //     )
-    //     .unwrap()
-    // };
     let vk = {
         let f = File::open(vk_path).unwrap();
         let mut reader = BufReader::new(f);
@@ -446,62 +407,9 @@ pub async fn gen_evm_verifier(
         .unwrap()
     };
     let circuit = gen_circuit_from_email_path(email_path).await;
-    // let num_instances = if is_agg {
-    //     vec![4 * LIMBS + circuit.num_instance().iter().sum::<usize>()]
-    // } else {
-    //     circuit.num_instance()
-    // };
     let num_instance = circuit.num_instance();
-    // let verifier_yul = if is_agg {
-    //     let svk = params.get_g()[0].into();
-    //     let dk = (params.g2(), params.s_g2()).into();
-    //     let protocol = compile(
-    //         &params,
-    //         &vk,
-    //         Config::kzg()
-    //             .with_num_instance(num_instances.clone())
-    //             .with_accumulator_indices(PublicAggregationCircuit::accumulator_indices()),
-    //     );
-
-    //     let loader = EvmLoader::new::<Fq, Fr>();
-    //     let protocol = protocol.loaded(&loader);
-    //     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
-
-    //     let instances = transcript.load_instances(num_instances);
-    //     let proof =
-    //         Plonk::<Kzg<Bn256, Gwc19>>::read_proof(&svk, &protocol, &instances, &mut transcript);
-    //     Plonk::<Kzg<Bn256, Gwc19>>::verify(&svk, &dk, &protocol, &instances, &proof);
-    //     loader.yul_code()
-    // } else {
-    //     let svk = params.get_g()[0].into();
-    //     let dk = (params.g2(), params.s_g2()).into();
-    //     let protocol = compile(
-    //         &params,
-    //         &vk,
-    //         Config::kzg()
-    //             .with_num_instance(num_instances.clone())
-    //             .with_accumulator_indices(DefaultEmailVerifyCircuit::<Fr>::accumulator_indices()),
-    //     );
-
-    //     let loader = EvmLoader::new::<Fq, Fr>();
-    //     let protocol = protocol.loaded(&loader);
-    //     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
-
-    //     let instances = transcript.load_instances(num_instances);
-    //     let proof =
-    //         Plonk::<Kzg<Bn256, Gwc19>>::read_proof(&svk, &protocol, &instances, &mut transcript);
-    //     Plonk::<Kzg<Bn256, Gwc19>>::verify(&svk, &dk, &protocol, &instances, &proof);
-    //     loader.yul_code()
-    // };
     let verifier_yul =
         gen_evm_verifier_yul::<DefaultEmailVerifyCircuit<Fr>>(&params, &vk, num_instance);
-    // let verifier = gen_evm_verifier_gwc::<DefaultVoiceRecoverCircuit>(
-    //     &app_params,
-    //     &vk,
-    //     vec![num_instance],
-    //     None,
-    // );
-    // let verifier_str = "0x".to_string() + &hex::encode(verifier);
     {
         let mut f = File::create(code_path).unwrap();
         let _ = f.write(verifier_yul.as_bytes());
@@ -509,8 +417,6 @@ pub async fn gen_evm_verifier(
 
         let mut f = File::create(code_path)?;
         let _ = f.write(output.as_bytes());
-        // write!(f, "{}", verifier_yul).unwrap();
-        // let output = f.flush().unwrap();
     };
     Ok(())
 }
@@ -540,53 +446,7 @@ pub async fn gen_agg_evm_verifier(
         .unwrap()
     };
     let circuit = gen_circuit_from_email_path(email_path).await;
-    // let num_instances = if is_agg {
-    //     vec![4 * LIMBS + circuit.num_instance().iter().sum::<usize>()]
-    // } else {
-    //     circuit.num_instance()
-    // };
     let num_instance = vec![4 * LIMBS + circuit.num_instance().iter().sum::<usize>()];
-    // let verifier_yul = if is_agg {
-    //     let svk = params.get_g()[0].into();
-    //     let dk = (params.g2(), params.s_g2()).into();
-    //     let protocol = compile(
-    //         &params,
-    //         &vk,
-    //         Config::kzg()
-    //             .with_num_instance(num_instances.clone())
-    //             .with_accumulator_indices(PublicAggregationCircuit::accumulator_indices()),
-    //     );
-
-    //     let loader = EvmLoader::new::<Fq, Fr>();
-    //     let protocol = protocol.loaded(&loader);
-    //     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
-
-    //     let instances = transcript.load_instances(num_instances);
-    //     let proof =
-    //         Plonk::<Kzg<Bn256, Gwc19>>::read_proof(&svk, &protocol, &instances, &mut transcript);
-    //     Plonk::<Kzg<Bn256, Gwc19>>::verify(&svk, &dk, &protocol, &instances, &proof);
-    //     loader.yul_code()
-    // } else {
-    //     let svk = params.get_g()[0].into();
-    //     let dk = (params.g2(), params.s_g2()).into();
-    //     let protocol = compile(
-    //         &params,
-    //         &vk,
-    //         Config::kzg()
-    //             .with_num_instance(num_instances.clone())
-    //             .with_accumulator_indices(DefaultEmailVerifyCircuit::<Fr>::accumulator_indices()),
-    //     );
-
-    //     let loader = EvmLoader::new::<Fq, Fr>();
-    //     let protocol = protocol.loaded(&loader);
-    //     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
-
-    //     let instances = transcript.load_instances(num_instances);
-    //     let proof =
-    //         Plonk::<Kzg<Bn256, Gwc19>>::read_proof(&svk, &protocol, &instances, &mut transcript);
-    //     Plonk::<Kzg<Bn256, Gwc19>>::verify(&svk, &dk, &protocol, &instances, &proof);
-    //     loader.yul_code()
-    // };
     let verifier_yul = gen_evm_verifier_yul::<PublicAggregationCircuit>(&params, &vk, num_instance);
     {
         let mut f = File::create(code_path).unwrap();
@@ -595,8 +455,6 @@ pub async fn gen_agg_evm_verifier(
 
         let mut f = File::create(code_path)?;
         let _ = f.write(output.as_bytes());
-        // write!(f, "{}", verifier_yul).unwrap();
-        // let output = f.flush().unwrap();
     };
     Ok(())
 }

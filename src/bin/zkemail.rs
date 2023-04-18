@@ -123,6 +123,32 @@ enum Commands {
         #[arg(long, default_value = "./build/evm_app_proof.hex")]
         proof_path: String,
     },
+    EVMProveAgg {
+        /// setup parameters path
+        #[arg(short, long, default_value = "./build/param_app.bin")]
+        app_param_path: String,
+        /// setup parameters path
+        #[arg(short, long, default_value = "./build/param_agg.bin")]
+        agg_param_path: String,
+        /// email verification circuit configure file
+        #[arg(short, long, default_value = "./configs/default_app.config")]
+        app_circuit_config: String,
+        /// email verification circuit configure file
+        #[arg(short, long, default_value = "./configs/default_agg.config")]
+        agg_circuit_config: String,
+        /// emails path
+        #[arg(short, long, default_value = "./build/demo.eml")]
+        email_path: String,
+        /// proving key path
+        #[arg(long, default_value = "./build/app.pk")]
+        app_pk_path: String,
+        /// proving key path
+        #[arg(long, default_value = "./build/agg.pk")]
+        agg_pk_path: String,
+        /// output proof file
+        #[arg(long, default_value = "./build/evm_agg_proof.hex")]
+        proof_path: String,
+    },
     GenEVMVerifier {
         /// setup parameter path
         #[arg(short, long, default_value = "./build/param_app.bin")]
@@ -229,6 +255,27 @@ async fn main() {
             &circuit_config,
             &pk_path,
             &email_path,
+            &proof_path,
+        )
+        .await
+        .unwrap(),
+        Commands::EVMProveAgg {
+            app_param_path,
+            agg_param_path,
+            app_circuit_config,
+            agg_circuit_config,
+            email_path,
+            app_pk_path,
+            agg_pk_path,
+            proof_path,
+        } => evm_prove_agg(
+            &app_param_path,
+            &agg_param_path,
+            &app_circuit_config,
+            &agg_circuit_config,
+            &email_path,
+            &app_pk_path,
+            &agg_pk_path,
             &proof_path,
         )
         .await
