@@ -60,9 +60,10 @@ pub fn gen_param(param_path: &str, k: u32) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn gen_app_key(
+pub async fn gen_app_key(
     param_path: &str,
     circuit_config_path: &str,
+    email_path: &str,
     pk_path: &str,
     vk_path: &str,
 ) -> Result<(), Error> {
@@ -77,8 +78,7 @@ pub fn gen_app_key(
     //     let mut reader = BufReader::new(f);
     //     ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     // };
-    let mut rng = thread_rng();
-    let circuit = DefaultEmailVerifyCircuit::<Fr>::random(&mut rng);
+    let circuit = gen_circuit_from_email_path(email_path).await;
     let pk = gen_pk::<DefaultEmailVerifyCircuit<Fr>>(&params, &circuit, Some(&Path::new(pk_path)));
     println!("app pk generated");
     // let snark = gen_snark_gwc(
@@ -113,6 +113,7 @@ pub async fn gen_agg_key(
     agg_param_path: &str,
     app_circuit_config_path: &str,
     agg_circuit_config_path: &str,
+    email_path: &str,
     app_pk_path: &str,
     agg_pk_path: &str,
     agg_vk_path: &str,
@@ -129,8 +130,7 @@ pub async fn gen_agg_key(
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    let mut rng = thread_rng();
-    let app_circuit = DefaultEmailVerifyCircuit::random(&mut rng);
+    let app_circuit = gen_circuit_from_email_path(email_path).await;
     let app_pk = {
         let f = File::open(Path::new(app_pk_path)).unwrap();
         let mut reader = BufReader::new(f);
@@ -401,9 +401,10 @@ pub async fn evm_prove_app(
 //     Ok(())
 // }
 
-pub fn gen_evm_verifier(
+pub async fn gen_evm_verifier(
     param_path: &str,
     circuit_config: &str,
+    email_path: &str,
     vk_path: &str,
     code_path: &str,
 ) -> Result<(), Error> {
@@ -444,8 +445,7 @@ pub fn gen_evm_verifier(
         )
         .unwrap()
     };
-    let mut rng = thread_rng();
-    let circuit = DefaultEmailVerifyCircuit::<Fr>::random(&mut rng);
+    let circuit = gen_circuit_from_email_path(email_path).await;
     // let num_instances = if is_agg {
     //     vec![4 * LIMBS + circuit.num_instance().iter().sum::<usize>()]
     // } else {
@@ -515,10 +515,11 @@ pub fn gen_evm_verifier(
     Ok(())
 }
 
-pub fn gen_agg_evm_verifier(
+pub async fn gen_agg_evm_verifier(
     param_path: &str,
     app_circuit_config: &str,
     agg_circuit_config: &str,
+    email_path: &str,
     vk_path: &str,
     code_path: &str,
 ) -> Result<(), Error> {
@@ -538,8 +539,7 @@ pub fn gen_agg_evm_verifier(
         )
         .unwrap()
     };
-    let mut rng = thread_rng();
-    let circuit = DefaultEmailVerifyCircuit::<Fr>::random(&mut rng);
+    let circuit = gen_circuit_from_email_path(email_path).await;
     // let num_instances = if is_agg {
     //     vec![4 * LIMBS + circuit.num_instance().iter().sum::<usize>()]
     // } else {

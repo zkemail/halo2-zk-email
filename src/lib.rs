@@ -546,67 +546,67 @@ impl<F: Field> DefaultEmailVerifyCircuit<F> {
         params
     }
 
-    pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
-        let params = DefaultEmailVerifyCircuit::<F>::read_config_params();
-        let _private_key =
-            RsaPrivateKey::new(rng, params.public_key_bits).expect("failed to generate a key");
-        let public_key = rsa::RsaPublicKey::from(&_private_key);
-        let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
-        let message = concat!("From:\r\n",).as_bytes();
-        let email = parse_mail(message).unwrap();
-        let logger = slog::Logger::root(slog::Discard, slog::o!());
-        let signer = SignerBuilder::new()
-            .with_signed_headers(&["From"])
-            .unwrap()
-            .with_private_key(private_key)
-            .with_selector("default")
-            .with_signing_domain("")
-            .with_logger(&logger)
-            .with_header_canonicalization(cfdkim::canonicalization::Type::Relaxed)
-            .with_body_canonicalization(cfdkim::canonicalization::Type::Relaxed)
-            .build()
-            .unwrap();
-        let signature = signer.sign(&email).unwrap();
-        let new_msg = vec![signature.as_bytes(), b"\r\n", message].concat();
-        let (canonicalized_header, canonicalized_body, signature_bytes) =
-            canonicalize_signed_email(&new_msg).unwrap();
+    // pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
+    //     let params = DefaultEmailVerifyCircuit::<F>::read_config_params();
+    //     let _private_key =
+    //         RsaPrivateKey::new(rng, params.public_key_bits).expect("failed to generate a key");
+    //     let public_key = rsa::RsaPublicKey::from(&_private_key);
+    //     let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
+    //     let message = concat!("From:random\r\n",).as_bytes();
+    //     let email = parse_mail(message).unwrap();
+    //     let logger = slog::Logger::root(slog::Discard, slog::o!());
+    //     let signer = SignerBuilder::new()
+    //         .with_signed_headers(&["From"])
+    //         .unwrap()
+    //         .with_private_key(private_key)
+    //         .with_selector("default")
+    //         .with_signing_domain("random")
+    //         .with_logger(&logger)
+    //         .with_header_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+    //         .with_body_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+    //         .build()
+    //         .unwrap();
+    //     let signature = signer.sign(&email).unwrap();
+    //     let new_msg = vec![signature.as_bytes(), b"\r\n", message].concat();
+    //     let (canonicalized_header, canonicalized_body, signature_bytes) =
+    //         canonicalize_signed_email(&new_msg).unwrap();
 
-        let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<F>::DEFAULT_E));
-        let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
-        let public_key = RSAPublicKey::<F>::new(Value::known(BigUint::from(n_big)), e);
-        let signature =
-            RSASignature::<F>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-        let circuit = DefaultEmailVerifyCircuit {
-            header_bytes: canonicalized_header,
-            body_bytes: canonicalized_body,
-            public_key,
-            signature,
-        };
+    //     let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<F>::DEFAULT_E));
+    //     let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
+    //     let public_key = RSAPublicKey::<F>::new(Value::known(BigUint::from(n_big)), e);
+    //     let signature =
+    //         RSASignature::<F>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
+    //     let circuit = DefaultEmailVerifyCircuit {
+    //         header_bytes: canonicalized_header,
+    //         body_bytes: canonicalized_body,
+    //         public_key,
+    //         signature,
+    //     };
 
-        // let mut rng = thread_rng();
-        // let params = Self::read_config_params();
-        // let mut n = BigUint::default();
-        // while n.bits() != params.public_key_bits as u64 {
-        //     n = rng.sample(RandomBits::new(params.public_key_bits as u64));
-        // }
-        // let public_key = RSAPublicKey::new(
-        //     Value::known(n),
-        //     RSAPubE::Fix(BigUint::from_u128(Self::DEFAULT_E).unwrap()),
-        // );
+    //     // let mut rng = thread_rng();
+    //     // let params = Self::read_config_params();
+    //     // let mut n = BigUint::default();
+    //     // while n.bits() != params.public_key_bits as u64 {
+    //     //     n = rng.sample(RandomBits::new(params.public_key_bits as u64));
+    //     // }
+    //     // let public_key = RSAPublicKey::new(
+    //     //     Value::known(n),
+    //     //     RSAPubE::Fix(BigUint::from_u128(Self::DEFAULT_E).unwrap()),
+    //     // );
 
-        // let mut c = BigUint::default();
-        // while c.bits() != params.public_key_bits as u64 {
-        //     c = rng.sample(RandomBits::new(params.public_key_bits as u64));
-        // }
-        // let signature = RSASignature::new(Value::known(c));
-        // Self {
-        //     header_bytes: vec![],
-        //     body_bytes: vec![],
-        //     public_key,
-        //     signature,
-        // }
-        circuit
-    }
+    //     // let mut c = BigUint::default();
+    //     // while c.bits() != params.public_key_bits as u64 {
+    //     //     c = rng.sample(RandomBits::new(params.public_key_bits as u64));
+    //     // }
+    //     // let signature = RSASignature::new(Value::known(c));
+    //     // Self {
+    //     //     header_bytes: vec![],
+    //     //     body_bytes: vec![],
+    //     //     public_key,
+    //     //     signature,
+    //     // }
+    //     circuit
+    // }
 
     pub fn get_public_hash_input(&self) -> Vec<u8> {
         let (header_substrs, body_substrs) = self.get_substrs();
