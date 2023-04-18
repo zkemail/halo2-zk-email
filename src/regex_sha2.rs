@@ -369,8 +369,8 @@ mod test {
         let mut expected_masked_chars = vec![Fr::from(0); TestRegexSha2::<Fr>::MAX_BYTE_SIZE];
         let mut expected_substr_ids = vec![Fr::from(0); TestRegexSha2::<Fr>::MAX_BYTE_SIZE];
         let correct_substrs = vec![
-            get_substr(&input_str, &[r"(?<=from:).*@.*(?=\r)".to_string()]),
-            get_substr(&input_str, &[r"(?<=subject:).*(?=\r)".to_string()]),
+            get_substr(&input_str, &[r"(?<=from:).*@.*(?=\r)".to_string()]).unwrap(),
+            get_substr(&input_str, &[r"(?<=subject:).*(?=\r)".to_string()]).unwrap(),
         ];
         for (substr_idx, (start, chars)) in correct_substrs.iter().enumerate() {
             for (idx, char) in chars.as_bytes().iter().enumerate() {

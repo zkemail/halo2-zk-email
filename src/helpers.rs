@@ -77,7 +77,8 @@ pub fn gen_app_key(
     //     let mut reader = BufReader::new(f);
     //     ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     // };
-    let circuit = DefaultEmailVerifyCircuit::<Fr>::random();
+    let mut rng = thread_rng();
+    let circuit = DefaultEmailVerifyCircuit::<Fr>::random(&mut rng);
     let pk = gen_pk::<DefaultEmailVerifyCircuit<Fr>>(&params, &circuit, Some(&Path::new(pk_path)));
     println!("app pk generated");
     // let snark = gen_snark_gwc(
@@ -112,7 +113,6 @@ pub async fn gen_agg_key(
     agg_param_path: &str,
     app_circuit_config_path: &str,
     agg_circuit_config_path: &str,
-    email_path: &str,
     app_pk_path: &str,
     agg_pk_path: &str,
     agg_vk_path: &str,
@@ -129,7 +129,8 @@ pub async fn gen_agg_key(
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    let app_circuit = gen_circuit_from_email_path(email_path).await;
+    let mut rng = thread_rng();
+    let app_circuit = DefaultEmailVerifyCircuit::random(&mut rng);
     let app_pk = {
         let f = File::open(Path::new(app_pk_path)).unwrap();
         let mut reader = BufReader::new(f);
@@ -443,7 +444,8 @@ pub fn gen_evm_verifier(
         )
         .unwrap()
     };
-    let circuit = DefaultEmailVerifyCircuit::<Fr>::random();
+    let mut rng = thread_rng();
+    let circuit = DefaultEmailVerifyCircuit::<Fr>::random(&mut rng);
     // let num_instances = if is_agg {
     //     vec![4 * LIMBS + circuit.num_instance().iter().sum::<usize>()]
     // } else {
@@ -536,7 +538,8 @@ pub fn gen_agg_evm_verifier(
         )
         .unwrap()
     };
-    let circuit = DefaultEmailVerifyCircuit::<Fr>::random();
+    let mut rng = thread_rng();
+    let circuit = DefaultEmailVerifyCircuit::<Fr>::random(&mut rng);
     // let num_instances = if is_agg {
     //     vec![4 * LIMBS + circuit.num_instance().iter().sum::<usize>()]
     // } else {
@@ -605,6 +608,7 @@ async fn gen_circuit_from_email_path(email_path: &str) -> DefaultEmailVerifyCirc
         f.read_to_end(&mut buf).unwrap();
         buf
     };
+    println!("email {}", String::from_utf8(email_bytes.clone()).unwrap());
     let (canonicalized_header, canonicalized_body, signature_bytes) =
         canonicalize_signed_email(&email_bytes).unwrap();
     let public_key = {

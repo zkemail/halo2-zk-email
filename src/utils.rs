@@ -1,7 +1,7 @@
 use fancy_regex::Regex;
 use itertools::Itertools;
 
-pub fn get_substr(input_str: &str, regexes: &[String]) -> (usize, String) {
+pub fn get_substr(input_str: &str, regexes: &[String]) -> Option<(usize, String)> {
     let regexes = regexes
         .into_iter()
         .map(|raw| Regex::new(&raw).unwrap())
@@ -11,10 +11,16 @@ pub fn get_substr(input_str: &str, regexes: &[String]) -> (usize, String) {
     // println!("first regex {}", regexes[0]);
     for regex in regexes.into_iter() {
         // println!(r"regex {}", regex);
-        let substr_match = regex.find(substr).unwrap().unwrap();
-        start += substr_match.start();
-        substr = substr_match.as_str();
+        match regex.find(substr).unwrap() {
+            Some(m) => {
+                start += m.start();
+                substr = m.as_str();
+            }
+            None => {
+                return None;
+            }
+        };
     }
     // println!("substr {}", substr);
-    (start, substr.to_string())
+    Some((start, substr.to_string()))
 }

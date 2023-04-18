@@ -73,9 +73,6 @@ enum Commands {
         /// email verification circuit configure file
         #[arg(short, long, default_value = "./configs/default_agg.config")]
         agg_circuit_config: String,
-        /// emails path
-        #[arg(short, long, default_value = "./build/demo.eml")]
-        email_path: String,
         /// proving key path
         #[arg(long, default_value = "./build/app.pk")]
         app_pk_path: String,
@@ -169,7 +166,6 @@ async fn main() {
             agg_param_path,
             app_circuit_config,
             agg_circuit_config,
-            email_path,
             app_pk_path,
             agg_pk_path,
             agg_vk_path,
@@ -178,7 +174,6 @@ async fn main() {
             &agg_param_path,
             &app_circuit_config,
             &agg_circuit_config,
-            &email_path,
             &app_pk_path,
             &agg_pk_path,
             &agg_vk_path,

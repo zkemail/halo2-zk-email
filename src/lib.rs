@@ -9,6 +9,7 @@ mod utils;
 pub use crate::helpers::*;
 use crate::regex_sha2::RegexSha2Config;
 use crate::utils::*;
+use cfdkim::{canonicalize_signed_email, SignerBuilder};
 use fancy_regex::Regex;
 use halo2_base::halo2_proofs::circuit::{AssignedCell, Cell, Region, SimpleFloorPlanner, Value};
 use halo2_base::halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
@@ -30,10 +31,12 @@ use halo2_rsa::{
     RSASignature,
 };
 use itertools::Itertools;
+use mailparse::parse_mail;
 use num_bigint::BigUint;
 use num_traits::FromPrimitive;
-use rand::thread_rng;
+use rand::{thread_rng, CryptoRng, Rng, RngCore};
 use regex_sha2_base64::RegexSha2Base64Config;
+use rsa::{PublicKeyParts, RsaPrivateKey};
 use serde_json;
 use sha2::{Digest, Sha256};
 use snark_verifier_sdk::CircuitExt;
@@ -543,62 +546,102 @@ impl<F: Field> DefaultEmailVerifyCircuit<F> {
         params
     }
 
-    pub fn random() -> Self {
-        use num_bigint::RandomBits;
-        use rand::Rng;
-        let mut rng = thread_rng();
-        let params = Self::read_config_params();
-        let mut n = BigUint::default();
-        while n.bits() != params.public_key_bits as u64 {
-            n = rng.sample(RandomBits::new(params.public_key_bits as u64));
-        }
-        let public_key = RSAPublicKey::new(
-            Value::known(n),
-            RSAPubE::Fix(BigUint::from_u128(Self::DEFAULT_E).unwrap()),
-        );
-        let mut c = BigUint::default();
-        while c.bits() != params.public_key_bits as u64 {
-            c = rng.sample(RandomBits::new(params.public_key_bits as u64));
-        }
-        let signature = RSASignature::new(Value::known(c));
-        Self {
-            header_bytes: vec![],
-            body_bytes: vec![],
+    pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
+        let params = DefaultEmailVerifyCircuit::<F>::read_config_params();
+        let _private_key =
+            RsaPrivateKey::new(rng, params.public_key_bits).expect("failed to generate a key");
+        let public_key = rsa::RsaPublicKey::from(&_private_key);
+        let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
+        let message = concat!("From:\r\n",).as_bytes();
+        let email = parse_mail(message).unwrap();
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let signer = SignerBuilder::new()
+            .with_signed_headers(&["From"])
+            .unwrap()
+            .with_private_key(private_key)
+            .with_selector("default")
+            .with_signing_domain("")
+            .with_logger(&logger)
+            .with_header_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+            .with_body_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+            .build()
+            .unwrap();
+        let signature = signer.sign(&email).unwrap();
+        let new_msg = vec![signature.as_bytes(), b"\r\n", message].concat();
+        let (canonicalized_header, canonicalized_body, signature_bytes) =
+            canonicalize_signed_email(&new_msg).unwrap();
+
+        let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<F>::DEFAULT_E));
+        let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
+        let public_key = RSAPublicKey::<F>::new(Value::known(BigUint::from(n_big)), e);
+        let signature =
+            RSASignature::<F>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
+        let circuit = DefaultEmailVerifyCircuit {
+            header_bytes: canonicalized_header,
+            body_bytes: canonicalized_body,
             public_key,
             signature,
-        }
+        };
+
+        // let mut rng = thread_rng();
+        // let params = Self::read_config_params();
+        // let mut n = BigUint::default();
+        // while n.bits() != params.public_key_bits as u64 {
+        //     n = rng.sample(RandomBits::new(params.public_key_bits as u64));
+        // }
+        // let public_key = RSAPublicKey::new(
+        //     Value::known(n),
+        //     RSAPubE::Fix(BigUint::from_u128(Self::DEFAULT_E).unwrap()),
+        // );
+
+        // let mut c = BigUint::default();
+        // while c.bits() != params.public_key_bits as u64 {
+        //     c = rng.sample(RandomBits::new(params.public_key_bits as u64));
+        // }
+        // let signature = RSASignature::new(Value::known(c));
+        // Self {
+        //     header_bytes: vec![],
+        //     body_bytes: vec![],
+        //     public_key,
+        //     signature,
+        // }
+        circuit
     }
 
     pub fn get_public_hash_input(&self) -> Vec<u8> {
         let (header_substrs, body_substrs) = self.get_substrs();
-        let bodyhash = header_substrs[0].1.as_bytes();
+        let bodyhash = header_substrs[0].as_ref().unwrap().1.as_bytes();
         let params = Self::read_config_params();
         let max_len = params.header_max_byte_size + params.body_max_byte_size;
         let mut expected_masked_chars = vec![0u8; max_len];
         let mut expected_substr_ids = vec![0u8; max_len]; // We only support up to 256 substring patterns.
-        for (substr_idx, (start, chars)) in header_substrs.iter().enumerate() {
-            for (idx, char) in chars.as_bytes().iter().enumerate() {
-                expected_masked_chars[start + idx] = *char;
-                expected_substr_ids[start + idx] = substr_idx as u8 + 1;
+        for (substr_idx, m) in header_substrs.iter().enumerate() {
+            if let Some((start, chars)) = m {
+                for (idx, char) in chars.as_bytes().iter().enumerate() {
+                    expected_masked_chars[start + idx] = *char;
+                    expected_substr_ids[start + idx] = substr_idx as u8 + 1;
+                }
             }
         }
-        for (substr_idx, (start, chars)) in body_substrs.iter().enumerate() {
-            for (idx, char) in chars.as_bytes().iter().enumerate() {
-                expected_masked_chars[params.header_max_byte_size + start + idx] = *char;
-                expected_substr_ids[params.header_max_byte_size + start + idx] =
-                    substr_idx as u8 + 1;
+        for (substr_idx, m) in body_substrs.iter().enumerate() {
+            if let Some((start, chars)) = m {
+                for (idx, char) in chars.as_bytes().iter().enumerate() {
+                    expected_masked_chars[params.header_max_byte_size + start + idx] = *char;
+                    expected_substr_ids[params.header_max_byte_size + start + idx] =
+                        substr_idx as u8 + 1;
+                }
             }
         }
         vec![
             bodyhash,
-            &[0u8; (64 - 44)],
+            &[0u8; (64 - 44)][..],
             &expected_masked_chars,
             &expected_substr_ids,
         ]
         .concat()
     }
 
-    pub fn get_substrs(&self) -> (Vec<(usize, String)>, Vec<(usize, String)>) {
+    pub fn get_substrs(&self) -> (Vec<Option<(usize, String)>>, Vec<Option<(usize, String)>>) {
         let params = Self::read_config_params();
         let header_str = String::from_utf8(self.header_bytes.clone())
             .expect("fail to encode header bytes to utf8 string");
