@@ -434,7 +434,11 @@ pub fn gen_evm_verifier(
     code_path: &str,
     is_agg: bool,
 ) -> Result<(), Error> {
-    set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
+    if is_agg {
+        set_var("VERIFY_CONFIG", circuit_config);
+    } else {
+        set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
+    }
     let params = {
         let f = File::open(Path::new(param_path)).unwrap();
         let mut reader = BufReader::new(f);
@@ -458,11 +462,12 @@ pub fn gen_evm_verifier(
         .unwrap()
     };
     let circuit = DefaultEmailVerifyCircuit::<Fr>::random();
-    let num_instances = if is_agg {
-        vec![4 * LIMBS + circuit.num_instance().iter().sum::<usize>()]
-    } else {
-        circuit.num_instance()
-    };
+    // let num_instances = if is_agg {
+    //     vec![4 * LIMBS + circuit.num_instance().iter().sum::<usize>()]
+    // } else {
+    //     circuit.num_instance()
+    // };
+    let num_instances = vec![0];
     let verifier_yul = if is_agg {
         let svk = params.get_g()[0].into();
         let dk = (params.g2(), params.s_g2()).into();
