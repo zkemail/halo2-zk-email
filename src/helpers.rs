@@ -432,27 +432,36 @@ pub fn gen_evm_verifier(
     circuit_config: &str,
     vk_path: &str,
     code_path: &str,
-    is_agg: bool,
 ) -> Result<(), Error> {
-    if is_agg {
-        set_var("VERIFY_CONFIG", circuit_config);
-    } else {
-        set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
-    }
+    // if is_agg {
+    //     set_var("VERIFY_CONFIG", circuit_config);
+    // } else {
+    //     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
+    // }
+    set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
     let params = {
         let f = File::open(Path::new(param_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    let vk = if is_agg {
-        let f = File::open(vk_path).unwrap();
-        let mut reader = BufReader::new(f);
-        VerifyingKey::<G1Affine>::read::<_, PublicAggregationCircuit>(
-            &mut reader,
-            SerdeFormat::RawBytesUnchecked,
-        )
-        .unwrap()
-    } else {
+    // let vk = if is_agg {
+    //     let f = File::open(vk_path).unwrap();
+    //     let mut reader = BufReader::new(f);
+    //     VerifyingKey::<G1Affine>::read::<_, PublicAggregationCircuit>(
+    //         &mut reader,
+    //         SerdeFormat::RawBytesUnchecked,
+    //     )
+    //     .unwrap()
+    // } else {
+    //     let f = File::open(vk_path).unwrap();
+    //     let mut reader = BufReader::new(f);
+    //     VerifyingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(
+    //         &mut reader,
+    //         SerdeFormat::RawBytesUnchecked,
+    //     )
+    //     .unwrap()
+    // };
+    let vk = {
         let f = File::open(vk_path).unwrap();
         let mut reader = BufReader::new(f);
         VerifyingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(
@@ -468,27 +477,48 @@ pub fn gen_evm_verifier(
     //     circuit.num_instance()
     // };
     let num_instances = vec![0];
-    let verifier_yul = if is_agg {
-        let svk = params.get_g()[0].into();
-        let dk = (params.g2(), params.s_g2()).into();
-        let protocol = compile(
-            &params,
-            &vk,
-            Config::kzg()
-                .with_num_instance(num_instances.clone())
-                .with_accumulator_indices(PublicAggregationCircuit::accumulator_indices()),
-        );
+    // let verifier_yul = if is_agg {
+    //     let svk = params.get_g()[0].into();
+    //     let dk = (params.g2(), params.s_g2()).into();
+    //     let protocol = compile(
+    //         &params,
+    //         &vk,
+    //         Config::kzg()
+    //             .with_num_instance(num_instances.clone())
+    //             .with_accumulator_indices(PublicAggregationCircuit::accumulator_indices()),
+    //     );
 
-        let loader = EvmLoader::new::<Fq, Fr>();
-        let protocol = protocol.loaded(&loader);
-        let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
+    //     let loader = EvmLoader::new::<Fq, Fr>();
+    //     let protocol = protocol.loaded(&loader);
+    //     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
 
-        let instances = transcript.load_instances(num_instances);
-        let proof =
-            Plonk::<Kzg<Bn256, Gwc19>>::read_proof(&svk, &protocol, &instances, &mut transcript);
-        Plonk::<Kzg<Bn256, Gwc19>>::verify(&svk, &dk, &protocol, &instances, &proof);
-        loader.yul_code()
-    } else {
+    //     let instances = transcript.load_instances(num_instances);
+    //     let proof =
+    //         Plonk::<Kzg<Bn256, Gwc19>>::read_proof(&svk, &protocol, &instances, &mut transcript);
+    //     Plonk::<Kzg<Bn256, Gwc19>>::verify(&svk, &dk, &protocol, &instances, &proof);
+    //     loader.yul_code()
+    // } else {
+    //     let svk = params.get_g()[0].into();
+    //     let dk = (params.g2(), params.s_g2()).into();
+    //     let protocol = compile(
+    //         &params,
+    //         &vk,
+    //         Config::kzg()
+    //             .with_num_instance(num_instances.clone())
+    //             .with_accumulator_indices(DefaultEmailVerifyCircuit::<Fr>::accumulator_indices()),
+    //     );
+
+    //     let loader = EvmLoader::new::<Fq, Fr>();
+    //     let protocol = protocol.loaded(&loader);
+    //     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
+
+    //     let instances = transcript.load_instances(num_instances);
+    //     let proof =
+    //         Plonk::<Kzg<Bn256, Gwc19>>::read_proof(&svk, &protocol, &instances, &mut transcript);
+    //     Plonk::<Kzg<Bn256, Gwc19>>::verify(&svk, &dk, &protocol, &instances, &proof);
+    //     loader.yul_code()
+    // };
+    let verifier_yul = {
         let svk = params.get_g()[0].into();
         let dk = (params.g2(), params.s_g2()).into();
         let protocol = compile(
@@ -516,6 +546,111 @@ pub fn gen_evm_verifier(
     //     None,
     // );
     // let verifier_str = "0x".to_string() + &hex::encode(verifier);
+    {
+        let mut f = File::create(code_path).unwrap();
+        let _ = f.write(verifier_yul.as_bytes());
+        let output = fix_verifier_sol(Path::new(code_path).to_path_buf()).unwrap();
+
+        let mut f = File::create(code_path)?;
+        let _ = f.write(output.as_bytes());
+        // write!(f, "{}", verifier_yul).unwrap();
+        // let output = f.flush().unwrap();
+    };
+    Ok(())
+}
+
+pub fn gen_agg_evm_verifier(
+    param_path: &str,
+    app_circuit_config: &str,
+    agg_circuit_config: &str,
+    vk_path: &str,
+    code_path: &str,
+) -> Result<(), Error> {
+    set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config);
+    set_var("VERIFY_CONFIG", agg_circuit_config);
+    let params = {
+        let f = File::open(Path::new(param_path)).unwrap();
+        let mut reader = BufReader::new(f);
+        ParamsKZG::<Bn256>::read(&mut reader).unwrap()
+    };
+    let vk = {
+        let f = File::open(vk_path).unwrap();
+        let mut reader = BufReader::new(f);
+        VerifyingKey::<G1Affine>::read::<_, PublicAggregationCircuit>(
+            &mut reader,
+            SerdeFormat::RawBytesUnchecked,
+        )
+        .unwrap()
+    };
+    let circuit = DefaultEmailVerifyCircuit::<Fr>::random();
+    // let num_instances = if is_agg {
+    //     vec![4 * LIMBS + circuit.num_instance().iter().sum::<usize>()]
+    // } else {
+    //     circuit.num_instance()
+    // };
+    let num_instances = vec![0];
+    // let verifier_yul = if is_agg {
+    //     let svk = params.get_g()[0].into();
+    //     let dk = (params.g2(), params.s_g2()).into();
+    //     let protocol = compile(
+    //         &params,
+    //         &vk,
+    //         Config::kzg()
+    //             .with_num_instance(num_instances.clone())
+    //             .with_accumulator_indices(PublicAggregationCircuit::accumulator_indices()),
+    //     );
+
+    //     let loader = EvmLoader::new::<Fq, Fr>();
+    //     let protocol = protocol.loaded(&loader);
+    //     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
+
+    //     let instances = transcript.load_instances(num_instances);
+    //     let proof =
+    //         Plonk::<Kzg<Bn256, Gwc19>>::read_proof(&svk, &protocol, &instances, &mut transcript);
+    //     Plonk::<Kzg<Bn256, Gwc19>>::verify(&svk, &dk, &protocol, &instances, &proof);
+    //     loader.yul_code()
+    // } else {
+    //     let svk = params.get_g()[0].into();
+    //     let dk = (params.g2(), params.s_g2()).into();
+    //     let protocol = compile(
+    //         &params,
+    //         &vk,
+    //         Config::kzg()
+    //             .with_num_instance(num_instances.clone())
+    //             .with_accumulator_indices(DefaultEmailVerifyCircuit::<Fr>::accumulator_indices()),
+    //     );
+
+    //     let loader = EvmLoader::new::<Fq, Fr>();
+    //     let protocol = protocol.loaded(&loader);
+    //     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
+
+    //     let instances = transcript.load_instances(num_instances);
+    //     let proof =
+    //         Plonk::<Kzg<Bn256, Gwc19>>::read_proof(&svk, &protocol, &instances, &mut transcript);
+    //     Plonk::<Kzg<Bn256, Gwc19>>::verify(&svk, &dk, &protocol, &instances, &proof);
+    //     loader.yul_code()
+    // };
+    let verifier_yul = {
+        let svk = params.get_g()[0].into();
+        let dk = (params.g2(), params.s_g2()).into();
+        let protocol = compile(
+            &params,
+            &vk,
+            Config::kzg()
+                .with_num_instance(num_instances.clone())
+                .with_accumulator_indices(PublicAggregationCircuit::accumulator_indices()),
+        );
+
+        let loader = EvmLoader::new::<Fq, Fr>();
+        let protocol = protocol.loaded(&loader);
+        let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
+
+        let instances = transcript.load_instances(num_instances);
+        let proof =
+            Plonk::<Kzg<Bn256, Gwc19>>::read_proof(&svk, &protocol, &instances, &mut transcript);
+        Plonk::<Kzg<Bn256, Gwc19>>::verify(&svk, &dk, &protocol, &instances, &proof);
+        loader.yul_code()
+    };
     {
         let mut f = File::create(code_path).unwrap();
         let _ = f.write(verifier_yul.as_bytes());

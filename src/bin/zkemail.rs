@@ -133,9 +133,23 @@ enum Commands {
         /// evm verifier file
         #[arg(short, long, default_value = "./build/Verifier.sol")]
         code_path: String,
-        /// is aggregation
-        #[arg(short, long, default_value_t = false)]
-        is_agg: bool,
+    },
+    GenAggEVMVerifier {
+        /// setup parameter path
+        #[arg(short, long, default_value = "./build/param_agg.bin")]
+        param_path: String,
+        /// email verification circuit configure file
+        #[arg(short, long, default_value = "./configs/default_app.config")]
+        app_circuit_config: String,
+        /// aggregation circuit configure file
+        #[arg(short, long, default_value = "./configs/default_agg.config")]
+        agg_circuit_config: String,
+        /// verifying key file
+        #[arg(long, default_value = "./build/agg.vk")]
+        vk_path: String,
+        /// evm verifier file
+        #[arg(short, long, default_value = "./build/Verifier.sol")]
+        code_path: String,
     },
 }
 
@@ -206,7 +220,20 @@ async fn main() {
             circuit_config,
             vk_path,
             code_path,
-            is_agg,
-        } => gen_evm_verifier(&param_path, &circuit_config, &vk_path, &code_path, is_agg).unwrap(),
+        } => gen_evm_verifier(&param_path, &circuit_config, &vk_path, &code_path).unwrap(),
+        Commands::GenAggEVMVerifier {
+            param_path,
+            app_circuit_config,
+            agg_circuit_config,
+            vk_path,
+            code_path,
+        } => gen_agg_evm_verifier(
+            &param_path,
+            &app_circuit_config,
+            &agg_circuit_config,
+            &vk_path,
+            &code_path,
+        )
+        .unwrap(),
     }
 }
