@@ -378,7 +378,37 @@ impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                 )?;
                 let public_hash_input = self.get_public_hash_input();
                 let public_hash_result = config.sha256_config.digest(ctx, &public_hash_input)?;
+                // for (idx, v) in public_hash_result.input_bytes.iter().enumerate() {
+                //     v.value().map(|v| {
+                //         println!(
+                //             "idx {} code {} char {}",
+                //             idx,
+                //             v.get_lower_32(),
+                //             (v.get_lower_32() as u8) as char
+                //         )
+                //     });
+                // }
                 let gate = config.sha256_config.range().gate.clone();
+                // for (idx, v) in result.header_result.masked_characters.iter().enumerate() {
+                //     v.value().map(|v| {
+                //         println!(
+                //             "idx {} code {} char {}",
+                //             idx,
+                //             v.get_lower_32(),
+                //             (v.get_lower_32() as u8) as char
+                //         )
+                //     });
+                // }
+                // for (idx, v) in result.body_result.masked_characters.iter().enumerate() {
+                //     v.value().map(|v| {
+                //         println!(
+                //             "idx {} code {} char {}",
+                //             idx,
+                //             v.get_lower_32(),
+                //             (v.get_lower_32() as u8) as char
+                //         )
+                //     });
+                // }
                 let assigned_public_hash_input = vec![
                     result
                         .assigned_bodyhash
@@ -404,8 +434,7 @@ impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                     .collect_vec(),
                 ]
                 .concat();
-                for (a, b) in public_hash_result
-                    .input_bytes
+                for (a, b) in public_hash_result.input_bytes[0..assigned_public_hash_input.len()]
                     .into_iter()
                     .map(|v| v.cell())
                     .collect_vec()
