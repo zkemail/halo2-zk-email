@@ -248,6 +248,7 @@ pub async fn evm_prove_agg(
     email_path: &str,
     app_pk_path: &str,
     agg_pk_path: &str,
+    acc_path: &str,
     proof_path: &str,
 ) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config_path);
@@ -290,6 +291,13 @@ pub async fn evm_prove_agg(
         .unwrap()
     };
     let instances = agg_circuit.instances();
+    let acc = encode_calldata(&[instances[0][0..4 * LIMBS].to_vec()], &[]);
+    {
+        let acc_hex = hex::encode(&acc);
+        let mut file = File::create(acc_path)?;
+        write!(file, "0x{}", acc_hex).unwrap();
+        file.flush().unwrap();
+    };
     let proof = gen_evm_proof_gwc(
         &agg_params,
         &agg_pk,

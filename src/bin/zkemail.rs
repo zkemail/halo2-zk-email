@@ -145,6 +145,9 @@ enum Commands {
         /// proving key path
         #[arg(long, default_value = "./build/agg.pk")]
         agg_pk_path: String,
+        /// output acc file
+        #[arg(long, default_value = "./build/evm_agg_acc.hex")]
+        acc_path: String,
         /// output proof file
         #[arg(long, default_value = "./build/evm_agg_proof.hex")]
         proof_path: String,
@@ -267,6 +270,7 @@ async fn main() {
             email_path,
             app_pk_path,
             agg_pk_path,
+            acc_path,
             proof_path,
         } => evm_prove_agg(
             &app_param_path,
@@ -276,6 +280,7 @@ async fn main() {
             &email_path,
             &app_pk_path,
             &agg_pk_path,
+            &acc_path,
             &proof_path,
         )
         .await
