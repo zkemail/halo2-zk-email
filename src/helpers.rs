@@ -11,7 +11,7 @@ use halo2_base::halo2_proofs::plonk::{
 };
 use halo2_base::halo2_proofs::poly::commitment::{Params, ParamsProver};
 use halo2_base::halo2_proofs::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
-use halo2_base::halo2_proofs::poly::kzg::multiopen::{ProverGWC, VerifierGWC};
+use halo2_base::halo2_proofs::poly::kzg::multiopen::{ProverSHPLONK, VerifierSHPLONK};
 use halo2_base::halo2_proofs::poly::kzg::strategy::SingleStrategy;
 use halo2_base::halo2_proofs::transcript::{
     Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
@@ -29,14 +29,14 @@ use rsa::PublicKeyParts;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use snark_verifier::loader::evm::EvmLoader;
-use snark_verifier::pcs::kzg::{Gwc19, Kzg};
+use snark_verifier::pcs::kzg::{Bdfg21, Kzg};
 use snark_verifier::system::halo2::transcript::evm::EvmTranscript;
 use snark_verifier::system::halo2::{compile, Config};
-use snark_verifier::verifier::PlonkVerifier;
-use snark_verifier_sdk::evm::{encode_calldata, gen_evm_proof, gen_evm_proof_gwc};
-use snark_verifier_sdk::halo2::aggregation::{AggregationCircuit, PublicAggregationCircuit};
-use snark_verifier_sdk::halo2::gen_snark_gwc;
-use snark_verifier_sdk::{gen_pk, CircuitExt, Plonk, LIMBS};
+use snark_verifier::verifier::{Plonk as PlonkApp, PlonkVerifier};
+use snark_verifier_sdk::evm::{encode_calldata, gen_evm_proof, gen_evm_proof_shplonk};
+use snark_verifier_sdk::halo2::aggregation::PublicAggregationCircuit;
+use snark_verifier_sdk::halo2::gen_snark_shplonk;
+use snark_verifier_sdk::{gen_pk, CircuitExt, Plonk as PlonkAgg, LIMBS};
 use std::env::set_var;
 use std::fmt::format;
 use std::fs::{self, File};
@@ -120,7 +120,7 @@ pub async fn gen_agg_key(
         )
         .unwrap()
     };
-    let snark = gen_snark_gwc(
+    let snark = gen_snark_shplonk(
         &app_params,
         &app_pk,
         app_circuit.clone(),
@@ -171,7 +171,7 @@ pub async fn prove_app(
 
     let proof = {
         let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
-        create_proof::<KZGCommitmentScheme<_>, ProverGWC<_>, _, _, _, _>(
+        create_proof::<KZGCommitmentScheme<_>, ProverSHPLONK<_>, _, _, _, _>(
             &params,
             &pk,
             &vec![circuit.clone()],
@@ -187,7 +187,7 @@ pub async fn prove_app(
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
         let verifier_params = params.verifier_params();
         let strategy = SingleStrategy::new(&verifier_params);
-        verify_proof::<_, VerifierGWC<_>, _, _, _>(
+        verify_proof::<_, VerifierSHPLONK<_>, _, _, _>(
             &params,
             &pk.get_vk(),
             strategy,
@@ -229,7 +229,7 @@ pub async fn evm_prove_app(
     };
     let circuit = gen_circuit_from_email_path(email_path).await;
     let instances = circuit.instances();
-    let proof = gen_evm_proof_gwc(&params, &pk, circuit, instances.clone(), &mut OsRng);
+    let proof = gen_evm_proof_shplonk(&params, &pk, circuit, instances.clone(), &mut OsRng);
 
     {
         let proof_hex = hex::encode(&proof);
@@ -273,7 +273,7 @@ pub async fn evm_prove_agg(
         )
         .unwrap()
     };
-    let snark = gen_snark_gwc(
+    let snark = gen_snark_shplonk(
         &app_params,
         &app_pk,
         app_circuit.clone(),
@@ -299,7 +299,7 @@ pub async fn evm_prove_agg(
         write!(file, "0x{}", acc_hex).unwrap();
         file.flush().unwrap();
     };
-    let proof = gen_evm_proof_gwc(
+    let proof = gen_evm_proof_shplonk(
         &agg_params,
         &agg_pk,
         agg_circuit,
@@ -417,8 +417,10 @@ pub async fn gen_evm_verifier(
     };
     let circuit = gen_circuit_from_email_path(email_path).await;
     let num_instance = circuit.num_instance();
-    let verifier_yul =
-        gen_evm_verifier_yul::<DefaultEmailVerifyCircuit<Fr>>(&params, &vk, num_instance);
+    let verifier_yul = gen_evm_verifier_yul::<
+        DefaultEmailVerifyCircuit<Fr>,
+        PlonkApp<Kzg<Bn256, Bdfg21>>,
+    >(&params, &vk, num_instance);
     {
         let mut f = File::create(code_path).unwrap();
         let _ = f.write(verifier_yul.as_bytes());
@@ -456,7 +458,11 @@ pub async fn gen_agg_evm_verifier(
     };
     let circuit = gen_circuit_from_email_path(email_path).await;
     let num_instance = vec![4 * LIMBS + circuit.num_instance().iter().sum::<usize>()];
-    let verifier_yul = gen_evm_verifier_yul::<PublicAggregationCircuit>(&params, &vk, num_instance);
+    let verifier_yul = gen_evm_verifier_yul::<PublicAggregationCircuit, PlonkAgg<Kzg<Bn256, Bdfg21>>>(
+        &params,
+        &vk,
+        num_instance,
+    );
     {
         let mut f = File::create(code_path).unwrap();
         let _ = f.write(verifier_yul.as_bytes());
@@ -501,7 +507,7 @@ async fn gen_circuit_from_email_path(email_path: &str) -> DefaultEmailVerifyCirc
     circuit
 }
 
-fn gen_evm_verifier_yul<C>(
+fn gen_evm_verifier_yul<C, P: PlonkVerifier<G1Affine, Rc<EvmLoader>, Kzg<Bn256, Bdfg21>>>(
     params: &ParamsKZG<Bn256>,
     vk: &VerifyingKey<G1Affine>,
     num_instance: Vec<usize>,
@@ -524,9 +530,8 @@ where
     let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
 
     let instances = transcript.load_instances(num_instance);
-    let proof =
-        Plonk::<Kzg<Bn256, Gwc19>>::read_proof(&svk, &protocol, &instances, &mut transcript);
-    Plonk::<Kzg<Bn256, Gwc19>>::verify(&svk, &dk, &protocol, &instances, &proof);
+    let proof = P::read_proof(&svk, &protocol, &instances, &mut transcript);
+    P::verify(&svk, &dk, &protocol, &instances, &proof);
 
     let yul_code = loader.yul_code();
     yul_code
