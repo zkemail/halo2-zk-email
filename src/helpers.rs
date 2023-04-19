@@ -4,7 +4,6 @@ use crate::{
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use cfdkim::{canonicalize_signed_email, resolve_public_key};
 use clap::{Parser, Subcommand};
-use fancy_regex::Regex;
 use halo2_base::halo2_proofs::circuit::Value;
 use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, Fq, Fr, G1Affine};
 use halo2_base::halo2_proofs::plonk::{
@@ -25,6 +24,7 @@ use num_bigint::BigUint;
 use num_traits::Pow;
 use rand::rngs::OsRng;
 use rand::thread_rng;
+use regex_simple::Regex;
 use rsa::PublicKeyParts;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -291,6 +291,7 @@ pub async fn evm_prove_agg(
         .unwrap()
     };
     let instances = agg_circuit.instances();
+    println!("instances {:?}", instances[0]);
     let acc = encode_calldata(&[instances[0][0..4 * LIMBS].to_vec()], &[]);
     {
         let acc_hex = hex::encode(&acc);
@@ -587,12 +588,12 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
 
     for line in reader.lines() {
         let mut line = line?;
-        let m = bool_pattern.captures(&line).unwrap();
+        let m = bool_pattern.captures(&line);
         if m.is_some() {
             line = line.replace(":bool", "");
         }
 
-        let m = calldata_pattern.captures(&line).unwrap();
+        let m = calldata_pattern.captures(&line);
         if let Some(m) = m {
             let calldata_and_addr = m.get(1).unwrap().as_str();
             let addr = m.get(2).unwrap().as_str();
@@ -613,7 +614,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             }
         }
 
-        let m = mstore8_pattern.captures(&line).unwrap();
+        let m = mstore8_pattern.captures(&line);
         if let Some(m) = m {
             let mstore = m.get(1).unwrap().as_str();
             let addr = m.get(2).unwrap().as_str();
@@ -626,7 +627,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             );
         }
 
-        let m = mstoren_pattern.captures(&line).unwrap();
+        let m = mstoren_pattern.captures(&line);
         if let Some(m) = m {
             let mstore = m.get(1).unwrap().as_str();
             let addr = m.get(2).unwrap().as_str();
@@ -639,7 +640,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             );
         }
 
-        let m = modexp_pattern.captures(&line).unwrap();
+        let m = modexp_pattern.captures(&line);
         if let Some(m) = m {
             let modexp = m.get(1).unwrap().as_str();
             let start_addr = m.get(2).unwrap().as_str();
@@ -661,7 +662,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             );
         }
 
-        let m = ecmul_pattern.captures(&line).unwrap();
+        let m = ecmul_pattern.captures(&line);
         if let Some(m) = m {
             let ecmul = m.get(1).unwrap().as_str();
             let start_addr = m.get(2).unwrap().as_str();
@@ -684,7 +685,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             );
         }
 
-        let m = ecadd_pattern.captures(&line).unwrap();
+        let m = ecadd_pattern.captures(&line);
         if let Some(m) = m {
             let ecadd = m.get(1).unwrap().as_str();
             let start_addr = m.get(2).unwrap().as_str();
@@ -707,7 +708,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             );
         }
 
-        let m = ecpairing_pattern.captures(&line).unwrap();
+        let m = ecpairing_pattern.captures(&line);
         if let Some(m) = m {
             let ecpairing = m.get(1).unwrap().as_str();
             let start_addr = m.get(2).unwrap().as_str();
@@ -730,7 +731,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             );
         }
 
-        let m = mstore_pattern.captures(&line).unwrap();
+        let m = mstore_pattern.captures(&line);
         if let Some(m) = m {
             let mstore = m.get(1).unwrap().as_str();
             let addr = m.get(2).unwrap().as_str();
@@ -743,7 +744,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             );
         }
 
-        let m = keccak_pattern.captures(&line).unwrap();
+        let m = keccak_pattern.captures(&line);
         if let Some(m) = m {
             let keccak = m.get(1).unwrap().as_str();
             let addr = m.get(2).unwrap().as_str();
@@ -758,7 +759,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
 
         // mload can show up multiple times per line
         loop {
-            let m = mload_pattern.captures(&line).unwrap();
+            let m = mload_pattern.captures(&line);
             if m.is_none() {
                 break;
             }

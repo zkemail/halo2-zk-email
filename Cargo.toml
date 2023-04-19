@@ -46,6 +46,7 @@ serde = { version = "1.0.159", features = ["derive"] }
 cfdkim = { version = "0.2.6", git = "https://github.com/SoraSuegami/dkim.git" }
 slog = "2.7.0"
 fancy-regex = "0.11.0"
+regex-simple = { version = "1", package = "regex" }
 hex = "0.4.3"
 tokio = { version = "1.16", features = [
     "net",

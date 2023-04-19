@@ -466,73 +466,6 @@ impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                     .map(|v| v.cell())
                     .collect_vec();
 
-                // encoded_bodyhash_cell.append(
-                //     &mut encoded_bodyhash
-                //         .into_iter()
-                //         .enumerate()
-                //         .map(|(idx, v)| {
-                //             v.value().map(|v| {
-                //                 // println!(
-                //                 //     "idx {} code {} char {}",
-                //                 //     idx,
-                //                 //     v.get_lower_32(),
-                //                 //     (v.get_lower_32() as u8) as char
-                //                 // )
-                //             });
-                //             v.cell()
-                //         })
-                //         .collect::<Vec<Cell>>(),
-                // );
-                // masked_str_cell.append(
-                //     &mut header_regex
-                //         .masked_characters
-                //         .into_iter()
-                //         .enumerate()
-                //         .map(|(idx, v)| {
-                //             v.value().map(|v| {
-                //                 // println!(
-                //                 //     "idx {} code {} char {}",
-                //                 //     idx,
-                //                 //     v.get_lower_32(),
-                //                 //     (v.get_lower_32() as u8) as char
-                //                 // )
-                //             });
-                //             v.cell()
-                //         })
-                //         .collect::<Vec<Cell>>(),
-                // );
-                // masked_str_cell.append(
-                //     &mut body_regex
-                //         .masked_characters
-                //         .into_iter()
-                //         .enumerate()
-                //         .map(|(idx, v)| {
-                //             v.value().map(|v| {
-                //                 // println!(
-                //                 //     "idx {} code {} char {}",
-                //                 //     idx,
-                //                 //     v.get_lower_32(),
-                //                 //     (v.get_lower_32() as u8) as char
-                //                 // )
-                //             });
-                //             v.cell()
-                //         })
-                //         .collect::<Vec<Cell>>(),
-                // );
-                // substr_id_cell.append(
-                //     &mut header_regex
-                //         .all_substr_ids
-                //         .into_iter()
-                //         .map(|v| v.cell())
-                //         .collect::<Vec<Cell>>(),
-                // );
-                // substr_id_cell.append(
-                //     &mut body_regex
-                //         .all_substr_ids
-                //         .into_iter()
-                //         .map(|v| v.cell())
-                //         .collect::<Vec<Cell>>(),
-                // );
                 Ok(())
             },
         )?;
@@ -554,10 +487,17 @@ impl<F: Field> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
     fn instances(&self) -> Vec<Vec<F>> {
         let public_hash_input = self.get_public_hash_input();
         let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
+        println!("public hash {}", hex::encode(public_hash.clone()));
         let public_frs = public_hash
             .chunks(16)
             .map(|bytes| F::from_u128(u128::from_le_bytes(bytes.try_into().unwrap())))
             .collect_vec();
+        println!(
+            "public fr0 {:?}, fr1 {:?}",
+            public_frs[0].to_repr(),
+            public_frs[1].to_repr()
+        );
+        println!("public fr0 {:?}, fr1 {:?}", public_frs[0], public_frs[1],);
         vec![public_frs]
     }
 }

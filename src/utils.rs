@@ -22,5 +22,6 @@ pub fn get_substr(input_str: &str, regexes: &[String]) -> Option<(usize, String)
         };
     }
     // println!("substr {}", substr);
+    // println!("start {}", start);
     Some((start, substr.to_string()))
 }
