@@ -1,7 +1,6 @@
+use crate::snark_verifier_sdk::*;
 use crate::utils::get_email_circuit_public_hash_input;
-use crate::{
-    recursion_and_evm::*, DefaultEmailVerifyCircuit, EmailVerifyConfig, EMAIL_VERIFY_CONFIG_ENV,
-};
+use crate::{DefaultEmailVerifyCircuit, EmailVerifyConfig, EMAIL_VERIFY_CONFIG_ENV};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use cfdkim::{canonicalize_signed_email, resolve_public_key};
 use clap::{Parser, Subcommand};
@@ -30,21 +29,19 @@ use regex_simple::Regex;
 use rsa::PublicKeyParts;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use snark_verifier::loader::evm::{compile_yul, EvmLoader};
-use snark_verifier::pcs::kzg::{Bdfg21, Kzg};
+use snark_verifier::loader::evm::{compile_yul, encode_calldata, EvmLoader};
+// use snark_verifier::pcs::kzg::{Bdfg21, Kzg};
 use snark_verifier::system::halo2::transcript::evm::EvmTranscript;
 use snark_verifier::system::halo2::{compile, Config};
-use snark_verifier::verifier::{Plonk as PlonkApp, PlonkVerifier};
-use snark_verifier_sdk::evm::{encode_calldata, evm_verify, gen_evm_proof, gen_evm_proof_shplonk};
-use snark_verifier_sdk::halo2::aggregation::PublicAggregationCircuit;
-use snark_verifier_sdk::halo2::gen_snark_shplonk;
-use snark_verifier_sdk::{gen_pk, CircuitExt, Plonk as PlonkAgg, LIMBS};
+// use snark_verifier::verifier::{Plonk as PlonkApp, PlonkVerifier};
+// use snark_verifier_sdk::evm::{encode_calldata, evm_verify, gen_evm_proof, gen_evm_proof_shplonk};
+// use snark_verifier_sdk::halo2::aggregation::PublicAggregationCircuit;
+// use snark_verifier_sdk::halo2::gen_snark_shplonk;
+// use snark_verifier_sdk::{gen_pk, CircuitExt, Plonk as PlonkAgg, LIMBS};
 use std::env::set_var;
-use std::fmt::format;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailVerifyPublicInput {
@@ -78,8 +75,15 @@ pub async fn gen_app_key(
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
     let circuit = gen_circuit_from_email_path(email_path).await;
-    let pk = gen_pk::<DefaultEmailVerifyCircuit<Fr>>(&params, &circuit, Some(&Path::new(pk_path)));
+    let pk = gen_pk::<DefaultEmailVerifyCircuit<Fr>>(&params, &circuit);
     println!("app pk generated");
+    {
+        let f = File::create(pk_path).unwrap();
+        let mut writer = BufWriter::new(f);
+        pk.write(&mut writer, SerdeFormat::RawBytesUnchecked)
+            .unwrap();
+        writer.flush().unwrap();
+    }
 
     let vk = pk.get_vk();
     {
@@ -95,15 +99,15 @@ pub async fn gen_app_key(
 pub async fn gen_agg_key(
     app_param_path: &str,
     agg_param_path: &str,
-    app_circuit_config_path: &str,
-    agg_circuit_config_path: &str,
+    circuit_config_path: &str,
+    // agg_circuit_config_path: &str,
     email_path: &str,
     app_pk_path: &str,
     agg_pk_path: &str,
     agg_vk_path: &str,
 ) -> Result<(), Error> {
-    set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config_path);
-    set_var("VERIFY_CONFIG", agg_circuit_config_path);
+    set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
+    // set_var("VERIFY_CONFIG", agg_circuit_config_path);
     let app_params = {
         let f = File::open(Path::new(app_param_path)).unwrap();
         let mut reader = BufReader::new(f);
@@ -124,18 +128,22 @@ pub async fn gen_agg_key(
         )
         .unwrap()
     };
-    let snark = gen_snark_shplonk(
-        &app_params,
-        &app_pk,
-        app_circuit.clone(),
-        &mut OsRng,
-        None::<&str>,
-    );
+    let snark = gen_application_snark(&app_params, &app_circuit, &app_pk);
     println!("snark generated");
-    let agg_circuit = PublicAggregationCircuit::new(&agg_params, vec![snark], false, &mut OsRng);
-    let agg_pk =
-        gen_pk::<PublicAggregationCircuit>(&agg_params, &agg_circuit, Some(Path::new(agg_pk_path)));
+    let agg_circuit = PublicAggregationCircuit::new(&agg_params, vec![snark]);
+    let agg_pk = gen_pk::<PublicAggregationCircuit<DefaultEmailVerifyCircuit<Fr>>>(
+        &agg_params,
+        &agg_circuit,
+    );
     println!("agg pk generated");
+    {
+        let f = File::create(agg_pk_path).unwrap();
+        let mut writer = BufWriter::new(f);
+        agg_pk
+            .write(&mut writer, SerdeFormat::RawBytesUnchecked)
+            .unwrap();
+        writer.flush().unwrap();
+    }
 
     let vk = agg_pk.get_vk();
     {
@@ -173,33 +181,34 @@ pub async fn prove_app(
     let circuit = gen_circuit_from_email_path(email_path).await;
     let instances = circuit.instances();
 
-    let proof = {
-        let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
-        create_proof::<KZGCommitmentScheme<_>, ProverSHPLONK<_>, _, _, _, _>(
-            &params,
-            &pk,
-            &vec![circuit.clone()],
-            &[&instances.iter().map(Vec::as_slice).collect_vec()],
-            OsRng,
-            &mut transcript,
-        )
-        .unwrap();
-        transcript.finalize()
-    };
+    let proof = gen_proof_native(&params, &pk, circuit);
+    // {
+    //     let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
+    //     create_proof::<KZGCommitmentScheme<_>, ProverSHPLONK<_>, _, _, _, _>(
+    //         &params,
+    //         &pk,
+    //         &vec![circuit.clone()],
+    //         &[&instances.iter().map(Vec::as_slice).collect_vec()],
+    //         OsRng,
+    //         &mut transcript,
+    //     )
+    //     .unwrap();
+    //     transcript.finalize()
+    // };
 
-    {
-        let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        let verifier_params = params.verifier_params();
-        let strategy = SingleStrategy::new(&verifier_params);
-        verify_proof::<_, VerifierSHPLONK<_>, _, _, _>(
-            &params,
-            &pk.get_vk(),
-            strategy,
-            &[&instances.iter().map(Vec::as_slice).collect_vec()],
-            &mut transcript,
-        )
-        .unwrap();
-    };
+    // {
+    //     let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+    //     let verifier_params = params.verifier_params();
+    //     let strategy = SingleStrategy::new(&verifier_params);
+    //     verify_proof::<_, VerifierSHPLONK<_>, _, _, _>(
+    //         &params,
+    //         &pk.get_vk(),
+    //         strategy,
+    //         &[&instances.iter().map(Vec::as_slice).collect_vec()],
+    //         &mut transcript,
+    //     )
+    //     .unwrap();
+    // };
     {
         let f = File::create(proof_path).unwrap();
         let mut writer = BufWriter::new(f);
@@ -232,9 +241,7 @@ pub async fn evm_prove_app(
         .unwrap()
     };
     let circuit = gen_circuit_from_email_path(email_path).await;
-    let instances = circuit.instances();
-    let proof = gen_evm_proof_shplonk(&params, &pk, circuit, instances.clone(), &mut OsRng);
-
+    let proof = gen_proof_evm(&params, &pk, circuit);
     {
         let proof_hex = hex::encode(&proof);
         let mut file = File::create(proof_path)?;
@@ -247,16 +254,16 @@ pub async fn evm_prove_app(
 pub async fn evm_prove_agg(
     app_param_path: &str,
     agg_param_path: &str,
-    app_circuit_config_path: &str,
-    agg_circuit_config_path: &str,
+    circuit_config_path: &str,
+    // agg_circuit_config_path: &str,
     email_path: &str,
     app_pk_path: &str,
     agg_pk_path: &str,
     acc_path: &str,
     proof_path: &str,
 ) -> Result<(), Error> {
-    set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config_path);
-    set_var("VERIFY_CONFIG", agg_circuit_config_path);
+    set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
+    // set_var("VERIFY_CONFIG", agg_circuit_config_path);
     let app_params = {
         let f = File::open(Path::new(app_param_path)).unwrap();
         let mut reader = BufReader::new(f);
@@ -277,18 +284,13 @@ pub async fn evm_prove_agg(
         )
         .unwrap()
     };
-    let snark = gen_snark_shplonk(
-        &app_params,
-        &app_pk,
-        app_circuit.clone(),
-        &mut OsRng,
-        None::<&str>,
-    );
-    let agg_circuit = PublicAggregationCircuit::new(&agg_params, vec![snark], false, &mut OsRng);
+    let snark = gen_application_snark(&app_params, &app_circuit, &app_pk);
+    let agg_circuit =
+        PublicAggregationCircuit::<DefaultEmailVerifyCircuit<Fr>>::new(&agg_params, vec![snark]);
     let agg_pk = {
         let f = File::open(Path::new(agg_pk_path)).unwrap();
         let mut reader = BufReader::new(f);
-        ProvingKey::<G1Affine>::read::<_, PublicAggregationCircuit>(
+        ProvingKey::<G1Affine>::read::<_, PublicAggregationCircuit<DefaultEmailVerifyCircuit<Fr>>>(
             &mut reader,
             SerdeFormat::RawBytesUnchecked,
         )
@@ -297,20 +299,14 @@ pub async fn evm_prove_agg(
     let instances = agg_circuit.instances();
     println!("instances {:?}", instances[0]);
 
-    let acc = encode_calldata(&[instances[0][0..4 * LIMBS].to_vec()], &[]);
+    let acc = encode_calldata(&[instances[0][0..NUM_ACC_INSTANCES].to_vec()], &[]);
     {
         let acc_hex = hex::encode(&acc);
         let mut file = File::create(acc_path)?;
         write!(file, "0x{}", acc_hex).unwrap();
         file.flush().unwrap();
     };
-    let proof = gen_evm_proof_shplonk(
-        &agg_params,
-        &agg_pk,
-        agg_circuit,
-        instances.clone(),
-        &mut OsRng,
-    );
+    let proof = gen_proof_evm(&agg_params, &agg_pk, agg_circuit);
     {
         let proof_hex = hex::encode(&proof);
         let mut file = File::create(proof_path)?;
@@ -400,7 +396,6 @@ pub async fn evm_prove_agg(
 pub async fn gen_evm_verifier(
     param_path: &str,
     circuit_config: &str,
-    email_path: &str,
     vk_path: &str,
     bytecode_path: &str,
     solidity_path: &str,
@@ -420,12 +415,9 @@ pub async fn gen_evm_verifier(
         )
         .unwrap()
     };
-    let circuit = gen_circuit_from_email_path(email_path).await;
-    let num_instance = circuit.num_instance();
-    let verifier_yul = gen_evm_verifier_yul::<
-        DefaultEmailVerifyCircuit<Fr>,
-        PlonkApp<Kzg<Bn256, Bdfg21>>,
-    >(&params, &vk, num_instance);
+    // let circuit = gen_circuit_from_email_path(email_path).await;
+    // let num_instance = DefaultEmailVerifyCircuit::<Fr>::num_instances(0);
+    let verifier_yul = gen_app_evm_verifier_yul::<DefaultEmailVerifyCircuit<Fr>>(&params, &vk);
     {
         let bytecode = compile_yul(&verifier_yul);
         let f = File::create(bytecode_path).unwrap();
@@ -446,15 +438,14 @@ pub async fn gen_evm_verifier(
 
 pub async fn gen_agg_evm_verifier(
     param_path: &str,
-    app_circuit_config: &str,
-    agg_circuit_config: &str,
-    email_path: &str,
+    circuit_config: &str,
+    // agg_circuit_config: &str,
     vk_path: &str,
     bytecode_path: &str,
     solidity_path: &str,
 ) -> Result<(), Error> {
-    set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config);
-    set_var("VERIFY_CONFIG", agg_circuit_config);
+    set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
+    // set_var("VERIFY_CONFIG", agg_circuit_config);
     let params = {
         let f = File::open(Path::new(param_path)).unwrap();
         let mut reader = BufReader::new(f);
@@ -463,19 +454,14 @@ pub async fn gen_agg_evm_verifier(
     let vk = {
         let f = File::open(vk_path).unwrap();
         let mut reader = BufReader::new(f);
-        VerifyingKey::<G1Affine>::read::<_, PublicAggregationCircuit>(
+        VerifyingKey::<G1Affine>::read::<_, PublicAggregationCircuit::<DefaultEmailVerifyCircuit<Fr>>>(
             &mut reader,
             SerdeFormat::RawBytesUnchecked,
         )
         .unwrap()
     };
-    let circuit = gen_circuit_from_email_path(email_path).await;
-    let num_instance = vec![4 * LIMBS + circuit.num_instance().iter().sum::<usize>()];
-    let verifier_yul = gen_evm_verifier_yul::<PublicAggregationCircuit, PlonkAgg<Kzg<Bn256, Bdfg21>>>(
-        &params,
-        &vk,
-        num_instance,
-    );
+    let verifier_yul =
+        gen_aggregation_evm_verifier_yul::<DefaultEmailVerifyCircuit<Fr>>(&params, &vk, 1);
     {
         let bytecode = compile_yul(&verifier_yul);
         let f = File::create(bytecode_path).unwrap();
@@ -549,15 +535,15 @@ pub fn evm_verify_app(
 }
 
 pub fn evm_verify_agg(
-    app_circuit_config: &str,
-    agg_circuit_config: &str,
+    circuit_config: &str,
+    // agg_circuit_config: &str,
     bytecode_path: &str,
     proof_path: &str,
     acc_path: &str,
     public_input_path: &str,
 ) -> Result<(), Error> {
-    set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config);
-    set_var("VERIFY_CONFIG", agg_circuit_config);
+    set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
+    // set_var("VERIFY_CONFIG", agg_circuit_config);
     let deployment_code = {
         let f = File::open(bytecode_path).unwrap();
         let mut reader = BufReader::new(f);
@@ -582,7 +568,7 @@ pub fn evm_verify_agg(
                 })
                 .collect_vec()
         };
-        assert_eq!(acc.len(), 4 * LIMBS);
+        assert_eq!(acc.len(), NUM_ACC_INSTANCES);
         let public_input = serde_json::from_reader::<File, EmailVerifyPublicInput>(
             File::open(public_input_path).unwrap(),
         )
@@ -649,36 +635,6 @@ async fn gen_circuit_from_email_path(email_path: &str) -> DefaultEmailVerifyCirc
         signature,
     };
     circuit
-}
-
-fn gen_evm_verifier_yul<C, P: PlonkVerifier<G1Affine, Rc<EvmLoader>, Kzg<Bn256, Bdfg21>>>(
-    params: &ParamsKZG<Bn256>,
-    vk: &VerifyingKey<G1Affine>,
-    num_instance: Vec<usize>,
-) -> String
-where
-    C: CircuitExt<Fr>,
-{
-    let svk = params.get_g()[0].into();
-    let dk = (params.g2(), params.s_g2()).into();
-    let protocol = compile(
-        params,
-        vk,
-        Config::kzg()
-            .with_num_instance(num_instance.clone())
-            .with_accumulator_indices(C::accumulator_indices()),
-    );
-
-    let loader = EvmLoader::new::<Fq, Fr>();
-    let protocol = protocol.loaded(&loader);
-    let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
-
-    let instances = transcript.load_instances(num_instance);
-    let proof = P::read_proof(&svk, &protocol, &instances, &mut transcript);
-    P::verify(&svk, &dk, &protocol, &instances, &proof);
-
-    let yul_code = loader.yul_code();
-    yul_code
 }
 
 fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::Error>> {

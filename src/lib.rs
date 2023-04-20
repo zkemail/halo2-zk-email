@@ -1,7 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod helpers;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod recursion_and_evm;
+pub mod snark_verifier_sdk;
 
 pub mod regex_sha2;
 pub mod regex_sha2_base64;
@@ -39,7 +39,8 @@ use regex_sha2_base64::RegexSha2Base64Config;
 use rsa::{PublicKeyParts, RsaPrivateKey};
 use serde_json;
 use sha2::{Digest, Sha256};
-use snark_verifier_sdk::CircuitExt;
+
+use crate::snark_verifier_sdk::CircuitExt;
 use std::env::set_var;
 use std::fmt::format;
 use std::fs::File;
@@ -493,10 +494,7 @@ impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
 }
 
 impl<F: Field> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
-    fn num_instance(&self) -> Vec<usize> {
-        // let params = Self::read_config_params();
-        // let max_len = params.header_max_byte_size + params.body_max_byte_size;
-        // vec![44, max_len, max_len]
+    fn num_instances(num_snarks: usize) -> Vec<usize> {
         vec![2]
     }
 

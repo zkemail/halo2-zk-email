@@ -1,3 +1,5 @@
+use base64::prelude::{Engine as _, BASE64_STANDARD};
+use cfdkim::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use fancy_regex::Regex;
 use halo2_base::halo2_proofs;
@@ -17,35 +19,33 @@ use halo2_base::halo2_proofs::transcript::{
     Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
 };
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error, SerdeFormat};
+use halo2_base::halo2_proofs::{
+    circuit::{floor_planner::V1, Cell, Value},
+    dev::{CircuitCost, FailureLocation, MockProver, VerifyFailure},
+    plonk::{Any, Column, Instance, ProvingKey, VerifyingKey},
+};
 use halo2_base::{gates::range::RangeConfig, utils::PrimeField, Context};
+use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
 use halo2_dynamic_sha256::Field;
 use halo2_regex::defs::{AllstrRegexDef, SubstrRegexDef};
 use halo2_rsa::{RSAPubE, RSAPublicKey, RSASignature};
+use halo2_zk_email::snark_verifier_sdk::{gen_proof_native, CircuitExt};
+use halo2_zk_email::{DefaultEmailVerifyCircuit, EmailVerifyConfig, EMAIL_VERIFY_CONFIG_ENV};
+use itertools::Itertools;
+use mailparse::parse_mail;
+use num_bigint::BigUint;
 use rand::rngs::OsRng;
-use snark_verifier_sdk::{evm::gen_evm_proof_gwc, CircuitExt};
+use rand::thread_rng;
+use rand::Rng;
+use rsa::{PublicKeyParts, RsaPrivateKey};
+use sha2::{self, Digest, Sha256};
 use std::env::set_var;
 use std::{
     fs::File,
     io::{prelude::*, BufReader, BufWriter},
     path::Path,
 };
-
-use base64::prelude::{Engine as _, BASE64_STANDARD};
-use cfdkim::*;
-use halo2_base::halo2_proofs::{
-    circuit::{floor_planner::V1, Cell, Value},
-    dev::{CircuitCost, FailureLocation, MockProver, VerifyFailure},
-    plonk::{Any, Column, Instance, ProvingKey, VerifyingKey},
-};
-use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
-use halo2_zk_email::{DefaultEmailVerifyCircuit, EmailVerifyConfig, EMAIL_VERIFY_CONFIG_ENV};
-use itertools::Itertools;
-use mailparse::parse_mail;
-use num_bigint::BigUint;
-use rand::thread_rng;
-use rand::Rng;
-use rsa::{PublicKeyParts, RsaPrivateKey};
-use sha2::{self, Digest, Sha256};
+use tokio::runtime::Runtime;
 
 // impl_email_verify_circuit!(
 //     Bench1EmailVerifyConfig,
@@ -84,43 +84,59 @@ fn gen_or_get_params(k: usize) -> ParamsKZG<Bn256> {
 fn bench_email_verify1(c: &mut Criterion) {
     let mut group = c.benchmark_group("email bench1 with recursion");
     group.sample_size(10);
-    let params = gen_or_get_params(13);
+    set_var(EMAIL_VERIFY_CONFIG_ENV, "./configs/default_app.config");
+    let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    let params = gen_or_get_params(config_params.degree as usize);
     println!("gen_params");
-    set_var(
-        EMAIL_VERIFY_CONFIG_ENV,
-        "./configs/bench_app_email_verify.config",
-    );
     let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
     let mut rng = thread_rng();
-    let _private_key = RsaPrivateKey::new(&mut rng, config_params.public_key_bits)
-        .expect("failed to generate a key");
-    let public_key = rsa::RsaPublicKey::from(&_private_key);
-    let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
-    let message = concat!(
-        "From: alice@zkemail.com\r\n",
-        "\r\n",
-        "email was meant for @zkemailverify.",
-    )
-    .as_bytes();
-    let email = parse_mail(message).unwrap();
+    // let _private_key = RsaPrivateKey::new(&mut rng, config_params.public_key_bits)
+    //     .expect("failed to generate a key");
+    // let public_key = rsa::RsaPublicKey::from(&_private_key);
+    // let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
+    // let message = concat!(
+    //     "From: alice@zkemail.com\r\n",
+    //     "\r\n",
+    //     "email was meant for @zkemailverify.",
+    // )
+    // .as_bytes();
+    // let email = parse_mail(message).unwrap();
+    // let logger = slog::Logger::root(slog::Discard, slog::o!());
+    // let signer = SignerBuilder::new()
+    //     .with_signed_headers(&["From"])
+    //     .unwrap()
+    //     .with_private_key(private_key)
+    //     .with_selector("default")
+    //     .with_signing_domain("zkemail.com")
+    //     .with_logger(&logger)
+    //     .with_header_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+    //     .with_body_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+    //     .build()
+    //     .unwrap();
+    // let signature = signer.sign(&email).unwrap();
+    // println!("signature {}", signature);
+    // let new_msg = vec![signature.as_bytes(), b"\r\n", message].concat();
+    let email_bytes = {
+        let mut f = File::open("./test_data/test_email1.eml").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+        buf
+    };
     let logger = slog::Logger::root(slog::Discard, slog::o!());
-    let signer = SignerBuilder::new()
-        .with_signed_headers(&["From"])
-        .unwrap()
-        .with_private_key(private_key)
-        .with_selector("default")
-        .with_signing_domain("zkemail.com")
-        .with_logger(&logger)
-        .with_header_canonicalization(cfdkim::canonicalization::Type::Relaxed)
-        .with_body_canonicalization(cfdkim::canonicalization::Type::Relaxed)
-        .build()
+    let runtime = Runtime::new().unwrap();
+    let public_key = runtime
+        .block_on(async { resolve_public_key(&logger, &email_bytes).await })
         .unwrap();
-    let signature = signer.sign(&email).unwrap();
-    println!("signature {}", signature);
-    let new_msg = vec![signature.as_bytes(), b"\r\n", message].concat();
+    let public_key = match public_key {
+        cfdkim::DkimPublicKey::Rsa(pk) => pk,
+        _ => panic!("not supportted public key type."),
+    };
     let (canonicalized_header, canonicalized_body, signature_bytes) =
-        canonicalize_signed_email(&new_msg).unwrap();
-
+        canonicalize_signed_email(&email_bytes).unwrap();
+    println!(
+        "header {}",
+        String::from_utf8(canonicalized_header.clone()).unwrap()
+    );
     let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
     let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
     let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
@@ -169,26 +185,10 @@ fn bench_email_verify1(c: &mut Criterion) {
     MockProver::run(params.k(), &circuit, circuit.instances())
         .unwrap()
         .assert_satisfied();
-    let emp_circuit = circuit.without_witnesses();
-    let vk = keygen_vk(&params, &emp_circuit).unwrap();
-    let pk = keygen_pk(&params, vk.clone(), &emp_circuit).unwrap();
-    let instances = circuit.instances();
-    let evm_proof = gen_evm_proof_gwc(&params, &pk, circuit.clone(), instances.clone(), &mut OsRng);
-
+    let vk = keygen_vk(&params, &circuit).unwrap();
+    let pk = keygen_pk(&params, vk.clone(), &circuit).unwrap();
     group.bench_function("bench 1", |b| {
-        b.iter(|| {
-            let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
-            create_proof::<KZGCommitmentScheme<_>, ProverGWC<_>, _, _, _, _>(
-                &params,
-                &pk,
-                &vec![circuit.clone()],
-                &[&instances.iter().map(|vec| &vec[..]).collect::<Vec<&[Fr]>>()[..]],
-                OsRng,
-                &mut transcript,
-            )
-            .unwrap();
-            transcript.finalize();
-        })
+        b.iter(|| gen_proof_native(&params, &pk, circuit.clone()))
     });
     group.finish();
 }

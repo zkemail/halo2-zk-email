@@ -25,16 +25,14 @@ halo2-regex = { git = "https://github.com/zkemail/halo2-regex.git", version = "0
 halo2-base64 = { git = "https://github.com/zkemail/halo2-base64.git", version = "0.1.0", branch = "main" }
 num-traits = "0.2.15"
 base64 = "0.21"
-snark-verifier = { git = "https://github.com/zkemail/snark-verifier.git", version = "0.1.0", branch = "main", default-features = false, features = [
-    "loader_evm",
-    "loader_halo2",
-    "halo2-pse",
-] }
-snark-verifier-sdk = { git = "https://github.com/zkemail/snark-verifier.git", version = "0.0.1", branch = "main", default-features = false, features = [
-    "loader_evm",
-    "loader_halo2",
-    "halo2-pse",
-] }
+snark-verifier = { git = "https://github.com/privacy-scaling-explorations/snark-verifier.git", version = "0.1.0", branch = "main" }
+halo2_wrong_ecc = { git = "https://github.com/privacy-scaling-explorations/halo2wrong", tag = "v2023_02_02", package = "ecc" }
+
+# snark-verifier-sdk = { git = "https://github.com/zkemail/snark-verifier.git", version = "0.0.1", branch = "main", default-features = false, features = [
+#     "loader_evm",
+#     "loader_halo2",
+#     "halo2-pse",
+# ] }
 ark-std = { version = "0.4.0", features = ["print-trace"] }
 ethereum-types = { version = "0.14", default-features = false, features = [
     "std",
@@ -63,20 +61,20 @@ mailparse = "0.14"
 # mail-parser = "0.8.2"
 # mail-auth = { version = "0.3.0", git = "https://github.com/zkemail/mail-auth.git", branch = "feat/not_async" }
 # cfdkim = { version = "0.2.6", path = "../dkim" }
-criterion = "0.4"
+criterion = { version = "0.4" }
 temp-env = "0.3.3"
 
-# [[bench]]
-# name = "email_verify"
-# harness = false
+[[bench]]
+name = "email_verify"
+harness = false
 
 # [[bench]]
 # name = "recursion"
 # harness = false
 
-[[bench]]
-name = "recursion_without_sha2"
-harness = false
+# [[bench]]
+# name = "recursion_without_sha2"
+# harness = false
 
 [[bin]]
 name = "zkemail"
