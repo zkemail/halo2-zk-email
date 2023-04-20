@@ -13,6 +13,7 @@ use halo2_base::halo2_proofs::{
     },
     transcript::{EncodedChallenge, TranscriptReadBuffer, TranscriptWriterBuffer},
 };
+use halo2_base::utils::value_to_option;
 use halo2_wrong_ecc::halo2::circuit::AssignedCell;
 use itertools::Itertools;
 use rand::rngs::OsRng;
@@ -304,7 +305,20 @@ impl<C: CircuitExt<Fr>> CircuitExt<Fr> for PublicAggregationCircuit<C> {
     }
 
     fn instances(&self) -> Vec<Vec<Fr>> {
-        vec![self.instances.clone()]
+        let acc = self.instances.clone();
+        let app_instances = self
+            .snarks
+            .iter()
+            .flat_map(|snark| {
+                snark.instances.iter().flat_map(|instances| {
+                    instances
+                        .iter()
+                        .map(|instance| value_to_option(*instance).unwrap())
+                        .collect_vec()
+                })
+            })
+            .collect_vec();
+        vec![vec![acc, app_instances].concat()]
     }
 }
 
