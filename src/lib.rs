@@ -376,7 +376,23 @@ impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                     &assigned_public_key,
                     &assigned_signature,
                 )?;
-                let public_hash_input = self.get_public_hash_input();
+                let public_hash_input = {
+                    let header_str = String::from_utf8(self.header_bytes.clone()).unwrap();
+                    let body_str = String::from_utf8(self.body_bytes.clone()).unwrap();
+                    let params = Self::read_config_params();
+                    let (header_substrs, body_substrs) = get_email_substrs(
+                        &header_str,
+                        &body_str,
+                        params.header_substr_regexes,
+                        params.body_substr_regexes,
+                    );
+                    get_email_circuit_public_hash_input(
+                        header_substrs,
+                        body_substrs,
+                        params.header_max_byte_size,
+                        params.body_max_byte_size,
+                    )
+                };
                 let public_hash_result = config.sha256_config.digest(ctx, &public_hash_input)?;
                 // for (idx, v) in public_hash_result.input_bytes.iter().enumerate() {
                 //     v.value().map(|v| {
@@ -485,7 +501,21 @@ impl<F: Field> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
     }
 
     fn instances(&self) -> Vec<Vec<F>> {
-        let public_hash_input = self.get_public_hash_input();
+        let header_str = String::from_utf8(self.header_bytes.clone()).unwrap();
+        let body_str = String::from_utf8(self.body_bytes.clone()).unwrap();
+        let params = Self::read_config_params();
+        let (header_substrs, body_substrs) = get_email_substrs(
+            &header_str,
+            &body_str,
+            params.header_substr_regexes,
+            params.body_substr_regexes,
+        );
+        let public_hash_input = get_email_circuit_public_hash_input(
+            header_substrs,
+            body_substrs,
+            params.header_max_byte_size,
+            params.body_max_byte_size,
+        );
         let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
         println!("public hash {}", hex::encode(public_hash.clone()));
         let public_frs = public_hash
@@ -576,103 +606,26 @@ impl<F: Field> DefaultEmailVerifyCircuit<F> {
     //     // }
     //     circuit
     // }
-
-    pub fn get_public_hash_input(&self) -> Vec<u8> {
-        let (header_substrs, body_substrs) = self.get_substrs();
-        let bodyhash = header_substrs[0].as_ref().unwrap().1.as_bytes();
-        let params = Self::read_config_params();
-        let max_len = params.header_max_byte_size + params.body_max_byte_size;
-        let mut expected_masked_chars = vec![0u8; max_len];
-        let mut expected_substr_ids = vec![0u8; max_len]; // We only support up to 256 substring patterns.
-        for (substr_idx, m) in header_substrs.iter().enumerate() {
-            if let Some((start, chars)) = m {
-                for (idx, char) in chars.as_bytes().iter().enumerate() {
-                    expected_masked_chars[start + idx] = *char;
-                    expected_substr_ids[start + idx] = substr_idx as u8 + 1;
-                }
-            }
-        }
-        for (substr_idx, m) in body_substrs.iter().enumerate() {
-            if let Some((start, chars)) = m {
-                for (idx, char) in chars.as_bytes().iter().enumerate() {
-                    expected_masked_chars[params.header_max_byte_size + start + idx] = *char;
-                    expected_substr_ids[params.header_max_byte_size + start + idx] =
-                        substr_idx as u8 + 1;
-                }
-            }
-        }
-        vec![
-            bodyhash,
-            &[0u8; (64 - 44)][..],
-            &expected_masked_chars,
-            &expected_substr_ids,
-        ]
-        .concat()
-    }
-
-    pub fn get_substrs(&self) -> (Vec<Option<(usize, String)>>, Vec<Option<(usize, String)>>) {
-        let params = Self::read_config_params();
-        let header_str = String::from_utf8(self.header_bytes.clone())
-            .expect("fail to encode header bytes to utf8 string");
-        let bodyhash_substr = get_substr(
-            &header_str,
-            &[
-                r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)".to_string(),
-            ],
-        );
-        let header_substrs = params
-            .header_substr_regexes
-            .iter()
-            .map(|raws| {
-                let raws = raws
-                    .into_iter()
-                    .map(|raw| format!(r"{}", raw))
-                    .collect_vec();
-                get_substr(&header_str, raws.as_slice())
-            })
-            .collect_vec();
-        let header_substrings = vec![vec![bodyhash_substr], header_substrs].concat();
-        let body_str = String::from_utf8(self.body_bytes.clone())
-            .expect("fail to encode body bytes to utf8 string");
-        let body_substrings = params
-            .body_substr_regexes
-            .iter()
-            .map(|raws| {
-                let raws = raws
-                    .into_iter()
-                    .map(|raw| format!(r"{}", raw))
-                    .collect_vec();
-                get_substr(&body_str, raws.as_slice())
-            })
-            .collect_vec();
-        (header_substrings, body_substrings)
-    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use cfdkim::{canonicalize_signed_email, resolve_public_key, verify_email, SignerBuilder};
+    use cfdkim::{canonicalize_signed_email, resolve_public_key, SignerBuilder};
     use halo2_base::halo2_proofs::{
-        circuit::{floor_planner::V1, Cell, SimpleFloorPlanner, Value},
+        circuit::Value,
         dev::{CircuitCost, FailureLocation, MockProver, VerifyFailure},
         halo2curves::bn256::{Fr, G1},
-        plonk::{Any, Circuit, Column, Instance},
     };
-    use halo2_base::{gates::range::RangeStrategy::Vertical, ContextParams, SKIP_FIRST_PASS};
     use halo2_rsa::RSAPubE;
     use mailparse::parse_mail;
     use rand::thread_rng;
     // use mail_auth::{dkim::{self, Canonicalization}, common::{headers::Writable, verify::VerifySignature}, AuthenticatedMessage, Resolver, DkimResult};
     use num_bigint::BigUint;
-    use sha2::{self, Digest, Sha256};
-    use std::{collections::HashSet, io::Read};
+    use std::io::Read;
     // use mail_auth::{common::{crypto::{RsaKey},headers::HeaderWriter},dkim::DkimSigner};
     // use mail_parser::{decoders::base64::base64_decode,  Message, Addr, HeaderValue};
-    use base64::prelude::{Engine as _, BASE64_STANDARD};
-    use fancy_regex::Regex;
-    use hex;
-    use rsa::{pkcs1::DecodeRsaPrivateKey, PublicKeyParts, RsaPrivateKey};
+    use rsa::{PublicKeyParts, RsaPrivateKey};
     use snark_verifier_sdk::CircuitExt;
     use temp_env;
 

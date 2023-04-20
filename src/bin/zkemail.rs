@@ -166,8 +166,11 @@ enum Commands {
         #[arg(long, default_value = "./build/app.vk")]
         vk_path: String,
         /// evm verifier file
+        #[arg(short, long, default_value = "./build/verifier.bin")]
+        bytecode_path: String,
+        /// evm verifier file
         #[arg(short, long, default_value = "./build/Verifier.sol")]
-        code_path: String,
+        solidity_path: String,
     },
     GenAggEVMVerifier {
         /// setup parameter path
@@ -186,8 +189,45 @@ enum Commands {
         #[arg(long, default_value = "./build/agg.vk")]
         vk_path: String,
         /// evm verifier file
+        #[arg(short, long, default_value = "./build/verifier.bin")]
+        bytecode_path: String,
+        /// evm verifier file
         #[arg(short, long, default_value = "./build/Verifier.sol")]
-        code_path: String,
+        solidity_path: String,
+    },
+    EVMVerifyApp {
+        /// email verification circuit configure file
+        #[arg(short, long, default_value = "./configs/default_app.config")]
+        circuit_config: String,
+        /// evm verifier file
+        #[arg(short, long, default_value = "./build/verifier.bin")]
+        bytecode_path: String,
+        /// output proof file
+        #[arg(long, default_value = "./build/evm_agg_proof.hex")]
+        proof_path: String,
+        /// public input file
+        #[arg(long, default_value = "./build/public_input.json")]
+        public_input_path: String,
+    },
+    EVMVerifyAgg {
+        /// email verification circuit configure file
+        #[arg(short, long, default_value = "./configs/default_app.config")]
+        app_circuit_config: String,
+        /// aggregation circuit configure file
+        #[arg(short, long, default_value = "./configs/default_agg.config")]
+        agg_circuit_config: String,
+        /// evm verifier file
+        #[arg(short, long, default_value = "./build/verifier.bin")]
+        bytecode_path: String,
+        /// output proof file
+        #[arg(long, default_value = "./build/evm_agg_proof.hex")]
+        proof_path: String,
+        /// output acc file
+        #[arg(long, default_value = "./build/evm_agg_acc.hex")]
+        acc_path: String,
+        /// public input file
+        #[arg(long, default_value = "./build/public_input.json")]
+        public_input_path: String,
     },
 }
 
@@ -290,13 +330,15 @@ async fn main() {
             circuit_config,
             email_path,
             vk_path,
-            code_path,
+            bytecode_path,
+            solidity_path,
         } => gen_evm_verifier(
             &param_path,
             &circuit_config,
             &email_path,
             &vk_path,
-            &code_path,
+            &bytecode_path,
+            &solidity_path,
         )
         .await
         .unwrap(),
@@ -306,16 +348,46 @@ async fn main() {
             agg_circuit_config,
             email_path,
             vk_path,
-            code_path,
+            bytecode_path,
+            solidity_path,
         } => gen_agg_evm_verifier(
             &param_path,
             &app_circuit_config,
             &agg_circuit_config,
             &email_path,
             &vk_path,
-            &code_path,
+            &bytecode_path,
+            &solidity_path,
         )
         .await
+        .unwrap(),
+        Commands::EVMVerifyApp {
+            circuit_config,
+            bytecode_path,
+            proof_path,
+            public_input_path,
+        } => evm_verify_app(
+            &circuit_config,
+            &bytecode_path,
+            &proof_path,
+            &public_input_path,
+        )
+        .unwrap(),
+        Commands::EVMVerifyAgg {
+            app_circuit_config,
+            agg_circuit_config,
+            bytecode_path,
+            proof_path,
+            acc_path,
+            public_input_path,
+        } => evm_verify_agg(
+            &app_circuit_config,
+            &agg_circuit_config,
+            &bytecode_path,
+            &proof_path,
+            &acc_path,
+            &public_input_path,
+        )
         .unwrap(),
     }
 }
