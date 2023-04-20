@@ -39,6 +39,7 @@ use regex_sha2_base64::RegexSha2Base64Config;
 use rsa::{PublicKeyParts, RsaPrivateKey};
 use serde_json;
 use sha2::{Digest, Sha256};
+use snark_verifier::loader::LoadedScalar;
 
 use crate::snark_verifier_sdk::CircuitExt;
 use std::env::set_var;
@@ -461,41 +462,47 @@ impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                     ctx.region.constrain_equal(a, b)?;
                 }
                 debug_assert_eq!(public_hash_result.output_bytes.len(), 32);
-                let packed_public_hash = public_hash_result
-                    .output_bytes
-                    .chunks(16)
-                    .map(|bytes| {
-                        let mut sum = gate.load_zero(ctx);
-                        for (idx, byte) in bytes.into_iter().enumerate() {
-                            sum = gate.mul_add(
-                                ctx,
-                                QuantumCell::Existing(byte),
-                                QuantumCell::Constant(F::from_u128(1u128 << (8 * idx))),
-                                QuantumCell::Existing(&sum),
-                            )
-                        }
-                        sum
-                    })
-                    .collect_vec();
+                let mut packed_public_hash = gate.load_zero(ctx);
+                let mut coeff = F::from(1u64);
+                for byte in public_hash_result.output_bytes[0..31].iter() {
+                    packed_public_hash = gate.mul_add(
+                        ctx,
+                        QuantumCell::Existing(byte),
+                        QuantumCell::Constant(coeff),
+                        QuantumCell::Existing(&packed_public_hash),
+                    );
+                    coeff *= F::from(256u64);
+                }
+                // let packed_public_hash = public_hash_result.output_bytes[0..31]
+                //     .map(|bytes| {
+                //         let mut sum = gate.load_zero(ctx);
+                //         for (idx, byte) in bytes.into_iter().enumerate() {
+                //             sum = gate.mul_add(
+                //                 ctx,
+                //                 QuantumCell::Existing(byte),
+                //                 QuantumCell::Constant(F::from_u128(1u128 << (8 * idx))),
+                //                 QuantumCell::Existing(&sum),
+                //             )
+                //         }
+                //         sum
+                //     })
+                //     .collect_vec();
                 config.sha256_config.range().finalize(ctx);
-                public_hash_cell = packed_public_hash
-                    .into_iter()
-                    .map(|v| v.cell())
-                    .collect_vec();
-
+                public_hash_cell.push(packed_public_hash.cell());
                 Ok(())
             },
         )?;
-        for (idx, cell) in public_hash_cell.into_iter().enumerate() {
-            layouter.constrain_instance(cell, config.public_hash, idx)?;
-        }
+        layouter.constrain_instance(public_hash_cell[0], config.public_hash, 0)?;
+        // for (idx, cell) in public_hash_cell.into_iter().enumerate() {
+        //     layouter.constrain_instance(cell, config.public_hash, idx)?;
+        // }
         Ok(())
     }
 }
 
 impl<F: Field> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
     fn num_instances(num_snarks: usize) -> Vec<usize> {
-        vec![2]
+        vec![1]
     }
 
     fn instances(&self) -> Vec<Vec<F>> {
@@ -516,17 +523,17 @@ impl<F: Field> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
         );
         let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
         println!("public hash {}", hex::encode(public_hash.clone()));
-        let public_frs = public_hash
-            .chunks(16)
-            .map(|bytes| F::from_u128(u128::from_le_bytes(bytes.try_into().unwrap())))
-            .collect_vec();
-        println!(
-            "public fr0 {:?}, fr1 {:?}",
-            public_frs[0].to_repr(),
-            public_frs[1].to_repr()
-        );
-        println!("public fr0 {:?}, fr1 {:?}", public_frs[0], public_frs[1],);
-        vec![public_frs]
+        let public_fr = {
+            let lo = F::from_u128(u128::from_le_bytes(public_hash[0..16].try_into().unwrap()));
+            let mut hi_bytes = [0; 16];
+            for idx in 0..15 {
+                hi_bytes[idx] = public_hash[16 + idx];
+            }
+            let hi = F::from_u128(u128::from_le_bytes(hi_bytes));
+            hi * F::from(2).pow_const(128) + lo
+        };
+        println!("public fr {:?}", public_fr.to_repr(),);
+        vec![vec![public_fr]]
     }
 }
 
