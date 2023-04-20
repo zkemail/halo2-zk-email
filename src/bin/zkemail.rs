@@ -203,7 +203,7 @@ enum Commands {
         #[arg(short, long, default_value = "./build/verifier.bin")]
         bytecode_path: String,
         /// output proof file
-        #[arg(long, default_value = "./build/evm_agg_proof.hex")]
+        #[arg(long, default_value = "./build/evm_app_proof.hex")]
         proof_path: String,
         /// public input file
         #[arg(long, default_value = "./build/public_input.json")]
