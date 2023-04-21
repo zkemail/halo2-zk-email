@@ -667,7 +667,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
     let mut end = None;
     for (i, line) in reader.lines().enumerate() {
         let line = line?;
-        if line.trim().starts_with("mstore(0x20") {
+        if line.trim().starts_with("mstore(0x20") && start.is_none() {
             start = Some(i as u32);
         }
 
@@ -682,7 +682,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
     } else {
         0
     };
-    // println!("num_pubinputs {}", num_pubinputs);
+    println!("num_pubinputs {}", num_pubinputs);
 
     let mut max_pubinputs_addr = 0;
     if num_pubinputs > 0 {
