@@ -38,6 +38,7 @@ use snark_verifier::system::halo2::{compile, Config};
 // use snark_verifier_sdk::halo2::aggregation::PublicAggregationCircuit;
 // use snark_verifier_sdk::halo2::gen_snark_shplonk;
 // use snark_verifier_sdk::{gen_pk, CircuitExt, Plonk as PlonkAgg, LIMBS};
+use snark_verifier::loader::LoadedScalar;
 use std::env::set_var;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
@@ -523,11 +524,16 @@ pub fn evm_verify_app(
             config_params.body_max_byte_size,
         );
         let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
-        let public_frs = public_hash
-            .chunks(16)
-            .map(|bytes| Fr::from_u128(u128::from_le_bytes(bytes.try_into().unwrap())))
-            .collect_vec();
-        public_frs
+        let public_fr = {
+            let lo = Fr::from_u128(u128::from_le_bytes(public_hash[0..16].try_into().unwrap()));
+            let mut hi_bytes = [0; 16];
+            for idx in 0..15 {
+                hi_bytes[idx] = public_hash[16 + idx];
+            }
+            let hi = Fr::from_u128(u128::from_le_bytes(hi_bytes));
+            hi * Fr::from(2).pow_const(128) + lo
+        };
+        vec![public_fr]
     };
     println!("instances {:?}", instances);
     evm_verify(deployment_code, vec![instances], proof);
@@ -593,11 +599,16 @@ pub fn evm_verify_agg(
             config_params.body_max_byte_size,
         );
         let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
-        let public_frs = public_hash
-            .chunks(16)
-            .map(|bytes| Fr::from_u128(u128::from_le_bytes(bytes.try_into().unwrap())))
-            .collect_vec();
-        vec![acc, public_frs].concat()
+        let public_fr = {
+            let lo = Fr::from_u128(u128::from_le_bytes(public_hash[0..16].try_into().unwrap()));
+            let mut hi_bytes = [0; 16];
+            for idx in 0..15 {
+                hi_bytes[idx] = public_hash[16 + idx];
+            }
+            let hi = Fr::from_u128(u128::from_le_bytes(hi_bytes));
+            hi * Fr::from(2).pow_const(128) + lo
+        };
+        vec![acc, vec![public_fr]].concat()
     };
     println!("instances {:?}", instances);
     evm_verify(deployment_code, vec![instances], proof);
