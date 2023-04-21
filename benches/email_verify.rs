@@ -26,7 +26,6 @@ use halo2_base::halo2_proofs::{
 };
 use halo2_base::{gates::range::RangeConfig, utils::PrimeField, Context};
 use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
-use halo2_dynamic_sha256::Field;
 use halo2_regex::defs::{AllstrRegexDef, SubstrRegexDef};
 use halo2_rsa::{RSAPubE, RSAPublicKey, RSASignature};
 use halo2_zk_email::snark_verifier_sdk::{gen_proof_native, CircuitExt};
