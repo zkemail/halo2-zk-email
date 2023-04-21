@@ -8,10 +8,11 @@ use halo2_base::halo2_proofs::{
 };
 use halo2_base::{
     gates::{flex_gate::FlexGateConfig, range::RangeConfig, RangeInstructions},
+    utils::PrimeField,
     Context,
 };
 use halo2_base64::Base64Config;
-use halo2_dynamic_sha256::{Field, Sha256DynamicConfig};
+use halo2_dynamic_sha256::Sha256DynamicConfig;
 use halo2_regex::{
     defs::{AllstrRegexDef, SubstrRegexDef},
     AssignedRegexResult,
@@ -19,19 +20,19 @@ use halo2_regex::{
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone)]
-pub struct RegexSha2Base64Result<'a, F: Field> {
+pub struct RegexSha2Base64Result<'a, F: PrimeField> {
     pub regex: AssignedRegexResult<'a, F>,
     pub encoded_hash: Vec<AssignedCell<F, F>>,
     pub encoded_hash_value: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
-pub struct RegexSha2Base64Config<F: Field> {
+pub struct RegexSha2Base64Config<F: PrimeField> {
     pub(crate) regex_sha2: RegexSha2Config<F>,
     pub(crate) base64_config: Base64Config<F>,
 }
 
-impl<F: Field> RegexSha2Base64Config<F> {
+impl<F: PrimeField> RegexSha2Base64Config<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         max_byte_size: usize,

@@ -6,28 +6,30 @@ use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
 use halo2_base::QuantumCell;
 use halo2_base::{
     gates::{flex_gate::FlexGateConfig, range::RangeConfig, GateInstructions, RangeInstructions},
+    utils::PrimeField,
     AssignedValue, Context,
 };
-use halo2_dynamic_sha256::{Field, Sha256CompressionConfig, Sha256DynamicConfig};
+use halo2_dynamic_sha256::Sha256DynamicConfig;
 use halo2_regex::{
     defs::{AllstrRegexDef, SubstrRegexDef},
     AssignedRegexResult, RegexVerifyConfig,
 };
+use halo2_wrong_ecc::halo2::halo2curves::FieldExt;
 
 #[derive(Debug, Clone, Default)]
-pub struct RegexSha2Result<'a, F: Field> {
+pub struct RegexSha2Result<'a, F: PrimeField> {
     pub regex: AssignedRegexResult<'a, F>,
     pub hash_bytes: Vec<AssignedValue<'a, F>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct RegexSha2Config<F: Field> {
+pub struct RegexSha2Config<F: PrimeField> {
     // pub(crate) sha256_config: Sha256DynamicConfig<F>,
     pub(crate) regex_config: RegexVerifyConfig<F>,
     pub max_byte_size: usize,
 }
 
-impl<F: Field> RegexSha2Config<F> {
+impl<F: PrimeField> RegexSha2Config<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         max_byte_size: usize,
@@ -164,7 +166,7 @@ mod test {
     use std::io::Read;
 
     #[derive(Debug, Clone)]
-    struct TestRegexSha2Config<F: Field> {
+    struct TestRegexSha2Config<F: PrimeField> {
         inner: RegexSha2Config<F>,
         sha256_config: Sha256DynamicConfig<F>,
         hash_instance: Column<Instance>,
@@ -173,12 +175,12 @@ mod test {
     }
 
     #[derive(Debug, Clone)]
-    struct TestRegexSha2<F: Field> {
+    struct TestRegexSha2<F: PrimeField> {
         input: Vec<u8>,
         _f: PhantomData<F>,
     }
 
-    impl<F: Field> Circuit<F> for TestRegexSha2<F> {
+    impl<F: PrimeField> Circuit<F> for TestRegexSha2<F> {
         type Config = TestRegexSha2Config<F>;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -200,13 +202,13 @@ mod test {
                 0,
                 Self::K as usize,
             );
-            let sha256_comp_configs = (0..Self::NUM_SHA2_COMP)
-                .map(|_| Sha256CompressionConfig::configure(meta))
-                .collect();
+            // let sha256_comp_configs = (0..Self::NUM_SHA2_COMP)
+            //     .map(|_| Sha256CompressionConfig::configure(meta))
+            //     .collect();
             let sha256_config = Sha256DynamicConfig::construct(
-                sha256_comp_configs,
                 vec![Self::MAX_BYTE_SIZE],
                 range_config.clone(),
+                false,
             );
             // let lookup_filepath = "./test_data/regex_test_lookup.txt";
             // let regex_def = AllstrRegexDef::read_from_text("");
@@ -336,14 +338,14 @@ mod test {
         }
     }
 
-    impl<F: Field> TestRegexSha2<F> {
+    impl<F: PrimeField> TestRegexSha2<F> {
         const MAX_BYTE_SIZE: usize = 1024;
-        const NUM_SHA2_COMP: usize = 1; // ~130 columns per extra SHA2 coloumn
-        const NUM_ADVICE: usize = 8;
+        // const NUM_SHA2_COMP: usize = 1; // ~130 columns per extra SHA2 coloumn
+        const NUM_ADVICE: usize = 25;
         const NUM_FIXED: usize = 1;
         const NUM_LOOKUP_ADVICE: usize = 1;
-        const LOOKUP_BITS: usize = 12;
-        const K: u32 = 13;
+        const LOOKUP_BITS: usize = 17;
+        const K: u32 = 18;
     }
 
     #[test]

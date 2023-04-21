@@ -21,7 +21,7 @@ use halo2_base::{
     Context,
 };
 use halo2_base::{AssignedValue, QuantumCell};
-use halo2_dynamic_sha256::{Field, Sha256CompressionConfig, Sha256DynamicConfig};
+use halo2_dynamic_sha256::Sha256DynamicConfig;
 use halo2_regex::{
     defs::{AllstrRegexDef, SubstrRegexDef},
     AssignedRegexResult,
@@ -47,7 +47,7 @@ use std::fmt::format;
 use std::fs::File;
 
 #[derive(Debug, Clone)]
-pub struct EmailVerifyResult<'a, F: Field> {
+pub struct EmailVerifyResult<'a, F: PrimeField> {
     pub assigned_bodyhash: Vec<AssignedCell<F, F>>,
     pub header_result: AssignedRegexResult<'a, F>,
     pub body_result: AssignedRegexResult<'a, F>,
@@ -55,13 +55,13 @@ pub struct EmailVerifyResult<'a, F: Field> {
 }
 
 #[derive(Debug, Clone)]
-pub struct EmailVerifyConfig<F: Field> {
+pub struct EmailVerifyConfig<F: PrimeField> {
     header_processer: RegexSha2Config<F>,
     body_processer: RegexSha2Base64Config<F>,
     rsa_config: RSAConfig<F>,
 }
 
-impl<F: Field> EmailVerifyConfig<F> {
+impl<F: PrimeField> EmailVerifyConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         // num_sha2_compression_per_column: usize,
@@ -226,7 +226,7 @@ pub struct DefaultEmailVerifyConfigParams {
 }
 
 #[derive(Debug, Clone)]
-pub struct DefaultEmailVerifyConfig<F: Field> {
+pub struct DefaultEmailVerifyConfig<F: PrimeField> {
     inner: EmailVerifyConfig<F>,
     sha256_config: Sha256DynamicConfig<F>,
     public_hash: Column<Instance>,
@@ -236,14 +236,14 @@ pub struct DefaultEmailVerifyConfig<F: Field> {
 }
 
 #[derive(Debug, Clone)]
-pub struct DefaultEmailVerifyCircuit<F: Field> {
+pub struct DefaultEmailVerifyCircuit<F: PrimeField> {
     pub header_bytes: Vec<u8>,
     pub body_bytes: Vec<u8>,
     pub public_key: RSAPublicKey<F>,
     pub signature: RSASignature<F>,
 }
 
-impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
+impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
     type Config = DefaultEmailVerifyConfig<F>;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -317,17 +317,17 @@ impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
             body_regex_defs,
             params.public_key_bits,
         );
-        let sha256_comp_configs = (0..params.num_sha2_compression_per_column)
-            .map(|_| Sha256CompressionConfig::configure(meta))
-            .collect();
+        // let sha256_comp_configs = (0..params.num_sha2_compression_per_column)
+        //     .map(|_| Sha256CompressionConfig::configure(meta))
+        //     .collect();
         let sha256_config = Sha256DynamicConfig::construct(
-            sha256_comp_configs,
             vec![
                 params.body_max_byte_size,
                 params.header_max_byte_size,
                 64 + 2 * (params.header_max_byte_size + params.body_max_byte_size) + 64,
             ],
             range_config.clone(),
+            false,
         );
         let public_hash = meta.instance_column();
         meta.enable_equality(public_hash);
@@ -500,7 +500,7 @@ impl<F: Field> Circuit<F> for DefaultEmailVerifyCircuit<F> {
     }
 }
 
-impl<F: Field> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
+impl<F: PrimeField> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
     fn num_instances(num_snarks: usize) -> Vec<usize> {
         vec![1]
     }
@@ -537,7 +537,7 @@ impl<F: Field> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
     }
 }
 
-impl<F: Field> DefaultEmailVerifyCircuit<F> {
+impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
     pub const DEFAULT_E: u128 = 65537;
 
     pub fn read_config_params() -> DefaultEmailVerifyConfigParams {
@@ -710,7 +710,7 @@ mod test {
                     signature,
                 };
                 let instances = circuit.instances();
-                let prover = MockProver::run(13, &circuit, instances).unwrap();
+                let prover = MockProver::run(params.degree, &circuit, instances).unwrap();
                 assert_eq!(prover.verify(), Ok(()));
             },
         );
@@ -804,7 +804,7 @@ mod test {
                 };
 
                 let instances = circuit.instances();
-                let prover = MockProver::run(13, &circuit, instances).unwrap();
+                let prover = MockProver::run(params.degree, &circuit, instances).unwrap();
                 assert_eq!(prover.verify(), Ok(()));
             },
         );
