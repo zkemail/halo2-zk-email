@@ -70,11 +70,15 @@ pub async fn gen_app_key(
     vk_path: &str,
 ) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
-    let params = {
+    let mut params = {
         let f = File::open(Path::new(param_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
+    let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    if params.k() > app_config.degree {
+        params.downsize(app_config.degree);
+    }
     let circuit = gen_circuit_from_email_path(email_path).await;
     let pk = gen_pk::<DefaultEmailVerifyCircuit<Fr>>(&params, &circuit);
     println!("app pk generated");
@@ -165,11 +169,15 @@ pub async fn prove_app(
     proof_path: &str,
 ) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
-    let params = {
+    let mut params = {
         let f = File::open(Path::new(param_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
+    let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    if params.k() > app_config.degree {
+        params.downsize(app_config.degree);
+    }
     let pk = {
         let f = File::open(Path::new(pk_path)).unwrap();
         let mut reader = BufReader::new(f);
@@ -180,7 +188,6 @@ pub async fn prove_app(
         .unwrap()
     };
     let circuit = gen_circuit_from_email_path(email_path).await;
-    let instances = circuit.instances();
 
     let proof = gen_proof_native(&params, &pk, circuit);
     // {
@@ -227,11 +234,15 @@ pub async fn evm_prove_app(
     proof_path: &str,
 ) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
-    let params = {
+    let mut params = {
         let f = File::open(Path::new(param_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
+    let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    if params.k() > app_config.degree {
+        params.downsize(app_config.degree);
+    }
     let pk = {
         let f = File::open(Path::new(pk_path)).unwrap();
         let mut reader = BufReader::new(f);
@@ -402,11 +413,15 @@ pub async fn gen_evm_verifier(
     solidity_path: &str,
 ) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
-    let params = {
+    let mut params = {
         let f = File::open(Path::new(param_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
+    let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    if params.k() > app_config.degree {
+        params.downsize(app_config.degree);
+    }
     let vk = {
         let f = File::open(vk_path).unwrap();
         let mut reader = BufReader::new(f);
