@@ -98,8 +98,7 @@ pub async fn gen_app_key(
 }
 
 pub async fn gen_agg_key(
-    app_param_path: &str,
-    agg_param_path: &str,
+    param_path: &str,
     circuit_config_path: &str,
     // agg_circuit_config_path: &str,
     email_path: &str,
@@ -109,15 +108,16 @@ pub async fn gen_agg_key(
 ) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     // set_var("VERIFY_CONFIG", agg_circuit_config_path);
-    let app_params = {
-        let f = File::open(Path::new(app_param_path)).unwrap();
+    let agg_params = {
+        let f = File::open(Path::new(param_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    let agg_params = {
-        let f = File::open(Path::new(agg_param_path)).unwrap();
-        let mut reader = BufReader::new(f);
-        ParamsKZG::<Bn256>::read(&mut reader).unwrap()
+    let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    let app_params = {
+        let mut params = agg_params.clone();
+        params.downsize(app_config.degree);
+        params
     };
     let app_circuit = gen_circuit_from_email_path(email_path).await;
     let app_pk = {
@@ -253,8 +253,7 @@ pub async fn evm_prove_app(
 }
 
 pub async fn evm_prove_agg(
-    app_param_path: &str,
-    agg_param_path: &str,
+    param_path: &str,
     circuit_config_path: &str,
     // agg_circuit_config_path: &str,
     email_path: &str,
@@ -265,15 +264,16 @@ pub async fn evm_prove_agg(
 ) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     // set_var("VERIFY_CONFIG", agg_circuit_config_path);
-    let app_params = {
-        let f = File::open(Path::new(app_param_path)).unwrap();
+    let agg_params = {
+        let f = File::open(Path::new(param_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    let agg_params = {
-        let f = File::open(Path::new(agg_param_path)).unwrap();
-        let mut reader = BufReader::new(f);
-        ParamsKZG::<Bn256>::read(&mut reader).unwrap()
+    let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    let app_params = {
+        let mut params = agg_params.clone();
+        params.downsize(app_config.degree);
+        params
     };
     let app_circuit = gen_circuit_from_email_path(email_path).await;
     let app_pk = {
