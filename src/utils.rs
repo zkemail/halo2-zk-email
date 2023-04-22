@@ -1,7 +1,10 @@
 use fancy_regex::Regex;
 use itertools::Itertools;
+use num_bigint::BigUint;
 
 pub fn get_email_circuit_public_hash_input(
+    headerhash: &[u8],
+    public_key_n_bytes: &[u8],
     header_substrs: Vec<Option<(usize, String)>>,
     body_substrs: Vec<Option<(usize, String)>>,
     header_max_byte_size: usize,
@@ -28,8 +31,10 @@ pub fn get_email_circuit_public_hash_input(
         }
     }
     vec![
+        headerhash,
         bodyhash,
-        &[0u8; (64 - 44)][..],
+        &[0u8; (128 - 32 - 44)][..],
+        &public_key_n_bytes,
         &expected_masked_chars,
         &expected_substr_ids,
     ]
@@ -43,18 +48,13 @@ pub fn get_email_substrs(
     body_substr_regexes: Vec<Vec<String>>,
 ) -> (Vec<Option<(usize, String)>>, Vec<Option<(usize, String)>>) {
     let bodyhash_substr = get_substr(
-            &header_str,
-            &[
-                r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)".to_string(),
-            ],
-        );
+        &header_str,
+        &[r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)".to_string()],
+    );
     let header_substrs = header_substr_regexes
         .iter()
         .map(|raws| {
-            let raws = raws
-                .into_iter()
-                .map(|raw| format!(r"{}", raw))
-                .collect_vec();
+            let raws = raws.into_iter().map(|raw| format!(r"{}", raw)).collect_vec();
             get_substr(&header_str, raws.as_slice())
         })
         .collect_vec();
@@ -62,10 +62,7 @@ pub fn get_email_substrs(
     let body_substrings = body_substr_regexes
         .iter()
         .map(|raws| {
-            let raws = raws
-                .into_iter()
-                .map(|raw| format!(r"{}", raw))
-                .collect_vec();
+            let raws = raws.into_iter().map(|raw| format!(r"{}", raw)).collect_vec();
             get_substr(&body_str, raws.as_slice())
         })
         .collect_vec();
@@ -73,10 +70,7 @@ pub fn get_email_substrs(
 }
 
 pub fn get_substr(input_str: &str, regexes: &[String]) -> Option<(usize, String)> {
-    let regexes = regexes
-        .into_iter()
-        .map(|raw| Regex::new(&raw).unwrap())
-        .collect_vec();
+    let regexes = regexes.into_iter().map(|raw| Regex::new(&raw).unwrap()).collect_vec();
     let mut start = 0;
     let mut substr = input_str;
     // println!("first regex {}", regexes[0]);

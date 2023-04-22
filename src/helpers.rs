@@ -7,16 +7,12 @@ use clap::{Parser, Subcommand};
 use halo2_base::halo2_proofs::circuit::Value;
 use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, Fq, Fr, G1Affine};
 use halo2_base::halo2_proofs::halo2curves::FieldExt;
-use halo2_base::halo2_proofs::plonk::{
-    create_proof, keygen_pk, keygen_vk, verify_proof, Error, ProvingKey, VerifyingKey,
-};
+use halo2_base::halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk, verify_proof, Error, ProvingKey, VerifyingKey};
 use halo2_base::halo2_proofs::poly::commitment::{Params, ParamsProver};
 use halo2_base::halo2_proofs::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
 use halo2_base::halo2_proofs::poly::kzg::multiopen::{ProverSHPLONK, VerifierSHPLONK};
 use halo2_base::halo2_proofs::poly::kzg::strategy::SingleStrategy;
-use halo2_base::halo2_proofs::transcript::{
-    Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
-};
+use halo2_base::halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
 use halo2_base::halo2_proofs::SerdeFormat;
 use halo2_rsa::{RSAPubE, RSAPublicKey, RSASignature};
 use hex;
@@ -46,6 +42,8 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailVerifyPublicInput {
+    pub headerhash: String,
+    pub public_key_n_bytes: String,
     pub header_starts: Vec<usize>,
     pub header_substrs: Vec<String>,
     pub body_starts: Vec<usize>,
@@ -62,13 +60,7 @@ pub fn gen_param(param_path: &str, k: u32) -> Result<(), Error> {
     Ok(())
 }
 
-pub async fn gen_app_key(
-    param_path: &str,
-    circuit_config_path: &str,
-    email_path: &str,
-    pk_path: &str,
-    vk_path: &str,
-) -> Result<(), Error> {
+pub async fn gen_app_key(param_path: &str, circuit_config_path: &str, email_path: &str, pk_path: &str, vk_path: &str) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let mut params = {
         let f = File::open(Path::new(param_path)).unwrap();
@@ -79,14 +71,13 @@ pub async fn gen_app_key(
     if params.k() > app_config.degree {
         params.downsize(app_config.degree);
     }
-    let (circuit, _, _) = gen_circuit_from_email_path(email_path).await;
+    let (circuit, _, _, _, _) = gen_circuit_from_email_path(email_path).await;
     let pk = gen_pk::<DefaultEmailVerifyCircuit<Fr>>(&params, &circuit);
     println!("app pk generated");
     {
         let f = File::create(pk_path).unwrap();
         let mut writer = BufWriter::new(f);
-        pk.write(&mut writer, SerdeFormat::RawBytesUnchecked)
-            .unwrap();
+        pk.write(&mut writer, SerdeFormat::RawBytesUnchecked).unwrap();
         writer.flush().unwrap();
     }
 
@@ -94,8 +85,7 @@ pub async fn gen_app_key(
     {
         let f = File::create(vk_path).unwrap();
         let mut writer = BufWriter::new(f);
-        vk.write(&mut writer, SerdeFormat::RawBytesUnchecked)
-            .unwrap();
+        vk.write(&mut writer, SerdeFormat::RawBytesUnchecked).unwrap();
         writer.flush().unwrap();
     }
     Ok(())
@@ -123,30 +113,21 @@ pub async fn gen_agg_key(
         params.downsize(app_config.degree);
         params
     };
-    let (app_circuit, _, _) = gen_circuit_from_email_path(email_path).await;
+    let (app_circuit, _, _, _, _) = gen_circuit_from_email_path(email_path).await;
     let app_pk = {
         let f = File::open(Path::new(app_pk_path)).unwrap();
         let mut reader = BufReader::new(f);
-        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(
-            &mut reader,
-            SerdeFormat::RawBytesUnchecked,
-        )
-        .unwrap()
+        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
     let snark = gen_application_snark(&app_params, &app_circuit, &app_pk);
     println!("snark generated");
     let agg_circuit = PublicAggregationCircuit::new(&agg_params, vec![snark]);
-    let agg_pk = gen_pk::<PublicAggregationCircuit<DefaultEmailVerifyCircuit<Fr>>>(
-        &agg_params,
-        &agg_circuit,
-    );
+    let agg_pk = gen_pk::<PublicAggregationCircuit<DefaultEmailVerifyCircuit<Fr>>>(&agg_params, &agg_circuit);
     println!("agg pk generated");
     {
         let f = File::create(agg_pk_path).unwrap();
         let mut writer = BufWriter::new(f);
-        agg_pk
-            .write(&mut writer, SerdeFormat::RawBytesUnchecked)
-            .unwrap();
+        agg_pk.write(&mut writer, SerdeFormat::RawBytesUnchecked).unwrap();
         writer.flush().unwrap();
     }
 
@@ -154,21 +135,13 @@ pub async fn gen_agg_key(
     {
         let f = File::create(agg_vk_path).unwrap();
         let mut writer = BufWriter::new(f);
-        vk.write(&mut writer, SerdeFormat::RawBytesUnchecked)
-            .unwrap();
+        vk.write(&mut writer, SerdeFormat::RawBytesUnchecked).unwrap();
         writer.flush().unwrap();
     }
     Ok(())
 }
 
-pub async fn prove_app(
-    param_path: &str,
-    circuit_config_path: &str,
-    pk_path: &str,
-    email_path: &str,
-    proof_path: &str,
-    public_input_path: &str,
-) -> Result<(), Error> {
+pub async fn prove_app(param_path: &str, circuit_config_path: &str, pk_path: &str, email_path: &str, proof_path: &str, public_input_path: &str) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let mut params = {
         let f = File::open(Path::new(param_path)).unwrap();
@@ -182,13 +155,9 @@ pub async fn prove_app(
     let pk = {
         let f = File::open(Path::new(pk_path)).unwrap();
         let mut reader = BufReader::new(f);
-        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(
-            &mut reader,
-            SerdeFormat::RawBytesUnchecked,
-        )
-        .unwrap()
+        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
-    let (circuit, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
+    let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
 
     let proof = gen_proof_native(&params, &pk, circuit);
     {
@@ -212,6 +181,8 @@ pub async fn prove_app(
         })
         .unzip();
     let public_input = EmailVerifyPublicInput {
+        headerhash: format!("0x{}", hex::encode(&headerhash)),
+        public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
         header_starts,
         header_substrs,
         body_starts,
@@ -226,14 +197,7 @@ pub async fn prove_app(
     Ok(())
 }
 
-pub async fn evm_prove_app(
-    param_path: &str,
-    circuit_config: &str,
-    pk_path: &str,
-    email_path: &str,
-    proof_path: &str,
-    public_input_path: &str,
-) -> Result<(), Error> {
+pub async fn evm_prove_app(param_path: &str, circuit_config: &str, pk_path: &str, email_path: &str, proof_path: &str, public_input_path: &str) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
     let mut params = {
         let f = File::open(Path::new(param_path)).unwrap();
@@ -247,13 +211,9 @@ pub async fn evm_prove_app(
     let pk = {
         let f = File::open(Path::new(pk_path)).unwrap();
         let mut reader = BufReader::new(f);
-        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(
-            &mut reader,
-            SerdeFormat::RawBytesUnchecked,
-        )
-        .unwrap()
+        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
-    let (circuit, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
+    let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
     let proof = gen_proof_evm(&params, &pk, circuit);
     {
         let proof_hex = hex::encode(&proof);
@@ -276,6 +236,8 @@ pub async fn evm_prove_app(
         })
         .unzip();
     let public_input = EmailVerifyPublicInput {
+        headerhash: format!("0x{}", hex::encode(&headerhash)),
+        public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
         header_starts,
         header_substrs,
         body_starts,
@@ -314,27 +276,18 @@ pub async fn evm_prove_agg(
         params.downsize(app_config.degree);
         params
     };
-    let (app_circuit, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
+    let (app_circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
     let app_pk = {
         let f = File::open(Path::new(app_pk_path)).unwrap();
         let mut reader = BufReader::new(f);
-        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(
-            &mut reader,
-            SerdeFormat::RawBytesUnchecked,
-        )
-        .unwrap()
+        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
     let snark = gen_application_snark(&app_params, &app_circuit, &app_pk);
-    let agg_circuit =
-        PublicAggregationCircuit::<DefaultEmailVerifyCircuit<Fr>>::new(&agg_params, vec![snark]);
+    let agg_circuit = PublicAggregationCircuit::<DefaultEmailVerifyCircuit<Fr>>::new(&agg_params, vec![snark]);
     let agg_pk = {
         let f = File::open(Path::new(agg_pk_path)).unwrap();
         let mut reader = BufReader::new(f);
-        ProvingKey::<G1Affine>::read::<_, PublicAggregationCircuit<DefaultEmailVerifyCircuit<Fr>>>(
-            &mut reader,
-            SerdeFormat::RawBytesUnchecked,
-        )
-        .unwrap()
+        ProvingKey::<G1Affine>::read::<_, PublicAggregationCircuit<DefaultEmailVerifyCircuit<Fr>>>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
     let instances = agg_circuit.instances();
     println!("instances {:?}", instances[0]);
@@ -368,6 +321,8 @@ pub async fn evm_prove_agg(
         })
         .unzip();
     let public_input = EmailVerifyPublicInput {
+        headerhash: format!("0x{}", hex::encode(&headerhash)),
+        public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
         header_starts,
         header_substrs,
         body_starts,
@@ -382,13 +337,7 @@ pub async fn evm_prove_agg(
     Ok(())
 }
 
-pub async fn gen_evm_verifier(
-    param_path: &str,
-    circuit_config: &str,
-    vk_path: &str,
-    bytecode_path: &str,
-    solidity_path: &str,
-) -> Result<(), Error> {
+pub async fn gen_evm_verifier(param_path: &str, circuit_config: &str, vk_path: &str, bytecode_path: &str, solidity_path: &str) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
     let mut params = {
         let f = File::open(Path::new(param_path)).unwrap();
@@ -402,11 +351,7 @@ pub async fn gen_evm_verifier(
     let vk = {
         let f = File::open(vk_path).unwrap();
         let mut reader = BufReader::new(f);
-        VerifyingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(
-            &mut reader,
-            SerdeFormat::RawBytesUnchecked,
-        )
-        .unwrap()
+        VerifyingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
     // let circuit = gen_circuit_from_email_path(email_path).await;
     // let num_instance = DefaultEmailVerifyCircuit::<Fr>::num_instances(0);
@@ -447,14 +392,9 @@ pub async fn gen_agg_evm_verifier(
     let vk = {
         let f = File::open(vk_path).unwrap();
         let mut reader = BufReader::new(f);
-        VerifyingKey::<G1Affine>::read::<_, PublicAggregationCircuit::<DefaultEmailVerifyCircuit<Fr>>>(
-            &mut reader,
-            SerdeFormat::RawBytesUnchecked,
-        )
-        .unwrap()
+        VerifyingKey::<G1Affine>::read::<_, PublicAggregationCircuit<DefaultEmailVerifyCircuit<Fr>>>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
-    let verifier_yul =
-        gen_aggregation_evm_verifier_yul::<DefaultEmailVerifyCircuit<Fr>>(&params, &vk, 1);
+    let verifier_yul = gen_aggregation_evm_verifier_yul::<DefaultEmailVerifyCircuit<Fr>>(&params, &vk, 1);
     {
         let bytecode = compile_yul(&verifier_yul);
         let f = File::create(bytecode_path).unwrap();
@@ -473,12 +413,7 @@ pub async fn gen_agg_evm_verifier(
     Ok(())
 }
 
-pub fn evm_verify_app(
-    circuit_config: &str,
-    bytecode_path: &str,
-    proof_path: &str,
-    public_input_path: &str,
-) -> Result<(), Error> {
+pub fn evm_verify_app(circuit_config: &str, bytecode_path: &str, proof_path: &str, public_input_path: &str) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config);
     let deployment_code = {
         let f = File::open(bytecode_path).unwrap();
@@ -492,11 +427,10 @@ pub fn evm_verify_app(
         hex::decode(&hex[2..]).unwrap()
     };
     let instances = {
-        let public_input = serde_json::from_reader::<File, EmailVerifyPublicInput>(
-            File::open(public_input_path).unwrap(),
-        )
-        .unwrap();
+        let public_input = serde_json::from_reader::<File, EmailVerifyPublicInput>(File::open(public_input_path).unwrap()).unwrap();
         let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+        let headerhash = hex::decode(&public_input.headerhash[2..]).unwrap();
+        let public_key_n_bytes = hex::decode(&public_input.public_key_n_bytes[2..]).unwrap();
         let header_substrs = public_input
             .header_starts
             .into_iter()
@@ -510,6 +444,8 @@ pub fn evm_verify_app(
             .map(|(start, substr)| Some((start, substr)))
             .collect_vec();
         let public_hash_input = get_email_circuit_public_hash_input(
+            &headerhash,
+            &public_key_n_bytes,
             header_substrs,
             body_substrs,
             config_params.header_max_byte_size,
@@ -567,10 +503,9 @@ pub fn evm_verify_agg(
                 .collect_vec()
         };
         assert_eq!(acc.len(), NUM_ACC_INSTANCES);
-        let public_input = serde_json::from_reader::<File, EmailVerifyPublicInput>(
-            File::open(public_input_path).unwrap(),
-        )
-        .unwrap();
+        let public_input = serde_json::from_reader::<File, EmailVerifyPublicInput>(File::open(public_input_path).unwrap()).unwrap();
+        let headerhash = hex::decode(&public_input.headerhash[2..]).unwrap();
+        let public_key_n_bytes = hex::decode(&public_input.public_key_n_bytes[2..]).unwrap();
         let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
         let header_substrs = public_input
             .header_starts
@@ -585,6 +520,8 @@ pub fn evm_verify_agg(
             .map(|(start, substr)| Some((start, substr)))
             .collect_vec();
         let public_hash_input = get_email_circuit_public_hash_input(
+            &headerhash,
+            &public_key_n_bytes,
             header_substrs,
             body_substrs,
             config_params.header_max_byte_size,
@@ -607,13 +544,7 @@ pub fn evm_verify_agg(
     Ok(())
 }
 
-async fn gen_circuit_from_email_path(
-    email_path: &str,
-) -> (
-    DefaultEmailVerifyCircuit<Fr>,
-    Vec<Option<(usize, String)>>,
-    Vec<Option<(usize, String)>>,
-) {
+async fn gen_circuit_from_email_path(email_path: &str) -> (DefaultEmailVerifyCircuit<Fr>, Vec<u8>, BigUint, Vec<Option<(usize, String)>>, Vec<Option<(usize, String)>>) {
     let email_bytes = {
         let mut f = File::open(email_path).unwrap();
         let mut buf = Vec::new();
@@ -621,38 +552,31 @@ async fn gen_circuit_from_email_path(
         buf
     };
     println!("email {}", String::from_utf8(email_bytes.clone()).unwrap());
-    let (canonicalized_header, canonicalized_body, signature_bytes) =
-        canonicalize_signed_email(&email_bytes).unwrap();
-    let public_key = {
+    let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
+    let headerhash = Sha256::digest(&canonicalized_header).to_vec();
+    let public_key_n = {
         let logger = slog::Logger::root(slog::Discard, slog::o!());
         match resolve_public_key(&logger, &email_bytes).await.unwrap() {
-            cfdkim::DkimPublicKey::Rsa(_pk) => {
-                let n = BigUint::from_radix_le(&_pk.n().clone().to_radix_le(16), 16).unwrap();
-                let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-                RSAPublicKey::<Fr>::new(Value::known(n), e)
-            }
+            cfdkim::DkimPublicKey::Rsa(_pk) => BigUint::from_radix_le(&_pk.n().clone().to_radix_le(16), 16).unwrap(),
             _ => {
                 panic!("Only RSA keys are supported.");
             }
         }
     };
+    let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
+    let public_key = RSAPublicKey::<Fr>::new(Value::known(public_key_n.clone()), e);
     let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
     let header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
     let body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
     let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-    let (header_substrs, body_substrs) = get_email_substrs(
-        &header_str,
-        &body_str,
-        config_params.header_substr_regexes,
-        config_params.body_substr_regexes,
-    );
+    let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, config_params.header_substr_regexes, config_params.body_substr_regexes);
     let circuit = DefaultEmailVerifyCircuit {
         header_bytes: canonicalized_header,
         body_bytes: canonicalized_body,
         public_key,
         signature,
     };
-    (circuit, header_substrs, body_substrs)
+    (circuit, headerhash, public_key_n, header_substrs, body_substrs)
 }
 
 // original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L326-L602
@@ -671,14 +595,10 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
     let mstoren_pattern = Regex::new(r"^\s*(mstore\((\d+)+),.+\)")?;
     let mload_pattern = Regex::new(r"(mload\((0x[0-9a-fA-F]+))\)")?;
     let keccak_pattern = Regex::new(r"(keccak256\((0x[0-9a-fA-F]+))")?;
-    let modexp_pattern =
-        Regex::new(r"(staticcall\(gas\(\), 0x5, (0x[0-9a-fA-F]+), 0xc0, (0x[0-9a-fA-F]+), 0x20)")?;
-    let ecmul_pattern =
-        Regex::new(r"(staticcall\(gas\(\), 0x7, (0x[0-9a-fA-F]+), 0x60, (0x[0-9a-fA-F]+), 0x40)")?;
-    let ecadd_pattern =
-        Regex::new(r"(staticcall\(gas\(\), 0x6, (0x[0-9a-fA-F]+), 0x80, (0x[0-9a-fA-F]+), 0x40)")?;
-    let ecpairing_pattern =
-        Regex::new(r"(staticcall\(gas\(\), 0x8, (0x[0-9a-fA-F]+), 0x180, (0x[0-9a-fA-F]+), 0x20)")?;
+    let modexp_pattern = Regex::new(r"(staticcall\(gas\(\), 0x5, (0x[0-9a-fA-F]+), 0xc0, (0x[0-9a-fA-F]+), 0x20)")?;
+    let ecmul_pattern = Regex::new(r"(staticcall\(gas\(\), 0x7, (0x[0-9a-fA-F]+), 0x60, (0x[0-9a-fA-F]+), 0x40)")?;
+    let ecadd_pattern = Regex::new(r"(staticcall\(gas\(\), 0x6, (0x[0-9a-fA-F]+), 0x80, (0x[0-9a-fA-F]+), 0x40)")?;
+    let ecpairing_pattern = Regex::new(r"(staticcall\(gas\(\), 0x8, (0x[0-9a-fA-F]+), 0x180, (0x[0-9a-fA-F]+), 0x20)")?;
     let bool_pattern = Regex::new(r":bool")?;
 
     // Count the number of pub inputs
@@ -696,11 +616,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
         }
     }
 
-    let num_pubinputs = if let Some(s) = start {
-        end.unwrap() - s
-    } else {
-        0
-    };
+    let num_pubinputs = if let Some(s) = start { end.unwrap() - s } else { 0 };
     println!("num_pubinputs {}", num_pubinputs);
 
     let mut max_pubinputs_addr = 0;
@@ -728,17 +644,11 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             if addr_as_num <= max_pubinputs_addr {
                 let pub_addr = format!("{:#x}", addr_as_num + 32);
                 // println!("pub_addr {}", pub_addr);
-                line = line.replace(
-                    calldata_and_addr,
-                    &format!("mload(add(pubInputs, {}))", pub_addr),
-                );
+                line = line.replace(calldata_and_addr, &format!("mload(add(pubInputs, {}))", pub_addr));
             } else {
                 let proof_addr = format!("{:#x}", addr_as_num - max_pubinputs_addr);
                 // println!("proof_addr {}", proof_addr);
-                line = line.replace(
-                    calldata_and_addr,
-                    &format!("mload(add(proof, {}))", proof_addr),
-                );
+                line = line.replace(calldata_and_addr, &format!("mload(add(proof, {}))", proof_addr));
             }
         }
 
@@ -749,10 +659,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             let addr_as_num = u32::from_str_radix(addr, 10)?;
             let transcript_addr = format!("{:#x}", addr_as_num);
             transcript_addrs.push(addr_as_num);
-            line = line.replace(
-                mstore,
-                &format!("mstore8(add(transcript, {})", transcript_addr),
-            );
+            line = line.replace(mstore, &format!("mstore8(add(transcript, {})", transcript_addr));
         }
 
         let m = mstoren_pattern.captures(&line);
@@ -762,10 +669,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             let addr_as_num = u32::from_str_radix(addr, 10)?;
             let transcript_addr = format!("{:#x}", addr_as_num);
             transcript_addrs.push(addr_as_num);
-            line = line.replace(
-                mstore,
-                &format!("mstore(add(transcript, {})", transcript_addr),
-            );
+            line = line.replace(mstore, &format!("mstore(add(transcript, {})", transcript_addr));
         }
 
         let m = modexp_pattern.captures(&line);
@@ -773,20 +677,15 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             let modexp = m.get(1).unwrap().as_str();
             let start_addr = m.get(2).unwrap().as_str();
             let result_addr = m.get(3).unwrap().as_str();
-            let start_addr_as_num =
-                u32::from_str_radix(start_addr.strip_prefix("0x").unwrap(), 16)?;
-            let result_addr_as_num =
-                u32::from_str_radix(result_addr.strip_prefix("0x").unwrap(), 16)?;
+            let start_addr_as_num = u32::from_str_radix(start_addr.strip_prefix("0x").unwrap(), 16)?;
+            let result_addr_as_num = u32::from_str_radix(result_addr.strip_prefix("0x").unwrap(), 16)?;
 
             let transcript_addr = format!("{:#x}", start_addr_as_num);
             transcript_addrs.push(start_addr_as_num);
             let result_addr = format!("{:#x}", result_addr_as_num);
             line = line.replace(
                 modexp,
-                &format!(
-                    "staticcall(gas(), 0x5, add(transcript, {}), 0xc0, add(transcript, {}), 0x20",
-                    transcript_addr, result_addr
-                ),
+                &format!("staticcall(gas(), 0x5, add(transcript, {}), 0xc0, add(transcript, {}), 0x20", transcript_addr, result_addr),
             );
         }
 
@@ -795,10 +694,8 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             let ecmul = m.get(1).unwrap().as_str();
             let start_addr = m.get(2).unwrap().as_str();
             let result_addr = m.get(3).unwrap().as_str();
-            let start_addr_as_num =
-                u32::from_str_radix(start_addr.strip_prefix("0x").unwrap(), 16)?;
-            let result_addr_as_num =
-                u32::from_str_radix(result_addr.strip_prefix("0x").unwrap(), 16)?;
+            let start_addr_as_num = u32::from_str_radix(start_addr.strip_prefix("0x").unwrap(), 16)?;
+            let result_addr_as_num = u32::from_str_radix(result_addr.strip_prefix("0x").unwrap(), 16)?;
 
             let transcript_addr = format!("{:#x}", start_addr_as_num);
             let result_addr = format!("{:#x}", result_addr_as_num);
@@ -806,10 +703,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             transcript_addrs.push(result_addr_as_num);
             line = line.replace(
                 ecmul,
-                &format!(
-                    "staticcall(gas(), 0x7, add(transcript, {}), 0x60, add(transcript, {}), 0x40",
-                    transcript_addr, result_addr
-                ),
+                &format!("staticcall(gas(), 0x7, add(transcript, {}), 0x60, add(transcript, {}), 0x40", transcript_addr, result_addr),
             );
         }
 
@@ -818,10 +712,8 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             let ecadd = m.get(1).unwrap().as_str();
             let start_addr = m.get(2).unwrap().as_str();
             let result_addr = m.get(3).unwrap().as_str();
-            let start_addr_as_num =
-                u32::from_str_radix(start_addr.strip_prefix("0x").unwrap(), 16)?;
-            let result_addr_as_num =
-                u32::from_str_radix(result_addr.strip_prefix("0x").unwrap(), 16)?;
+            let start_addr_as_num = u32::from_str_radix(start_addr.strip_prefix("0x").unwrap(), 16)?;
+            let result_addr_as_num = u32::from_str_radix(result_addr.strip_prefix("0x").unwrap(), 16)?;
 
             let transcript_addr = format!("{:#x}", start_addr_as_num);
             let result_addr = format!("{:#x}", result_addr_as_num);
@@ -829,10 +721,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             transcript_addrs.push(result_addr_as_num);
             line = line.replace(
                 ecadd,
-                &format!(
-                    "staticcall(gas(), 0x6, add(transcript, {}), 0x80, add(transcript, {}), 0x40",
-                    transcript_addr, result_addr
-                ),
+                &format!("staticcall(gas(), 0x6, add(transcript, {}), 0x80, add(transcript, {}), 0x40", transcript_addr, result_addr),
             );
         }
 
@@ -841,10 +730,8 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             let ecpairing = m.get(1).unwrap().as_str();
             let start_addr = m.get(2).unwrap().as_str();
             let result_addr = m.get(3).unwrap().as_str();
-            let start_addr_as_num =
-                u32::from_str_radix(start_addr.strip_prefix("0x").unwrap(), 16)?;
-            let result_addr_as_num =
-                u32::from_str_radix(result_addr.strip_prefix("0x").unwrap(), 16)?;
+            let start_addr_as_num = u32::from_str_radix(start_addr.strip_prefix("0x").unwrap(), 16)?;
+            let result_addr_as_num = u32::from_str_radix(result_addr.strip_prefix("0x").unwrap(), 16)?;
 
             let transcript_addr = format!("{:#x}", start_addr_as_num);
             let result_addr = format!("{:#x}", result_addr_as_num);
@@ -852,10 +739,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             transcript_addrs.push(result_addr_as_num);
             line = line.replace(
                 ecpairing,
-                &format!(
-                    "staticcall(gas(), 0x8, add(transcript, {}), 0x180, add(transcript, {}), 0x20",
-                    transcript_addr, result_addr
-                ),
+                &format!("staticcall(gas(), 0x8, add(transcript, {}), 0x180, add(transcript, {}), 0x20", transcript_addr, result_addr),
             );
         }
 
@@ -866,10 +750,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             let addr_as_num = u32::from_str_radix(addr, 16)?;
             let transcript_addr = format!("{:#x}", addr_as_num);
             transcript_addrs.push(addr_as_num);
-            line = line.replace(
-                mstore,
-                &format!("mstore(add(transcript, {})", transcript_addr),
-            );
+            line = line.replace(mstore, &format!("mstore(add(transcript, {})", transcript_addr));
         }
 
         let m = keccak_pattern.captures(&line);
@@ -879,10 +760,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             let addr_as_num = u32::from_str_radix(addr.strip_prefix("0x").unwrap(), 16)?;
             let transcript_addr = format!("{:#x}", addr_as_num);
             transcript_addrs.push(addr_as_num);
-            line = line.replace(
-                keccak,
-                &format!("keccak256(add(transcript, {})", transcript_addr),
-            );
+            line = line.replace(keccak, &format!("keccak256(add(transcript, {})", transcript_addr));
         }
 
         // mload can show up multiple times per line
@@ -897,10 +775,7 @@ fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::E
             let addr_as_num = u32::from_str_radix(addr.strip_prefix("0x").unwrap(), 16)?;
             let transcript_addr = format!("{:#x}", addr_as_num);
             transcript_addrs.push(addr_as_num);
-            line = line.replace(
-                mload,
-                &format!("mload(add(transcript, {})", transcript_addr),
-            );
+            line = line.replace(mload, &format!("mload(add(transcript, {})", transcript_addr));
         }
 
         modified_lines.push(line);
