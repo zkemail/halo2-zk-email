@@ -17,16 +17,34 @@ halo2-ecc = { version = "0.2.2", default-features = false, features = [
     "halo2-pse",
     "display",
 ], git = "https://github.com/axiom-crypto/halo2-lib.git" }
-halo2-dynamic-sha256 = { git = "https://github.com/zkemail/halo2-dynamic-sha256.git", version = "0.1.0", branch = "main" }
+halo2-dynamic-sha256 = { git = "https://github.com/zkemail/halo2-dynamic-sha256.git", version = "0.1.0", branch = "feat/main_gate_base" }
 halo2-rsa = { git = "https://github.com/zkemail/halo2-rsa.git", version = "0.1.0", branch = "feat/new_bigint" }
-halo2-regex = { git = "https://github.com/zkemail/halo2-regex.git", version = "0.1.0", branch = "main" }
-# halo2-regex = { path = "../halo2-regex", version = "0.1.0" }
+halo2-regex = { git = "https://github.com/zkemail/halo2-regex.git", version = "0.1.0", branch = "feat/multi_regex" }
+# halo2-regex = { path = "../halo2-regex-2", version = "0.1.0" }
 halo2-base64 = { git = "https://github.com/zkemail/halo2-base64.git", version = "0.1.0", branch = "main" }
 num-traits = "0.2.15"
 base64 = "0.21"
-mail-auth = { git = "https://github.com/Divide-By-0/mail-auth.git", version = "0.3.0", branch = "main" }
-# mail-auth = { path = "../mail-auth/" }
-futures = "0.3.27"
+snark-verifier = { git = "https://github.com/privacy-scaling-explorations/snark-verifier.git", version = "0.1.0", branch = "main" }
+halo2_wrong_ecc = { git = "https://github.com/privacy-scaling-explorations/halo2wrong", tag = "v2023_02_02", package = "ecc" }
+
+# snark-verifier-sdk = { git = "https://github.com/zkemail/snark-verifier.git", version = "0.0.1", branch = "main", default-features = false, features = [
+#     "loader_evm",
+#     "loader_halo2",
+#     "halo2-pse",
+# ] }
+ark-std = { version = "0.4.0", features = ["print-trace"] }
+ethereum-types = { version = "0.14", default-features = false, features = [
+    "std",
+] }
+itertools = "0.10.3"
+clap = { version = "4.2.1", features = ["derive"] }
+serde_json = "1.0.95"
+serde = { version = "1.0.159", features = ["derive"] }
+cfdkim = { version = "0.2.6", git = "https://github.com/SoraSuegami/dkim.git" }
+slog = "2.7.0"
+fancy-regex = "0.11.0"
+regex-simple = { version = "1", package = "regex" }
+hex = "0.4.3"
 tokio = { version = "1.16", features = [
     "net",
     "io-util",
@@ -34,14 +52,37 @@ tokio = { version = "1.16", features = [
     "rt-multi-thread",
     "macros",
 ] }
-cfdkim = { version = "0.2.6", git = "https://github.com/SoraSuegami/dkim.git" }
-trust-dns-resolver = "0.22.0"
+serde_regex = "1.1.0"
+mailparse = "0.14"
+
 
 [dev-dependencies]
 # mail-parser = "0.8.2"
 # mail-auth = { version = "0.3.0", git = "https://github.com/zkemail/mail-auth.git", branch = "feat/not_async" }
-cfdkim = { version = "0.2.6", git = "https://github.com/SoraSuegami/dkim.git" }
 # cfdkim = { version = "0.2.6", path = "../dkim" }
-mailparse = "0.14"
-hex = "0.4.3"
-slog = "2.7.0"
+criterion = { version = "0.4" }
+temp-env = "0.3.3"
+
+[[bench]]
+name = "email_verify"
+harness = false
+
+# [[bench]]
+# name = "recursion"
+# harness = false
+
+# [[bench]]
+# name = "recursion_without_sha2"
+# harness = false
+
+[[bin]]
+name = "zkemail"
+test = false
+bench = false
+
+[patch."https://github.com/axiom-crypto/halo2-lib.git"]
+halo2-base = { version = "0.2.2", git = "https://github.com/SoraSuegami/halo2-lib.git" }
+halo2-ecc = { version = "0.2.2", git = "https://github.com/SoraSuegami/halo2-lib.git" }
+
+[patch."https://github.com/privacy-scaling-explorations/halo2.git"]
+halo2_proofs = { git = "https://github.com/privacy-scaling-explorations//halo2.git", tag = "v2023_02_02" }
