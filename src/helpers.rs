@@ -46,10 +46,10 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailVerifyPublicInput {
-    header_starts: Vec<usize>,
-    header_substrs: Vec<String>,
-    body_starts: Vec<usize>,
-    body_substrs: Vec<String>,
+    pub header_starts: Vec<usize>,
+    pub header_substrs: Vec<String>,
+    pub body_starts: Vec<usize>,
+    pub body_substrs: Vec<String>,
 }
 
 pub fn gen_param(param_path: &str, k: u32) -> Result<(), Error> {
