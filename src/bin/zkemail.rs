@@ -101,6 +101,9 @@ enum Commands {
         /// output proof file
         #[arg(long, default_value = "./build/app_proof.bin")]
         proof_path: String,
+        /// public input file
+        #[arg(long, default_value = "./build/public_input.json")]
+        public_input_path: String,
     },
     EVMProveApp {
         /// setup parameters path
@@ -118,6 +121,9 @@ enum Commands {
         /// output proof file
         #[arg(long, default_value = "./build/evm_app_proof.hex")]
         proof_path: String,
+        /// public input file
+        #[arg(long, default_value = "./build/public_input.json")]
+        public_input_path: String,
     },
     EVMProveAgg {
         /// setup parameters path
@@ -144,6 +150,9 @@ enum Commands {
         /// output proof file
         #[arg(long, default_value = "./build/evm_agg_proof.hex")]
         proof_path: String,
+        /// public input file
+        #[arg(long, default_value = "./build/public_input.json")]
+        public_input_path: String,
     },
     GenEVMVerifier {
         /// setup parameters path
@@ -267,12 +276,14 @@ async fn main() {
             pk_path,
             email_path,
             proof_path,
+            public_input_path,
         } => prove_app(
             &param_path,
             &circuit_config,
             &pk_path,
             &email_path,
             &proof_path,
+            &public_input_path,
         )
         .await
         .unwrap(),
@@ -282,12 +293,14 @@ async fn main() {
             pk_path,
             email_path,
             proof_path,
+            public_input_path,
         } => evm_prove_app(
             &param_path,
             &circuit_config,
             &pk_path,
             &email_path,
             &proof_path,
+            &public_input_path,
         )
         .await
         .unwrap(),
@@ -299,6 +312,7 @@ async fn main() {
             agg_pk_path,
             acc_path,
             proof_path,
+            public_input_path,
         } => evm_prove_agg(
             &param_path,
             &circuit_config,
@@ -307,6 +321,7 @@ async fn main() {
             &agg_pk_path,
             &acc_path,
             &proof_path,
+            &public_input_path,
         )
         .await
         .unwrap(),
