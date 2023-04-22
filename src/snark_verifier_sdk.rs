@@ -29,9 +29,9 @@ use snark_verifier::{
 use std::marker::PhantomData;
 use std::{io::Cursor, rc::Rc};
 
-pub const LIMBS: usize = 4;
+pub const LIMBS: usize = 3; //4;
 pub const NUM_ACC_INSTANCES: usize = 4 * LIMBS;
-const BITS: usize = 68;
+const BITS: usize = 88; //68;
 
 type As = KzgAs<Bn256, Gwc19>;
 type PlonkSuccinctVerifier = verifier::plonk::PlonkSuccinctVerifier<As, LimbsEncoding<LIMBS, BITS>>;

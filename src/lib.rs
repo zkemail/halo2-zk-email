@@ -324,7 +324,10 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
             vec![
                 params.body_max_byte_size,
                 params.header_max_byte_size,
-                64 + 2 * (params.header_max_byte_size + params.body_max_byte_size) + 64,
+                32 + 44
+                    + (128 - 44 - 32)
+                    + 2 * (params.header_max_byte_size + params.body_max_byte_size)
+                    + 64,
             ],
             range_config.clone(),
             false,

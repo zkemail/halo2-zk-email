@@ -15,11 +15,13 @@ use halo2_regex::{
     AssignedRegexResult, RegexVerifyConfig,
 };
 use halo2_wrong_ecc::halo2::halo2curves::FieldExt;
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Default)]
 pub struct RegexSha2Result<'a, F: PrimeField> {
     pub regex: AssignedRegexResult<'a, F>,
     pub hash_bytes: Vec<AssignedValue<'a, F>>,
+    pub hash_value: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -101,9 +103,11 @@ impl<F: PrimeField> RegexSha2Config<F> {
             QuantumCell::Existing(&input_len_sum),
             QuantumCell::Existing(&assigned_hash_result.input_len),
         );
+        let hash_value = Sha256::digest(input).to_vec();
         let result = RegexSha2Result {
             regex: regex_result,
             hash_bytes: assigned_hash_result.output_bytes,
+            hash_value,
         };
         Ok(result)
     }
