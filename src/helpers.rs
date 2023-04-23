@@ -66,6 +66,18 @@ pub fn gen_param(param_path: &str, k: u32) -> Result<(), Error> {
     Ok(())
 }
 
+pub fn downsize_param(original_param_path: &str, new_param_path: &str, k: u32) -> Result<(), Error> {
+    let f = File::open(Path::new(original_param_path)).unwrap();
+    let mut reader = BufReader::new(f);
+    let mut params = ParamsKZG::<Bn256>::read(&mut reader).unwrap();
+    params.downsize(k);
+    let f = File::create(new_param_path).unwrap();
+    let mut writer = BufWriter::new(f);
+    params.write(&mut writer).unwrap();
+    writer.flush().unwrap();
+    Ok(())
+}
+
 pub async fn gen_app_key(param_path: &str, circuit_config_path: &str, email_path: &str, pk_path: &str, vk_path: &str) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let mut params = {
@@ -98,7 +110,8 @@ pub async fn gen_app_key(param_path: &str, circuit_config_path: &str, email_path
 }
 
 pub async fn gen_agg_key(
-    param_path: &str,
+    app_param_path: &str,
+    agg_param_path: &str,
     app_circuit_config_path: &str,
     agg_circuit_config_path: &str,
     email_path: &str,
@@ -109,16 +122,21 @@ pub async fn gen_agg_key(
     set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config_path);
     set_var(VERIFY_CONFIG_KEY, agg_circuit_config_path);
     let agg_params = {
-        let f = File::open(Path::new(param_path)).unwrap();
+        let f = File::open(Path::new(agg_param_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    // let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
     let app_params = {
-        let mut params = agg_params.clone();
-        params.downsize(app_config.degree);
-        params
+        let f = File::open(Path::new(app_param_path)).unwrap();
+        let mut reader = BufReader::new(f);
+        ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
+    // let app_params = {
+    //     let mut params = agg_params.clone();
+    //     params.downsize(app_config.degree);
+    //     params
+    // };
     let (app_circuit, _, _, _, _) = gen_circuit_from_email_path(email_path).await;
     let app_pk = {
         let f = File::open(Path::new(app_pk_path)).unwrap();
@@ -260,7 +278,8 @@ pub async fn evm_prove_app(param_path: &str, circuit_config_path: &str, pk_path:
 }
 
 pub async fn evm_prove_agg(
-    param_path: &str,
+    app_param_path: &str,
+    agg_param_path: &str,
     app_circuit_config_path: &str,
     agg_circuit_config_path: &str,
     email_path: &str,
@@ -273,15 +292,20 @@ pub async fn evm_prove_agg(
     set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config_path);
     set_var(VERIFY_CONFIG_KEY, agg_circuit_config_path);
     let agg_params = {
-        let f = File::open(Path::new(param_path)).unwrap();
+        let f = File::open(Path::new(agg_param_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    // let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    // let app_params = {
+    //     let mut params = agg_params.clone();
+    //     params.downsize(app_config.degree);
+    //     params
+    // };
     let app_params = {
-        let mut params = agg_params.clone();
-        params.downsize(app_config.degree);
-        params
+        let f = File::open(Path::new(app_param_path)).unwrap();
+        let mut reader = BufReader::new(f);
+        ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
     let (app_circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
     let app_pk = {
@@ -290,6 +314,7 @@ pub async fn evm_prove_agg(
         ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
     let snark = gen_snark_shplonk(&app_params, &app_pk, app_circuit, &mut OsRng, None::<&str>);
+    println!("snark generated");
     let agg_circuit = PublicAggregationCircuit::new(&agg_params, vec![snark], false, &mut OsRng);
     let agg_pk = {
         let f = File::open(Path::new(agg_pk_path)).unwrap();
@@ -307,6 +332,7 @@ pub async fn evm_prove_agg(
         file.flush().unwrap();
     };
     let proof = gen_evm_proof_shplonk(&agg_params, &agg_pk, agg_circuit, instances, &mut OsRng);
+    println!("proof generated");
     {
         let proof_hex = hex::encode(&proof);
         let mut file = File::create(proof_path)?;
@@ -383,7 +409,7 @@ pub async fn gen_evm_verifier(param_path: &str, circuit_config_path: &str, vk_pa
 }
 
 pub async fn gen_agg_evm_verifier(
-    param_path: &str,
+    agg_param_path: &str,
     app_circuit_config_path: &str,
     agg_circuit_config_path: &str,
     vk_path: &str,
@@ -393,7 +419,7 @@ pub async fn gen_agg_evm_verifier(
     set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config_path);
     set_var(VERIFY_CONFIG_KEY, agg_circuit_config_path);
     let params = {
-        let f = File::open(Path::new(param_path)).unwrap();
+        let f = File::open(Path::new(agg_param_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
