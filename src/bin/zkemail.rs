@@ -50,7 +50,7 @@ enum Commands {
         param_path: String,
         /// email verification circuit configure file
         #[arg(short, long, default_value = "./configs/default_app.config")]
-        circuit_config_path: String,
+        circuit_config: String,
         /// emails path
         #[arg(short, long, default_value = "./build/demo.eml")]
         email_path: String,
@@ -68,10 +68,10 @@ enum Commands {
         param_path: String,
         /// email verification circuit configure file
         #[arg(short, long, default_value = "./configs/default_app.config")]
-        app_circuit_config_path: String,
-        /// email verification circuit configure file
-        #[arg(short, long, default_value = "./configs/default_agg.config")]
-        agg_circuit_config_path: String,
+        circuit_config: String,
+        // /// email verification circuit configure file
+        // #[arg(short, long, default_value = "./configs/default_agg.config")]
+        // agg_circuit_config: String,
         /// emails path
         #[arg(short, long, default_value = "./build/demo.eml")]
         email_path: String,
@@ -91,7 +91,7 @@ enum Commands {
         param_path: String,
         /// email verification circuit configure file
         #[arg(short, long, default_value = "./configs/default_app.config")]
-        circuit_config_path: String,
+        circuit_config: String,
         /// proving key path
         #[arg(long, default_value = "./build/app.pk")]
         pk_path: String,
@@ -111,7 +111,7 @@ enum Commands {
         param_path: String,
         /// email verification circuit configure file
         #[arg(short, long, default_value = "./configs/default_app.config")]
-        circuit_config_path: String,
+        circuit_config: String,
         /// proving key path
         #[arg(long, default_value = "./build/app.pk")]
         pk_path: String,
@@ -131,10 +131,10 @@ enum Commands {
         param_path: String,
         /// email verification circuit configure file
         #[arg(short, long, default_value = "./configs/default_app.config")]
-        app_circuit_config_path: String,
-        /// email verification circuit configure file
-        #[arg(short, long, default_value = "./configs/default_agg.config")]
-        agg_circuit_config_path: String,
+        circuit_config: String,
+        // /// email verification circuit configure file
+        // #[arg(short, long, default_value = "./configs/default_agg.config")]
+        // agg_circuit_config: String,
         /// emails path
         #[arg(short, long, default_value = "./build/demo.eml")]
         email_path: String,
@@ -160,7 +160,7 @@ enum Commands {
         param_path: String,
         /// email verification circuit configure file
         #[arg(short, long, default_value = "./configs/default_app.config")]
-        circuit_config_path: String,
+        circuit_config: String,
         // /// emails path
         // #[arg(short, long, default_value = "./build/demo.eml")]
         // email_path: String,
@@ -180,10 +180,10 @@ enum Commands {
         param_path: String,
         /// email verification circuit configure file
         #[arg(short, long, default_value = "./configs/default_app.config")]
-        app_circuit_config_path: String,
-        /// aggregation circuit configure file
-        #[arg(short, long, default_value = "./configs/default_agg.config")]
-        agg_circuit_config_path: String,
+        circuit_config: String,
+        // /// aggregation circuit configure file
+        // #[arg(short, long, default_value = "./configs/default_agg.config")]
+        // agg_circuit_config: String,
         // /// emails path
         // #[arg(short, long, default_value = "./build/demo.eml")]
         // email_path: String,
@@ -200,7 +200,7 @@ enum Commands {
     EVMVerifyApp {
         /// email verification circuit configure file
         #[arg(short, long, default_value = "./configs/default_app.config")]
-        circuit_config_path: String,
+        circuit_config: String,
         /// evm verifier file
         #[arg(short, long, default_value = "./build/verifier.bin")]
         bytecode_path: String,
@@ -214,10 +214,10 @@ enum Commands {
     EVMVerifyAgg {
         /// email verification circuit configure file
         #[arg(short, long, default_value = "./configs/default_app.config")]
-        app_circuit_config_path: String,
-        /// aggregation circuit configure file
-        #[arg(short, long, default_value = "./configs/default_agg.config")]
-        agg_circuit_config_path: String,
+        circuit_config: String,
+        // /// aggregation circuit configure file
+        // #[arg(short, long, default_value = "./configs/default_agg.config")]
+        // agg_circuit_config: String,
         /// evm verifier file
         #[arg(short, long, default_value = "./build/verifier.bin")]
         bytecode_path: String,
@@ -240,23 +240,29 @@ async fn main() {
         Commands::GenParam { k, param_path } => gen_param(&param_path, k).unwrap(),
         Commands::GenAppKey {
             param_path,
-            circuit_config_path,
+            circuit_config,
             email_path,
             pk_path,
             vk_path,
-        } => gen_app_key(&param_path, &circuit_config_path, &email_path, &pk_path, &vk_path).await.unwrap(),
+        } => gen_app_key(
+            &param_path,
+            &circuit_config,
+            &email_path,
+            &pk_path,
+            &vk_path,
+        )
+        .await
+        .unwrap(),
         Commands::GenAggKey {
             param_path,
-            app_circuit_config_path,
-            agg_circuit_config_path,
+            circuit_config,
             email_path,
             app_pk_path,
             agg_pk_path,
             agg_vk_path,
         } => gen_agg_key(
             &param_path,
-            &app_circuit_config_path,
-            &agg_circuit_config_path,
+            &circuit_config,
             &email_path,
             &app_pk_path,
             &agg_pk_path,
@@ -266,28 +272,41 @@ async fn main() {
         .unwrap(),
         Commands::ProveApp {
             param_path,
-            circuit_config_path,
+            circuit_config,
             pk_path,
             email_path,
             proof_path,
             public_input_path,
-        } => prove_app(&param_path, &circuit_config_path, &pk_path, &email_path, &proof_path, &public_input_path)
-            .await
-            .unwrap(),
+        } => prove_app(
+            &param_path,
+            &circuit_config,
+            &pk_path,
+            &email_path,
+            &proof_path,
+            &public_input_path,
+        )
+        .await
+        .unwrap(),
         Commands::EVMProveApp {
             param_path,
-            circuit_config_path,
+            circuit_config,
             pk_path,
             email_path,
             proof_path,
             public_input_path,
-        } => evm_prove_app(&param_path, &circuit_config_path, &pk_path, &email_path, &proof_path, &public_input_path)
-            .await
-            .unwrap(),
+        } => evm_prove_app(
+            &param_path,
+            &circuit_config,
+            &pk_path,
+            &email_path,
+            &proof_path,
+            &public_input_path,
+        )
+        .await
+        .unwrap(),
         Commands::EVMProveAgg {
             param_path,
-            app_circuit_config_path,
-            agg_circuit_config_path,
+            circuit_config,
             email_path,
             app_pk_path,
             agg_pk_path,
@@ -296,8 +315,7 @@ async fn main() {
             public_input_path,
         } => evm_prove_agg(
             &param_path,
-            &app_circuit_config_path,
-            &agg_circuit_config_path,
+            &circuit_config,
             &email_path,
             &app_pk_path,
             &agg_pk_path,
@@ -309,37 +327,54 @@ async fn main() {
         .unwrap(),
         Commands::GenEVMVerifier {
             param_path,
-            circuit_config_path,
+            circuit_config,
             vk_path,
             bytecode_path,
             solidity_path,
-        } => gen_evm_verifier(&param_path, &circuit_config_path, &vk_path, &bytecode_path, &solidity_path).await.unwrap(),
+        } => gen_evm_verifier(
+            &param_path,
+            &circuit_config,
+            &vk_path,
+            &bytecode_path,
+            &solidity_path,
+        )
+        .await
+        .unwrap(),
         Commands::GenAggEVMVerifier {
             param_path,
-            app_circuit_config_path,
-            agg_circuit_config_path,
+            circuit_config,
             vk_path,
             bytecode_path,
             solidity_path,
-        } => gen_agg_evm_verifier(&param_path, &app_circuit_config_path, &agg_circuit_config_path, &vk_path, &bytecode_path, &solidity_path)
-            .await
-            .unwrap(),
+        } => gen_agg_evm_verifier(
+            &param_path,
+            &circuit_config,
+            &vk_path,
+            &bytecode_path,
+            &solidity_path,
+        )
+        .await
+        .unwrap(),
         Commands::EVMVerifyApp {
-            circuit_config_path,
+            circuit_config,
             bytecode_path,
             proof_path,
             public_input_path,
-        } => evm_verify_app(&circuit_config_path, &bytecode_path, &proof_path, &public_input_path).unwrap(),
+        } => evm_verify_app(
+            &circuit_config,
+            &bytecode_path,
+            &proof_path,
+            &public_input_path,
+        )
+        .unwrap(),
         Commands::EVMVerifyAgg {
-            app_circuit_config_path,
-            agg_circuit_config_path,
+            circuit_config,
             bytecode_path,
             proof_path,
             acc_path,
             public_input_path,
         } => evm_verify_agg(
-            &app_circuit_config_path,
-            &agg_circuit_config_path,
+            &circuit_config,
             &bytecode_path,
             &proof_path,
             &acc_path,

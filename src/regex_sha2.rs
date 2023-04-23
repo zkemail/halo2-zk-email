@@ -14,6 +14,7 @@ use halo2_regex::{
     defs::{AllstrRegexDef, SubstrRegexDef},
     AssignedRegexResult, RegexVerifyConfig,
 };
+use halo2_wrong_ecc::halo2::halo2curves::FieldExt;
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Default)]
@@ -46,7 +47,12 @@ impl<F: PrimeField> RegexSha2Config<F> {
         //     max_byte_size,
         //     range_config.clone(),
         // );
-        let regex_config = RegexVerifyConfig::configure(meta, max_byte_size, range_config.gate().clone(), regex_defs);
+        let regex_config = RegexVerifyConfig::configure(
+            meta,
+            max_byte_size,
+            range_config.gate().clone(),
+            regex_defs,
+        );
         Self {
             // sha256_config,
             regex_config,
@@ -54,7 +60,12 @@ impl<F: PrimeField> RegexSha2Config<F> {
         }
     }
 
-    pub fn match_and_hash<'v: 'a, 'a>(&self, ctx: &mut Context<'v, F>, sha256_config: &mut Sha256DynamicConfig<F>, input: &[u8]) -> Result<RegexSha2Result<'a, F>, Error> {
+    pub fn match_and_hash<'v: 'a, 'a>(
+        &self,
+        ctx: &mut Context<'v, F>,
+        sha256_config: &mut Sha256DynamicConfig<F>,
+        input: &[u8],
+    ) -> Result<RegexSha2Result<'a, F>, Error> {
         let max_input_size = self.max_byte_size;
         // 1. Let's match sub strings!
         let regex_result = self.regex_config.match_substrs(ctx, input)?;
@@ -66,12 +77,32 @@ impl<F: PrimeField> RegexSha2Config<F> {
         let mut input_len_sum = gate.load_zero(ctx);
         for idx in 0..max_input_size {
             let flag = &regex_result.all_enable_flags[idx];
-            let regex_input = gate.mul(ctx, QuantumCell::Existing(flag), QuantumCell::Existing(&regex_result.all_characters[idx]));
-            let sha2_input = gate.mul(ctx, QuantumCell::Existing(flag), QuantumCell::Existing(&assigned_hash_result.input_bytes[idx]));
-            gate.assert_equal(ctx, QuantumCell::Existing(&regex_input), QuantumCell::Existing(&sha2_input));
-            input_len_sum = gate.add(ctx, QuantumCell::Existing(&input_len_sum), QuantumCell::Existing(flag));
+            let regex_input = gate.mul(
+                ctx,
+                QuantumCell::Existing(flag),
+                QuantumCell::Existing(&regex_result.all_characters[idx]),
+            );
+            let sha2_input = gate.mul(
+                ctx,
+                QuantumCell::Existing(flag),
+                QuantumCell::Existing(&assigned_hash_result.input_bytes[idx]),
+            );
+            gate.assert_equal(
+                ctx,
+                QuantumCell::Existing(&regex_input),
+                QuantumCell::Existing(&sha2_input),
+            );
+            input_len_sum = gate.add(
+                ctx,
+                QuantumCell::Existing(&input_len_sum),
+                QuantumCell::Existing(flag),
+            );
         }
-        gate.assert_equal(ctx, QuantumCell::Existing(&input_len_sum), QuantumCell::Existing(&assigned_hash_result.input_len));
+        gate.assert_equal(
+            ctx,
+            QuantumCell::Existing(&input_len_sum),
+            QuantumCell::Existing(&assigned_hash_result.input_len),
+        );
         let hash_value = Sha256::digest(input).to_vec();
         let result = RegexSha2Result {
             regex: regex_result,
@@ -109,12 +140,16 @@ mod test {
     use cfdkim::canonicalize_signed_email;
     use fancy_regex::Regex;
     use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, G1Affine};
-    use halo2_base::halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk, verify_proof, ConstraintSystem};
+    use halo2_base::halo2_proofs::plonk::{
+        create_proof, keygen_pk, keygen_vk, verify_proof, ConstraintSystem,
+    };
     use halo2_base::halo2_proofs::poly::commitment::{Params, ParamsProver, ParamsVerifier};
     use halo2_base::halo2_proofs::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
     use halo2_base::halo2_proofs::poly::kzg::multiopen::{ProverGWC, VerifierGWC};
     use halo2_base::halo2_proofs::poly::kzg::strategy::SingleStrategy;
-    use halo2_base::halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
+    use halo2_base::halo2_proofs::transcript::{
+        Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
+    };
     use rand::rngs::OsRng;
     use std::collections::HashSet;
     use std::marker::PhantomData;
@@ -154,7 +189,10 @@ mod test {
         type FloorPlanner = SimpleFloorPlanner;
 
         fn without_witnesses(&self) -> Self {
-            Self { input: vec![], _f: PhantomData }
+            Self {
+                input: vec![],
+                _f: PhantomData,
+            }
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
@@ -171,7 +209,11 @@ mod test {
             // let sha256_comp_configs = (0..Self::NUM_SHA2_COMP)
             //     .map(|_| Sha256CompressionConfig::configure(meta))
             //     .collect();
-            let sha256_config = Sha256DynamicConfig::construct(vec![Self::MAX_BYTE_SIZE], range_config.clone(), false);
+            let sha256_config = Sha256DynamicConfig::construct(
+                vec![Self::MAX_BYTE_SIZE],
+                range_config.clone(),
+                false,
+            );
             // let lookup_filepath = "./test_data/regex_test_lookup.txt";
             // let regex_def = AllstrRegexDef::read_from_text("");
             // let substr_def1 = SubstrRegexDef::new(
@@ -204,7 +246,8 @@ mod test {
                     SubstrRegexDef::read_from_text("./test_data/substr_subject.txt"),
                 ),
             ];
-            let inner = RegexSha2Config::configure(meta, Self::MAX_BYTE_SIZE, range_config, regex_defs);
+            let inner =
+                RegexSha2Config::configure(meta, Self::MAX_BYTE_SIZE, range_config, regex_defs);
             let hash_instance = meta.instance_column();
             meta.enable_equality(hash_instance);
             let masked_str_instance = meta.instance_column();
@@ -220,9 +263,16 @@ mod test {
             }
         }
 
-        fn synthesize(&self, mut config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
+        fn synthesize(
+            &self,
+            mut config: Self::Config,
+            mut layouter: impl Layouter<F>,
+        ) -> Result<(), Error> {
             config.inner.load(&mut layouter)?;
-            config.sha256_config.range().load_lookup_table(&mut layouter)?;
+            config
+                .sha256_config
+                .range()
+                .load_lookup_table(&mut layouter)?;
             let mut first_pass = SKIP_FIRST_PASS;
             let mut hash_bytes_cell = vec![];
             let mut masked_str_cell = vec![];
@@ -236,9 +286,18 @@ mod test {
                         return Ok(());
                     }
                     let ctx = &mut config.sha256_config.new_context(region);
-                    let result = config.inner.match_and_hash(ctx, &mut config.sha256_config, &self.input)?;
+                    let result =
+                        config
+                            .inner
+                            .match_and_hash(ctx, &mut config.sha256_config, &self.input)?;
                     config.sha256_config.range().finalize(ctx);
-                    hash_bytes_cell.append(&mut result.hash_bytes.into_iter().map(|byte| byte.cell()).collect::<Vec<Cell>>());
+                    hash_bytes_cell.append(
+                        &mut result
+                            .hash_bytes
+                            .into_iter()
+                            .map(|byte| byte.cell())
+                            .collect::<Vec<Cell>>(),
+                    );
                     masked_str_cell.append(
                         &mut result
                             .regex
@@ -258,7 +317,14 @@ mod test {
                             })
                             .collect::<Vec<Cell>>(),
                     );
-                    substr_id_cell.append(&mut result.regex.all_substr_ids.into_iter().map(|id| id.cell()).collect::<Vec<Cell>>());
+                    substr_id_cell.append(
+                        &mut result
+                            .regex
+                            .all_substr_ids
+                            .into_iter()
+                            .map(|id| id.cell())
+                            .collect::<Vec<Cell>>(),
+                    );
                     Ok(())
                 },
             )?;
@@ -297,9 +363,15 @@ mod test {
         let (input, _, _) = canonicalize_signed_email(&email_bytes).unwrap();
         let input_str = String::from_utf8(input.clone()).unwrap();
         // let input: Vec<u8> = "email was meant for @y.".chars().map(|c| c as u8).collect();
-        let circuit = TestRegexSha2::<Fr> { input, _f: PhantomData };
+        let circuit = TestRegexSha2::<Fr> {
+            input,
+            _f: PhantomData,
+        };
         let expected_output = Sha256::digest(&circuit.input);
-        let hash_fs = expected_output.iter().map(|byte| Fr::from(*byte as u64)).collect::<Vec<Fr>>();
+        let hash_fs = expected_output
+            .iter()
+            .map(|byte| Fr::from(*byte as u64))
+            .collect::<Vec<Fr>>();
         let mut expected_masked_chars = vec![Fr::from(0); TestRegexSha2::<Fr>::MAX_BYTE_SIZE];
         let mut expected_substr_ids = vec![Fr::from(0); TestRegexSha2::<Fr>::MAX_BYTE_SIZE];
         let correct_substrs = vec![
@@ -312,7 +384,12 @@ mod test {
                 expected_substr_ids[start + idx] = Fr::from(substr_idx as u64 + 1);
             }
         }
-        let prover = MockProver::run(TestRegexSha2::<Fr>::K, &circuit, vec![hash_fs, expected_masked_chars, expected_substr_ids]).unwrap();
+        let prover = MockProver::run(
+            TestRegexSha2::<Fr>::K,
+            &circuit,
+            vec![hash_fs, expected_masked_chars, expected_substr_ids],
+        )
+        .unwrap();
         assert_eq!(prover.verify(), Ok(()));
     }
 
