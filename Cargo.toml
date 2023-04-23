@@ -23,14 +23,18 @@ halo2-regex = { git = "https://github.com/zkemail/halo2-regex.git", version = "0
 halo2-base64 = { git = "https://github.com/zkemail/halo2-base64.git", version = "0.1.0", branch = "main" }
 num-traits = "0.2.15"
 base64 = "0.21"
-snark-verifier = { git = "https://github.com/privacy-scaling-explorations/snark-verifier.git", version = "0.1.0", branch = "main" }
-halo2_wrong_ecc = { git = "https://github.com/privacy-scaling-explorations/halo2wrong", tag = "v2023_02_02", package = "ecc" }
-
-# snark-verifier-sdk = { git = "https://github.com/zkemail/snark-verifier.git", version = "0.0.1", branch = "main", default-features = false, features = [
-#     "loader_evm",
-#     "loader_halo2",
-#     "halo2-pse",
-# ] }
+# snark-verifier = { git = "https://github.com/privacy-scaling-explorations/snark-verifier.git", version = "0.1.0", branch = "main" }
+# halo2_wrong_ecc = { git = "https://github.com/privacy-scaling-explorations/halo2wrong", tag = "v2023_02_02", package = "ecc" }
+snark-verifier = { git = "https://github.com/zkemail/snark-verifier.git", version = "0.1.0", branch = "main", default-features = false, features = [
+    "loader_evm",
+    "loader_halo2",
+    "halo2-pse",
+] }
+snark-verifier-sdk = { git = "https://github.com/zkemail/snark-verifier.git", version = "0.0.1", branch = "main", default-features = false, features = [
+    "loader_evm",
+    "loader_halo2",
+    "halo2-pse",
+] }
 ark-std = { version = "0.4.0", features = ["print-trace"] }
 ethereum-types = { version = "0.14", default-features = false, features = [
     "std",
