@@ -482,6 +482,7 @@ impl<F: PrimeField> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
 
     fn instances(&self) -> Vec<Vec<F>> {
         let headerhash_value = Sha256::digest(&self.header_bytes).to_vec();
+        println!("header hash {}", hex::encode(&headerhash_value));
         let header_str = String::from_utf8(self.header_bytes.clone()).unwrap();
         let body_str = String::from_utf8(self.body_bytes.clone()).unwrap();
         let params = Self::read_config_params();
@@ -771,6 +772,7 @@ mod test {
             println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
             println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
             let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
+            println!("public key n {}", hex::encode(&public_key.n().to_bytes_le()));
             let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
             let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
             let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
