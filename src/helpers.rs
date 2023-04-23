@@ -403,7 +403,7 @@ pub async fn gen_agg_evm_verifier(
         VerifyingKey::<G1Affine>::read::<_, PublicAggregationCircuit>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
     let num_instance = vec![1 + NUM_ACC_INSTANCES];
-    let verifier_yul = gen_evm_verifier_yul::<DefaultEmailVerifyCircuit<Fr>>(&params, &vk, num_instance);
+    let verifier_yul = gen_evm_verifier_yul::<PublicAggregationCircuit>(&params, &vk, num_instance);
     {
         let bytecode = compile_yul(&verifier_yul);
         let f = File::create(bytecode_path).unwrap();
