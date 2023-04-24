@@ -5,9 +5,7 @@ use fancy_regex::Regex;
 use halo2_base::halo2_proofs;
 use halo2_base::halo2_proofs::circuit::SimpleFloorPlanner;
 use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, Fr, G1Affine};
-use halo2_base::halo2_proofs::plonk::{
-    create_proof, keygen_pk, keygen_vk, verify_proof, Circuit, ConstraintSystem,
-};
+use halo2_base::halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk, verify_proof, Circuit, ConstraintSystem};
 use halo2_base::halo2_proofs::poly::kzg::commitment::KZGCommitmentScheme;
 use halo2_base::halo2_proofs::poly::kzg::multiopen::{ProverGWC, VerifierGWC};
 use halo2_base::halo2_proofs::poly::kzg::strategy::SingleStrategy;
@@ -15,9 +13,7 @@ use halo2_base::halo2_proofs::poly::{
     commitment::{Params, ParamsProver, ParamsVerifier},
     kzg::commitment::ParamsKZG,
 };
-use halo2_base::halo2_proofs::transcript::{
-    Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
-};
+use halo2_base::halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error, SerdeFormat};
 use halo2_base::halo2_proofs::{
     circuit::{floor_planner::V1, Cell, Value},
@@ -28,7 +24,6 @@ use halo2_base::{gates::range::RangeConfig, utils::PrimeField, Context};
 use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
 use halo2_regex::defs::{AllstrRegexDef, SubstrRegexDef};
 use halo2_rsa::{RSAPubE, RSAPublicKey, RSASignature};
-use halo2_zk_email::snark_verifier_sdk::{gen_proof_native, CircuitExt};
 use halo2_zk_email::{DefaultEmailVerifyCircuit, EmailVerifyConfig, EMAIL_VERIFY_CONFIG_ENV};
 use itertools::Itertools;
 use mailparse::parse_mail;
@@ -38,6 +33,8 @@ use rand::thread_rng;
 use rand::Rng;
 use rsa::{PublicKeyParts, RsaPrivateKey};
 use sha2::{self, Digest, Sha256};
+use snark_verifier_sdk::halo2::{gen_proof, gen_proof_shplonk};
+use snark_verifier_sdk::CircuitExt;
 use std::env::set_var;
 use std::{
     fs::File,
@@ -72,9 +69,7 @@ fn gen_or_get_params(k: usize) -> ParamsKZG<Bn256> {
         }
         Err(_) => {
             let params = ParamsKZG::<Bn256>::setup(k as u32, OsRng);
-            params
-                .write(&mut BufWriter::new(File::create(&path).unwrap()))
-                .unwrap();
+            params.write(&mut BufWriter::new(File::create(&path).unwrap())).unwrap();
             params
         }
     }
@@ -123,19 +118,13 @@ fn bench_email_verify1(c: &mut Criterion) {
     };
     let logger = slog::Logger::root(slog::Discard, slog::o!());
     let runtime = Runtime::new().unwrap();
-    let public_key = runtime
-        .block_on(async { resolve_public_key(&logger, &email_bytes).await })
-        .unwrap();
+    let public_key = runtime.block_on(async { resolve_public_key(&logger, &email_bytes).await }).unwrap();
     let public_key = match public_key {
         cfdkim::DkimPublicKey::Rsa(pk) => pk,
         _ => panic!("not supportted public key type."),
     };
-    let (canonicalized_header, canonicalized_body, signature_bytes) =
-        canonicalize_signed_email(&email_bytes).unwrap();
-    println!(
-        "header {}",
-        String::from_utf8(canonicalized_header.clone()).unwrap()
-    );
+    let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
+    println!("header {}", String::from_utf8(canonicalized_header.clone()).unwrap());
     let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
     let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
     let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
@@ -181,13 +170,11 @@ fn bench_email_verify1(c: &mut Criterion) {
         public_key,
         signature,
     };
-    MockProver::run(params.k(), &circuit, circuit.instances())
-        .unwrap()
-        .assert_satisfied();
+    MockProver::run(params.k(), &circuit, circuit.instances()).unwrap().assert_satisfied();
     let vk = keygen_vk(&params, &circuit).unwrap();
     let pk = keygen_pk(&params, vk.clone(), &circuit).unwrap();
     group.bench_function("bench 1", |b| {
-        b.iter(|| gen_proof_native(&params, &pk, circuit.clone()))
+        b.iter(|| gen_proof_shplonk(&params, &pk, circuit.clone(), circuit.instances(), &mut OsRng, None))
     });
     group.finish();
 }

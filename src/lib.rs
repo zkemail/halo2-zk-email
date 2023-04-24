@@ -368,24 +368,12 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                 let range = config.sha256_config.range().clone();
                 let gate = range.gate.clone();
                 // for (idx, v) in result.header_result.masked_characters.iter().enumerate() {
-                //     v.value().map(|v| {
-                //         println!(
-                //             "idx {} code {} char {}",
-                //             idx,
-                //             v.get_lower_32(),
-                //             (v.get_lower_32() as u8) as char
-                //         )
-                //     });
+                //     v.value()
+                //         .map(|v| println!("idx {} code {} char {}", idx, v.get_lower_32(), (v.get_lower_32() as u8) as char));
                 // }
                 // for (idx, v) in result.body_result.masked_characters.iter().enumerate() {
-                //     v.value().map(|v| {
-                //         println!(
-                //             "idx {} code {} char {}",
-                //             idx,
-                //             v.get_lower_32(),
-                //             (v.get_lower_32() as u8) as char
-                //         )
-                //     });
+                //     v.value()
+                //         .map(|v| println!("idx {} code {} char {}", idx, v.get_lower_32(), (v.get_lower_32() as u8) as char));
                 // }
                 let assigned_public_key_bytes = assigned_public_key
                     .n
@@ -764,6 +752,48 @@ mod test {
             _ => panic!("not supportted public key type."),
         };
         temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex1_email_verify.config"), move || {
+            let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+            let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
+            println!("header len\n {}", canonicalized_header.len());
+            println!("body len\n {}", canonicalized_body.len());
+            // println!("body\n{:?}", canonicalized_body);
+            println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
+            println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
+            let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
+            println!("public key n {}", hex::encode(&public_key.n().to_bytes_le()));
+            let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
+            let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
+            let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
+            let circuit = DefaultEmailVerifyCircuit {
+                header_bytes: canonicalized_header,
+                body_bytes: canonicalized_body,
+                public_key,
+                signature,
+            };
+
+            let instances = circuit.instances();
+            let prover = MockProver::run(params.degree, &circuit, instances).unwrap();
+            assert_eq!(prover.verify(), Ok(()));
+        });
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_existing_email2() {
+        let email_bytes = {
+            let mut f = File::open("./test_data/test_email2.eml").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            buf
+        };
+
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let public_key = resolve_public_key(&logger, &email_bytes).await.unwrap();
+        let public_key = match public_key {
+            cfdkim::DkimPublicKey::Rsa(pk) => pk,
+            _ => panic!("not supportted public key type."),
+        };
+        temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex2_email_verify.config"), move || {
             let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
             let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
             println!("header len\n {}", canonicalized_header.len());
