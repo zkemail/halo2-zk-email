@@ -5,7 +5,7 @@ mod helpers;
 
 pub mod regex_sha2;
 pub mod regex_sha2_base64;
-mod utils;
+pub mod utils;
 pub use crate::helpers::*;
 use crate::regex_sha2::RegexSha2Config;
 use crate::utils::*;
