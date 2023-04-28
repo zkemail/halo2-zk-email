@@ -614,7 +614,7 @@ async fn gen_circuit_from_email_path(email_path: &str) -> (DefaultEmailVerifyCir
     (circuit, headerhash, public_key_n, header_substrs, body_substrs)
 }
 
-fn gen_evm_verifier_yul<C>(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, num_instance: Vec<usize>) -> String
+pub fn gen_evm_verifier_yul<C>(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, num_instance: Vec<usize>) -> String
 where
     C: CircuitExt<Fr>,
 {
@@ -639,7 +639,7 @@ where
 }
 
 // original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L326-L602
-fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::Error>> {
+pub fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::error::Error>> {
     let file = File::open(input_file.clone())?;
     let reader = BufReader::new(file);
 
