@@ -470,7 +470,7 @@ impl<F: PrimeField> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
 
     fn instances(&self) -> Vec<Vec<F>> {
         let headerhash_value = Sha256::digest(&self.header_bytes).to_vec();
-        println!("header hash {}", hex::encode(&headerhash_value));
+        // println!("header hash {}", hex::encode(&headerhash_value));
         let header_str = String::from_utf8(self.header_bytes.clone()).unwrap();
         let body_str = String::from_utf8(self.body_bytes.clone()).unwrap();
         let params = Self::read_config_params();
@@ -484,7 +484,7 @@ impl<F: PrimeField> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
             params.body_max_byte_size,
         );
         let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
-        println!("public hash {}", hex::encode(public_hash.clone()));
+        // println!("public hash {}", hex::encode(public_hash.clone()));
         let public_fr = {
             let lo = F::from_u128(u128::from_le_bytes(public_hash[0..16].try_into().unwrap()));
             let mut hi_bytes = [0; 16];
@@ -494,7 +494,7 @@ impl<F: PrimeField> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
             let hi = F::from_u128(u128::from_le_bytes(hi_bytes));
             hi * F::from(2).pow_const(128) + lo
         };
-        println!("public fr {:?}", public_fr.to_repr(),);
+        // println!("public fr {:?}", public_fr.to_repr(),);
         vec![vec![public_fr]]
     }
 }
@@ -777,7 +777,6 @@ mod test {
         });
     }
 
-    #[ignore]
     #[tokio::test]
     async fn test_existing_email2() {
         let email_bytes = {
