@@ -1,5 +1,6 @@
 // use crate::snark_verifier_sdk::*;
 use crate::utils::{get_email_circuit_public_hash_input, get_email_substrs};
+use crate::vrm::DecomposedRegexConfig;
 use crate::{DefaultEmailVerifyCircuit, EmailVerifyConfig, EMAIL_VERIFY_CONFIG_ENV};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use cfdkim::{canonicalize_signed_email, resolve_public_key};
@@ -869,4 +870,23 @@ pub fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::erro
     }
     writeln!(write, "}} return success; }} }}")?;
     Ok(contract)
+}
+
+pub fn gen_regex_files(decomposed_regex_config_path: &str, regex_dir_path: &str, regex_files_prefix: &str) -> Result<(), Error> {
+    let decomposed_regex_config = serde_json::from_reader::<File, DecomposedRegexConfig>(File::open(decomposed_regex_config_path).unwrap()).unwrap();
+    let regex_dir_path = PathBuf::new().join(regex_dir_path);
+    let allstr_file_path = regex_dir_path.join(format!("{}_allstr.txt", regex_files_prefix));
+    let mut num_public_parts = 0usize;
+    for part in decomposed_regex_config.parts.iter() {
+        if part.is_public {
+            num_public_parts += 1;
+        }
+    }
+    let substr_file_pathes = (0..num_public_parts)
+        .map(|idx| regex_dir_path.join(format!("{}_substr_{}.txt", regex_files_prefix, idx)))
+        .collect_vec();
+    decomposed_regex_config
+        .gen_regex_files(&allstr_file_path, &substr_file_pathes)
+        .expect("fail to generate regex files");
+    Ok(())
 }

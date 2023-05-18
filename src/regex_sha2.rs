@@ -11,7 +11,7 @@ use halo2_base::{
 };
 use halo2_dynamic_sha256::Sha256DynamicConfig;
 use halo2_regex::{
-    defs::{AllstrRegexDef, SubstrRegexDef},
+    defs::{AllstrRegexDef, RegexDefs, SubstrRegexDef},
     AssignedRegexResult, RegexVerifyConfig,
 };
 use sha2::{Digest, Sha256};
@@ -36,7 +36,7 @@ impl<F: PrimeField> RegexSha2Config<F> {
         max_byte_size: usize,
         // num_sha2_compression_per_column: usize,
         range_config: RangeConfig<F>,
-        regex_defs: Vec<(AllstrRegexDef, SubstrRegexDef)>,
+        regex_defs: Vec<RegexDefs>,
     ) -> Self {
         // let sha256_comp_configs = (0..num_sha2_compression_per_column)
         //     .map(|_| Sha256CompressionConfig::configure(meta))
@@ -195,14 +195,14 @@ mod test {
             //     ]),
             // );
             let regex_defs = vec![
-                (
-                    AllstrRegexDef::read_from_text("./test_data/regex_from.txt"),
-                    SubstrRegexDef::read_from_text("./test_data/substr_from.txt"),
-                ),
-                (
-                    AllstrRegexDef::read_from_text("./test_data/regex_subject.txt"),
-                    SubstrRegexDef::read_from_text("./test_data/substr_subject.txt"),
-                ),
+                RegexDefs {
+                    allstr: AllstrRegexDef::read_from_text("./test_data/regex_from.txt"),
+                    substrs: vec![SubstrRegexDef::read_from_text("./test_data/substr_from.txt")],
+                },
+                RegexDefs {
+                    allstr: AllstrRegexDef::read_from_text("./test_data/regex_subject.txt"),
+                    substrs: vec![SubstrRegexDef::read_from_text("./test_data/substr_subject.txt")],
+                },
             ];
             let inner = RegexSha2Config::configure(meta, Self::MAX_BYTE_SIZE, range_config, regex_defs);
             let hash_instance = meta.instance_column();

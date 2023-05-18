@@ -249,6 +249,14 @@ enum Commands {
         #[arg(long, default_value = "./build/public_input.json")]
         public_input_path: String,
     },
+    GenRegexFiles {
+        #[arg(short, long, default_value = "./configs/decomposed_regex_config.json")]
+        decomposed_regex_config_path: String,
+        #[arg(long, default_value = "./build")]
+        regex_dir_path: String,
+        #[arg(short, long)]
+        regex_files_prefix: String,
+    },
 }
 
 #[tokio::main]
@@ -380,5 +388,10 @@ async fn main() {
             &public_input_path,
         )
         .unwrap(),
+        Commands::GenRegexFiles {
+            decomposed_regex_config_path,
+            regex_dir_path,
+            regex_files_prefix,
+        } => gen_regex_files(&decomposed_regex_config_path, &regex_dir_path, &regex_files_prefix).unwrap(),
     }
 }

@@ -1,6 +1,5 @@
 use fancy_regex::Regex;
 use itertools::Itertools;
-use num_bigint::BigUint;
 
 pub fn get_email_circuit_public_hash_input(
     headerhash: &[u8],
