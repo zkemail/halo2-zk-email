@@ -1,7 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod helpers;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod vrm;
+// #[cfg(not(target_arch = "wasm32"))]
+// pub mod vrm;
 // #[cfg(not(target_arch = "wasm32"))]
 // pub mod snark_verifier_sdk;
 pub mod regex_sha2;
@@ -25,6 +25,7 @@ use halo2_base::{
 use halo2_base::{AssignedValue, QuantumCell};
 use halo2_dynamic_sha256::{AssignedHashResult, Sha256DynamicConfig};
 use halo2_regex::defs::RegexDefs;
+pub use halo2_regex::vrm;
 use halo2_regex::{
     defs::{AllstrRegexDef, SubstrRegexDef},
     AssignedRegexResult,
@@ -42,8 +43,6 @@ use sha2::{Digest, Sha256};
 use snark_verifier::loader::LoadedScalar;
 
 use snark_verifier_sdk::CircuitExt;
-use std::env::set_var;
-use std::fmt::format;
 use std::fs::File;
 
 #[derive(Debug, Clone)]
@@ -72,7 +71,7 @@ impl<F: PrimeField> EmailVerifyConfig<F> {
         bodyhash_defs: RegexDefs,
         header_regex_defs: Vec<RegexDefs>,
         body_max_byte_size: usize,
-        body_regex_defs: RegexDefs,
+        body_regex_defs: Vec<RegexDefs>,
         public_key_bits: usize,
     ) -> Self {
         let header_defs = [vec![bodyhash_defs], header_regex_defs].concat();
@@ -88,7 +87,7 @@ impl<F: PrimeField> EmailVerifyConfig<F> {
             body_max_byte_size,
             // num_sha2_compression_per_column,
             range_config.clone(),
-            vec![body_regex_defs],
+            body_regex_defs,
         );
         let biguint_config = halo2_rsa::BigUintConfig::construct(range_config, 64);
         let rsa_config = RSAConfig::construct(biguint_config, public_key_bits, 5);
@@ -204,9 +203,9 @@ pub struct DefaultEmailVerifyConfigParams {
     pub bodyhash_regex_filepath: String,
     pub bodyhash_substr_filepath: String,
     pub header_regex_filepathes: Vec<String>,
-    pub header_substr_filepathes: Vec<String>,
-    pub body_regex_filepath: String,
-    pub body_substr_filepathes: Vec<String>,
+    pub header_substr_filepathes: Vec<Vec<String>>,
+    pub body_regex_filepathes: Vec<String>,
+    pub body_substr_filepathes: Vec<Vec<String>>,
     pub num_sha2_compression_per_column: usize,
     pub header_max_byte_size: usize,
     pub body_max_byte_size: usize,
@@ -263,31 +262,27 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
             allstr: bodyhash_allstr_def,
             substrs: vec![bodyhash_substr_def],
         };
-        let header_allstr_defs = params
+
+        let body_regex_defs = params
+            .body_regex_filepathes
+            .iter()
+            .zip(params.body_substr_filepathes.iter())
+            .map(|(allstr_path, substr_pathes)| {
+                let allstr = AllstrRegexDef::read_from_text(&allstr_path);
+                let substrs = substr_pathes.into_iter().map(|path| SubstrRegexDef::read_from_text(&path)).collect_vec();
+                RegexDefs { allstr, substrs }
+            })
+            .collect_vec();
+        let header_regex_defs = params
             .header_regex_filepathes
-            .into_iter()
-            .map(|path| AllstrRegexDef::read_from_text(&path))
-            .collect::<Vec<AllstrRegexDef>>();
-        let header_substr_defs = params
-            .header_substr_filepathes
-            .into_iter()
-            .map(|path| SubstrRegexDef::read_from_text(&path))
-            .collect::<Vec<SubstrRegexDef>>();
-        let body_allstr_def = AllstrRegexDef::read_from_text(&params.body_regex_filepath);
-        let body_substr_defs = params
-            .body_substr_filepathes
-            .into_iter()
-            .map(|path| SubstrRegexDef::read_from_text(&path))
-            .collect::<Vec<SubstrRegexDef>>();
-        let header_regex_defs = header_allstr_defs
-            .into_iter()
-            .zip(header_substr_defs.into_iter())
-            .map(|(allstr, substr)| RegexDefs { allstr, substrs: vec![substr] })
-            .collect::<Vec<RegexDefs>>();
-        let body_regex_defs = RegexDefs {
-            allstr: body_allstr_def,
-            substrs: body_substr_defs,
-        };
+            .iter()
+            .zip(params.header_substr_filepathes.iter())
+            .map(|(allstr_path, substr_pathes)| {
+                let allstr = AllstrRegexDef::read_from_text(&allstr_path);
+                let substrs = substr_pathes.into_iter().map(|path| SubstrRegexDef::read_from_text(&path)).collect_vec();
+                RegexDefs { allstr, substrs }
+            })
+            .collect_vec();
         let inner = EmailVerifyConfig::configure(
             meta,
             // params.num_sha2_compression_per_column,
@@ -522,18 +517,40 @@ mod test {
         dev::{CircuitCost, FailureLocation, MockProver, VerifyFailure},
         halo2curves::bn256::{Fr, G1},
     };
+    use halo2_regex::vrm::DecomposedRegexConfig;
     use halo2_rsa::RSAPubE;
     use mailparse::parse_mail;
     use num_bigint::BigUint;
     use rand::thread_rng;
     use rsa::{PublicKeyParts, RsaPrivateKey};
     use snark_verifier_sdk::CircuitExt;
-    use std::io::Read;
+    use std::{io::Read, path::Path};
     use temp_env;
 
     #[test]
     fn test_generated_email1() {
         temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test1_email_verify.config"), || {
+            let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+            regex_bodyhash_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+                    &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+                )
+                .unwrap();
+            let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+            regex_from_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                    &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+                )
+                .unwrap();
+            let regex_body_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/test1_email_body_defs.json").unwrap()).unwrap();
+            regex_body_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/test1_email_body_allstr.txt").to_path_buf(),
+                    &[Path::new("./test_data/test1_email_body_substr_0.txt").to_path_buf()],
+                )
+                .unwrap();
             let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
             let mut rng = thread_rng();
             let _private_key = RsaPrivateKey::new(&mut rng, params.public_key_bits).expect("failed to generate a key");
@@ -580,6 +597,37 @@ mod test {
     #[test]
     fn test_generated_email2() {
         temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test2_email_verify.config"), || {
+            let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+            regex_bodyhash_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+                    &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+                )
+                .unwrap();
+            let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+            regex_from_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                    &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+                )
+                .unwrap();
+            let regex_to_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/to_defs.json").unwrap()).unwrap();
+            regex_to_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/to_allstr.txt").to_path_buf(),
+                    &[Path::new("./test_data/to_substr_0.txt").to_path_buf()],
+                )
+                .unwrap();
+            let regex_body_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/test2_email_body_defs.json").unwrap()).unwrap();
+            regex_body_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/test2_email_body_allstr.txt").to_path_buf(),
+                    &[
+                        Path::new("./test_data/test2_email_body_substr_0.txt").to_path_buf(),
+                        Path::new("./test_data/test2_email_body_substr_1.txt").to_path_buf(),
+                    ],
+                )
+                .unwrap();
             let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
             let mut rng = thread_rng();
             let _private_key = RsaPrivateKey::new(&mut rng, params.public_key_bits).expect("failed to generate a key");
@@ -588,7 +636,6 @@ mod test {
             let message = concat!(
                 "From: alice@zkemail.com\r\n",
                 "To: bob@example.com\r\n",
-                "Subject: Hello.\r\n",
                 "\r\n",
                 "email was meant for @zkemailverify and halo.",
             )
@@ -596,7 +643,7 @@ mod test {
             let email = parse_mail(message).unwrap();
             let logger = slog::Logger::root(slog::Discard, slog::o!());
             let signer = SignerBuilder::new()
-                .with_signed_headers(&["Subject", "To", "From"])
+                .with_signed_headers(&["To", "From"])
                 .unwrap()
                 .with_private_key(private_key)
                 .with_selector("default")
@@ -633,6 +680,49 @@ mod test {
 
     #[tokio::test]
     async fn test_existing_email1() {
+        let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+        regex_bodyhash_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+        regex_from_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_to_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/to_defs.json").unwrap()).unwrap();
+        regex_to_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/to_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/to_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_subject_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/subject_defs.json").unwrap()).unwrap();
+        regex_subject_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/subject_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/subject_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let regex_body_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/test_ex1_email_body_defs.json").unwrap()).unwrap();
+        regex_body_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/test_ex1_email_body_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/test_ex1_email_body_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex1_email_body_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex1_email_body_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
         let email_bytes = {
             let mut f = File::open("./test_data/test_email1.eml").unwrap();
             let mut buf = Vec::new();
@@ -672,6 +762,49 @@ mod test {
 
     #[tokio::test]
     async fn test_existing_email2() {
+        let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+        regex_bodyhash_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+        regex_from_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_to_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/to_defs.json").unwrap()).unwrap();
+        regex_to_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/to_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/to_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_subject_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/subject_defs.json").unwrap()).unwrap();
+        regex_subject_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/subject_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/subject_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let regex_body_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/test_ex2_email_body_defs.json").unwrap()).unwrap();
+        regex_body_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/test_ex2_email_body_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/test_ex2_email_body_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex2_email_body_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex2_email_body_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
         let email_bytes = {
             let mut f = File::open("./test_data/test_email2.eml").unwrap();
             let mut buf = Vec::new();

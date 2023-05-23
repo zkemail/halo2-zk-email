@@ -115,9 +115,11 @@ mod test {
     use halo2_base::halo2_proofs::poly::kzg::multiopen::{ProverGWC, VerifierGWC};
     use halo2_base::halo2_proofs::poly::kzg::strategy::SingleStrategy;
     use halo2_base::halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
+    use halo2_regex::vrm::DecomposedRegexConfig;
     use rand::rngs::OsRng;
     use std::collections::HashSet;
     use std::marker::PhantomData;
+    use std::path::Path;
 
     use super::*;
 
@@ -196,12 +198,16 @@ mod test {
             // );
             let regex_defs = vec![
                 RegexDefs {
-                    allstr: AllstrRegexDef::read_from_text("./test_data/regex_from.txt"),
-                    substrs: vec![SubstrRegexDef::read_from_text("./test_data/substr_from.txt")],
+                    allstr: AllstrRegexDef::read_from_text("./test_data/from_allstr.txt"),
+                    substrs: vec![SubstrRegexDef::read_from_text("./test_data/from_substr_0.txt")],
                 },
                 RegexDefs {
-                    allstr: AllstrRegexDef::read_from_text("./test_data/regex_subject.txt"),
-                    substrs: vec![SubstrRegexDef::read_from_text("./test_data/substr_subject.txt")],
+                    allstr: AllstrRegexDef::read_from_text("./test_data/subject_allstr.txt"),
+                    substrs: vec![
+                        SubstrRegexDef::read_from_text("./test_data/subject_substr_0.txt"),
+                        SubstrRegexDef::read_from_text("./test_data/subject_substr_1.txt"),
+                        SubstrRegexDef::read_from_text("./test_data/subject_substr_2.txt"),
+                    ],
                 },
             ];
             let inner = RegexSha2Config::configure(meta, Self::MAX_BYTE_SIZE, range_config, regex_defs);
@@ -288,6 +294,24 @@ mod test {
 
     #[test]
     fn test_regex_sha2_valid_case1() {
+        let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+        regex_from_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_subject_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/subject_defs.json").unwrap()).unwrap();
+        regex_subject_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/subject_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/subject_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
         let email_bytes = {
             let mut f = File::open("./test_data/test_email1.eml").unwrap();
             let mut buf = Vec::new();
