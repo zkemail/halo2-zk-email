@@ -1,9 +1,5 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod helpers;
-// #[cfg(not(target_arch = "wasm32"))]
-// pub mod vrm;
-// #[cfg(not(target_arch = "wasm32"))]
-// pub mod snark_verifier_sdk;
 pub mod regex_sha2;
 pub mod regex_sha2_base64;
 pub mod utils;
@@ -65,7 +61,6 @@ pub struct EmailVerifyConfig<F: PrimeField> {
 impl<F: PrimeField> EmailVerifyConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
-        // num_sha2_compression_per_column: usize,
         range_config: RangeConfig<F>,
         header_max_byte_size: usize,
         bodyhash_defs: RegexDefs,
@@ -75,20 +70,8 @@ impl<F: PrimeField> EmailVerifyConfig<F> {
         public_key_bits: usize,
     ) -> Self {
         let header_defs = [vec![bodyhash_defs], header_regex_defs].concat();
-        let header_processer = RegexSha2Config::configure(
-            meta,
-            header_max_byte_size,
-            // num_sha2_compression_per_column,
-            range_config.clone(),
-            header_defs,
-        );
-        let body_processer = RegexSha2Base64Config::configure(
-            meta,
-            body_max_byte_size,
-            // num_sha2_compression_per_column,
-            range_config.clone(),
-            body_regex_defs,
-        );
+        let header_processer = RegexSha2Config::configure(meta, header_max_byte_size, range_config.clone(), header_defs);
+        let body_processer = RegexSha2Base64Config::configure(meta, body_max_byte_size, range_config.clone(), body_regex_defs);
         let biguint_config = halo2_rsa::BigUintConfig::construct(range_config, 64);
         let rsa_config = RSAConfig::construct(biguint_config, public_key_bits, 5);
         Self {
@@ -174,22 +157,6 @@ impl<F: PrimeField> EmailVerifyConfig<F> {
         self.body_processer.load(layouter)?;
         Ok(())
     }
-
-    // pub fn finalize(&self, ctx: &mut Context<F>) {
-    //     self.header_processer.finalize(ctx);
-    // }
-
-    // pub fn new_context<'a, 'b>(&'b self, region: Region<'a, F>) -> Context<'a, F> {
-    //     self.header_processer.new_context(region)
-    // }
-
-    // pub fn range(&self) -> &RangeConfig<F> {
-    //     self.header_processer.range()
-    // }
-
-    // pub fn gate(&self) -> &FlexGateConfig<F> {
-    //     self.header_processer.gate()
-    // }
 }
 
 pub const EMAIL_VERIFY_CONFIG_ENV: &'static str = "EMAIL_VERIFY_CONFIG";
@@ -285,7 +252,6 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
             .collect_vec();
         let inner = EmailVerifyConfig::configure(
             meta,
-            // params.num_sha2_compression_per_column,
             range_config.clone(),
             params.header_max_byte_size,
             bodyhash_defs,
@@ -294,9 +260,6 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
             body_regex_defs,
             params.public_key_bits,
         );
-        // let sha256_comp_configs = (0..params.num_sha2_compression_per_column)
-        //     .map(|_| Sha256CompressionConfig::configure(meta))
-        //     .collect();
         let sha256_config = Sha256DynamicConfig::construct(
             vec![
                 params.body_max_byte_size,
@@ -308,12 +271,6 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
         );
         let public_hash = meta.instance_column();
         meta.enable_equality(public_hash);
-        // let encoded_bodyhash_instance = meta.instance_column();
-        // meta.enable_equality(encoded_bodyhash_instance);
-        // let masked_str_instance = meta.instance_column();
-        // meta.enable_equality(masked_str_instance);
-        // let substr_ids_instance = meta.instance_column();
-        // meta.enable_equality(substr_ids_instance);
         DefaultEmailVerifyConfig {
             inner,
             sha256_config,
@@ -434,29 +391,12 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                     packed_public_hash = gate.mul_add(ctx, QuantumCell::Existing(byte), QuantumCell::Constant(coeff), QuantumCell::Existing(&packed_public_hash));
                     coeff *= F::from(256u64);
                 }
-                // let packed_public_hash = public_hash_result.output_bytes[0..31]
-                //     .map(|bytes| {
-                //         let mut sum = gate.load_zero(ctx);
-                //         for (idx, byte) in bytes.into_iter().enumerate() {
-                //             sum = gate.mul_add(
-                //                 ctx,
-                //                 QuantumCell::Existing(byte),
-                //                 QuantumCell::Constant(F::from_u128(1u128 << (8 * idx))),
-                //                 QuantumCell::Existing(&sum),
-                //             )
-                //         }
-                //         sum
-                //     })
-                //     .collect_vec();
                 config.sha256_config.range().finalize(ctx);
                 public_hash_cell.push(packed_public_hash.cell());
                 Ok(())
             },
         )?;
         layouter.constrain_instance(public_hash_cell[0], config.public_hash, 0)?;
-        // for (idx, cell) in public_hash_cell.into_iter().enumerate() {
-        //     layouter.constrain_instance(cell, config.public_hash, idx)?;
-        // }
         Ok(())
     }
 }

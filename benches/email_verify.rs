@@ -23,6 +23,7 @@ use halo2_base::halo2_proofs::{
 use halo2_base::{gates::range::RangeConfig, utils::PrimeField, Context};
 use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
 use halo2_regex::defs::{AllstrRegexDef, SubstrRegexDef};
+use halo2_regex::vrm::DecomposedRegexConfig;
 use halo2_rsa::{RSAPubE, RSAPublicKey, RSASignature};
 use halo2_zk_email::{DefaultEmailVerifyCircuit, EmailVerifyConfig, EMAIL_VERIFY_CONFIG_ENV};
 use itertools::Itertools;
@@ -76,40 +77,55 @@ fn gen_or_get_params(k: usize) -> ParamsKZG<Bn256> {
 }
 
 fn bench_email_verify1(c: &mut Criterion) {
-    let mut group = c.benchmark_group("email bench1 with recursion");
+    let mut group = c.benchmark_group("email bench1 without recursion");
     group.sample_size(10);
-    set_var(EMAIL_VERIFY_CONFIG_ENV, "./configs/default_app.config");
+    set_var(EMAIL_VERIFY_CONFIG_ENV, "./configs/test_ex1_email_verify.config");
     let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
     let params = gen_or_get_params(config_params.degree as usize);
     println!("gen_params");
-    let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-    let mut rng = thread_rng();
-    // let _private_key = RsaPrivateKey::new(&mut rng, config_params.public_key_bits)
-    //     .expect("failed to generate a key");
-    // let public_key = rsa::RsaPublicKey::from(&_private_key);
-    // let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
-    // let message = concat!(
-    //     "From: alice@zkemail.com\r\n",
-    //     "\r\n",
-    //     "email was meant for @zkemailverify.",
-    // )
-    // .as_bytes();
-    // let email = parse_mail(message).unwrap();
-    // let logger = slog::Logger::root(slog::Discard, slog::o!());
-    // let signer = SignerBuilder::new()
-    //     .with_signed_headers(&["From"])
-    //     .unwrap()
-    //     .with_private_key(private_key)
-    //     .with_selector("default")
-    //     .with_signing_domain("zkemail.com")
-    //     .with_logger(&logger)
-    //     .with_header_canonicalization(cfdkim::canonicalization::Type::Relaxed)
-    //     .with_body_canonicalization(cfdkim::canonicalization::Type::Relaxed)
-    //     .build()
-    //     .unwrap();
-    // let signature = signer.sign(&email).unwrap();
-    // println!("signature {}", signature);
-    // let new_msg = vec![signature.as_bytes(), b"\r\n", message].concat();
+    let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+    regex_bodyhash_decomposed
+        .gen_regex_files(
+            &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+            &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+        )
+        .unwrap();
+    let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+    regex_from_decomposed
+        .gen_regex_files(
+            &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+            &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+        )
+        .unwrap();
+    let regex_to_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/to_defs.json").unwrap()).unwrap();
+    regex_to_decomposed
+        .gen_regex_files(
+            &Path::new("./test_data/to_allstr.txt").to_path_buf(),
+            &[Path::new("./test_data/to_substr_0.txt").to_path_buf()],
+        )
+        .unwrap();
+    let regex_subject_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/subject_defs.json").unwrap()).unwrap();
+    regex_subject_decomposed
+        .gen_regex_files(
+            &Path::new("./test_data/subject_allstr.txt").to_path_buf(),
+            &[
+                Path::new("./test_data/subject_substr_0.txt").to_path_buf(),
+                Path::new("./test_data/subject_substr_1.txt").to_path_buf(),
+                Path::new("./test_data/subject_substr_2.txt").to_path_buf(),
+            ],
+        )
+        .unwrap();
+    let regex_body_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/test_ex1_email_body_defs.json").unwrap()).unwrap();
+    regex_body_decomposed
+        .gen_regex_files(
+            &Path::new("./test_data/test_ex1_email_body_allstr.txt").to_path_buf(),
+            &[
+                Path::new("./test_data/test_ex1_email_body_substr_0.txt").to_path_buf(),
+                Path::new("./test_data/test_ex1_email_body_substr_1.txt").to_path_buf(),
+                Path::new("./test_data/test_ex1_email_body_substr_2.txt").to_path_buf(),
+            ],
+        )
+        .unwrap();
     let email_bytes = {
         let mut f = File::open("./test_data/test_email1.eml").unwrap();
         let mut buf = Vec::new();
@@ -124,11 +140,21 @@ fn bench_email_verify1(c: &mut Criterion) {
         _ => panic!("not supportted public key type."),
     };
     let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-    println!("header {}", String::from_utf8(canonicalized_header.clone()).unwrap());
+    println!("header len\n {}", canonicalized_header.len());
+    println!("body len\n {}", canonicalized_body.len());
+    println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
+    println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
     let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
     let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
     let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
     let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
+    let circuit = DefaultEmailVerifyCircuit {
+        header_bytes: canonicalized_header,
+        body_bytes: canonicalized_body,
+        public_key,
+        signature,
+    };
+
     // let hash = Sha256::digest(&canonicalized_body);
     // let mut expected_output = Vec::new();
     // expected_output.resize(44, 0);
@@ -164,12 +190,6 @@ fn bench_email_verify1(c: &mut Criterion) {
     //     body_substr1_match.start(),
     //     body_substr1_match.as_str().to_string(),
     // )];
-    let circuit = DefaultEmailVerifyCircuit {
-        header_bytes: canonicalized_header,
-        body_bytes: canonicalized_body,
-        public_key,
-        signature,
-    };
     MockProver::run(params.k(), &circuit, circuit.instances()).unwrap().assert_satisfied();
     let vk = keygen_vk(&params, &circuit).unwrap();
     let pk = keygen_pk(&params, vk.clone(), &circuit).unwrap();

@@ -25,33 +25,14 @@ pub struct RegexSha2Result<'a, F: PrimeField> {
 
 #[derive(Debug, Clone)]
 pub struct RegexSha2Config<F: PrimeField> {
-    // pub(crate) sha256_config: Sha256DynamicConfig<F>,
     pub(crate) regex_config: RegexVerifyConfig<F>,
     pub max_byte_size: usize,
 }
 
 impl<F: PrimeField> RegexSha2Config<F> {
-    pub fn configure(
-        meta: &mut ConstraintSystem<F>,
-        max_byte_size: usize,
-        // num_sha2_compression_per_column: usize,
-        range_config: RangeConfig<F>,
-        regex_defs: Vec<RegexDefs>,
-    ) -> Self {
-        // let sha256_comp_configs = (0..num_sha2_compression_per_column)
-        //     .map(|_| Sha256CompressionConfig::configure(meta))
-        //     .collect();
-        // let sha256_config = Sha256DynamicConfig::construct(
-        //     sha256_comp_configs,
-        //     max_byte_size,
-        //     range_config.clone(),
-        // );
+    pub fn configure(meta: &mut ConstraintSystem<F>, max_byte_size: usize, range_config: RangeConfig<F>, regex_defs: Vec<RegexDefs>) -> Self {
         let regex_config = RegexVerifyConfig::configure(meta, max_byte_size, range_config.gate().clone(), regex_defs);
-        Self {
-            // sha256_config,
-            regex_config,
-            max_byte_size,
-        }
+        Self { regex_config, max_byte_size }
     }
 
     pub fn match_and_hash<'v: 'a, 'a>(&self, ctx: &mut Context<'v, F>, sha256_config: &mut Sha256DynamicConfig<F>, input: &[u8]) -> Result<RegexSha2Result<'a, F>, Error> {
@@ -80,14 +61,6 @@ impl<F: PrimeField> RegexSha2Config<F> {
         };
         Ok(result)
     }
-
-    // pub fn range(&self) -> &RangeConfig<F> {
-    //     self.sha256_config.range()
-    // }
-
-    // pub fn gate(&self) -> &FlexGateConfig<F> {
-    //     self.range().gate()
-    // }
 
     pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.regex_config.load(layouter)?;
