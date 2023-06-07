@@ -81,6 +81,7 @@ pub fn downsize_param(original_param_path: &str, new_param_path: &str, k: u32) -
 
 pub async fn gen_app_key(param_path: &str, circuit_config_path: &str, email_path: &str, pk_path: &str, vk_path: &str) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
+
     let mut params = {
         let f = File::open(Path::new(param_path)).unwrap();
         let mut reader = BufReader::new(f);
@@ -846,7 +847,7 @@ pub fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::erro
     let mut contract = format!(
         "// SPDX-License-Identifier: MIT
     pragma solidity ^0.8.17;
-    
+
     contract Verifier {{
         function verify(
             uint256[] memory pubInputs,

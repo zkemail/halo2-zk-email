@@ -40,7 +40,7 @@ enum Commands {
         #[arg(long)]
         k: u32,
         /// setup parameters path
-        #[arg(short, long, default_value = "./build/agg_params.bin")]
+        #[arg(short, long, default_value = "./build/app_params.bin")]
         param_path: String,
     },
     /// Downsize a setup parameter (not for production).

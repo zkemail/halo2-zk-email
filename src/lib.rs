@@ -507,6 +507,10 @@ impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
 
     pub fn read_config_params() -> DefaultEmailVerifyConfigParams {
         let path = std::env::var(EMAIL_VERIFY_CONFIG_ENV).expect("You should set the configure file path to EMAIL_VERIFY_CONFIG.");
+        let contents = std::fs::read(path.clone()).expect("Failed to read file");
+        let contents_str = String::from_utf8(contents).unwrap();
+        println!("Circuit config contents: {}", contents_str);
+
         let params: DefaultEmailVerifyConfigParams =
             serde_json::from_reader(File::open(path.as_str()).expect(&format!("{} does not exist.", path))).expect("File is found but invalid.");
         params
