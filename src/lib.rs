@@ -161,6 +161,36 @@ impl<F: PrimeField> EmailVerifyConfig<F> {
 
 pub const EMAIL_VERIFY_CONFIG_ENV: &'static str = "EMAIL_VERIFY_CONFIG";
 #[derive(serde::Serialize, serde::Deserialize)]
+pub struct Sha2ConfigParams {
+    pub num_sha2_compression_per_column: usize,
+    pub num_bits_lookup: usize,
+    pub num_advice_columns: usize,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct HeaderConfigParams {
+    pub bodyhash_regex_filepath: String,
+    pub bodyhash_substr_filepath: String,
+    pub header_regex_filepathes: Vec<String>,
+    pub header_substr_filepathes: Vec<Vec<String>>,
+    pub header_max_byte_size: usize,
+    pub header_substr_regexes: Vec<Vec<String>>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct BodyConfigParams {
+    pub body_regex_filepathes: Vec<String>,
+    pub body_substr_filepathes: Vec<Vec<String>>,
+    pub body_max_byte_size: usize,
+    pub body_substr_regexes: Vec<Vec<String>>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct RsaConfigParams {
+    pub public_key_bits: usize,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct DefaultEmailVerifyConfigParams {
     pub degree: u32,
     pub num_advice: usize,
@@ -260,13 +290,16 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
             body_regex_defs,
             params.public_key_bits,
         );
-        let sha256_config = Sha256DynamicConfig::construct(
+        let sha256_config = Sha256DynamicConfig::configure(
+            meta,
             vec![
                 params.body_max_byte_size,
                 params.header_max_byte_size,
                 128 + params.public_key_bits / 8 + 2 * (params.header_max_byte_size + params.body_max_byte_size) + 64, // (header hash, base64 body hash, padding, RSA public key, masked chars, substr ids)
             ],
             range_config.clone(),
+            16,
+            1,
             false,
         );
         let public_hash = meta.instance_column();
@@ -281,6 +314,7 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
     fn synthesize(&self, mut config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
         config.inner.load(&mut layouter)?;
         config.sha256_config.range().load_lookup_table(&mut layouter)?;
+        config.sha256_config.load(&mut layouter)?;
         let mut first_pass = SKIP_FIRST_PASS;
         let mut public_hash_cell = vec![];
         let params = Self::read_config_params();

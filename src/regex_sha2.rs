@@ -146,7 +146,7 @@ mod test {
             // let sha256_comp_configs = (0..Self::NUM_SHA2_COMP)
             //     .map(|_| Sha256CompressionConfig::configure(meta))
             //     .collect();
-            let sha256_config = Sha256DynamicConfig::construct(vec![Self::MAX_BYTE_SIZE], range_config.clone(), false);
+            let sha256_config = Sha256DynamicConfig::configure(meta, vec![Self::MAX_BYTE_SIZE], range_config.clone(), 16, 1, false);
             // let lookup_filepath = "./test_data/regex_test_lookup.txt";
             // let regex_def = AllstrRegexDef::read_from_text("");
             // let substr_def1 = SubstrRegexDef::new(
@@ -202,6 +202,7 @@ mod test {
         fn synthesize(&self, mut config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
             config.inner.load(&mut layouter)?;
             config.sha256_config.range().load_lookup_table(&mut layouter)?;
+            config.sha256_config.load(&mut layouter)?;
             let mut first_pass = SKIP_FIRST_PASS;
             let mut hash_bytes_cell = vec![];
             let mut masked_str_cell = vec![];
@@ -258,11 +259,11 @@ mod test {
     impl<F: PrimeField> TestRegexSha2<F> {
         const MAX_BYTE_SIZE: usize = 1024;
         // const NUM_SHA2_COMP: usize = 1; // ~130 columns per extra SHA2 coloumn
-        const NUM_ADVICE: usize = 25;
+        const NUM_ADVICE: usize = 12;
         const NUM_FIXED: usize = 1;
         const NUM_LOOKUP_ADVICE: usize = 1;
-        const LOOKUP_BITS: usize = 17;
-        const K: u32 = 18;
+        const LOOKUP_BITS: usize = 18;
+        const K: u32 = 19;
     }
 
     #[test]
