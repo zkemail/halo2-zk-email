@@ -65,7 +65,7 @@ graph-cycles = "0.1.0"
 thiserror = "1.0.40"
 
 [dev-dependencies]
-criterion = { version = "0.4" }
+criterion = { version = "0.3" }
 temp-env = "0.3.3"
 
 [[bench]]

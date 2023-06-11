@@ -19,3 +19,10 @@ Cargo.lock
 *.bin
 *.hex
 *.sol
+/benches/*.pk
+/benches/*.vk
+/benches/*.hex
+/benches/*.bin
+/benches/*.json
+*.log
+.DS_Store
