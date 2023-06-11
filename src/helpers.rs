@@ -1,26 +1,19 @@
 // use crate::snark_verifier_sdk::*;
 use crate::utils::{get_email_circuit_public_hash_input, get_email_substrs};
 use crate::vrm::DecomposedRegexConfig;
-use crate::{DefaultEmailVerifyCircuit, EmailVerifyConfig, EMAIL_VERIFY_CONFIG_ENV};
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+use crate::{DefaultEmailVerifyCircuit, EMAIL_VERIFY_CONFIG_ENV};
 use cfdkim::{canonicalize_signed_email, resolve_public_key};
-use clap::{Parser, Subcommand};
-use core::num;
 use halo2_base::halo2_proofs::circuit::Value;
 use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, Fq, Fr, G1Affine};
 use halo2_base::halo2_proofs::halo2curves::FieldExt;
-use halo2_base::halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk, verify_proof, Error, ProvingKey, VerifyingKey};
+use halo2_base::halo2_proofs::plonk::{Error, ProvingKey, VerifyingKey};
 use halo2_base::halo2_proofs::poly::commitment::{Params, ParamsProver};
-use halo2_base::halo2_proofs::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
-use halo2_base::halo2_proofs::poly::kzg::multiopen::{ProverSHPLONK, VerifierSHPLONK};
-use halo2_base::halo2_proofs::poly::kzg::strategy::SingleStrategy;
-use halo2_base::halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
+use halo2_base::halo2_proofs::poly::kzg::commitment::ParamsKZG;
 use halo2_base::halo2_proofs::SerdeFormat;
 use halo2_rsa::{RSAPubE, RSAPublicKey, RSASignature};
 use hex;
 use itertools::Itertools;
 use num_bigint::BigUint;
-use num_traits::Pow;
 use rand::rngs::OsRng;
 use rand::thread_rng;
 use regex_simple::Regex;
@@ -32,12 +25,12 @@ use snark_verifier::loader::LoadedScalar;
 use snark_verifier::pcs::kzg::{Bdfg21, Kzg};
 use snark_verifier::system::halo2::transcript::evm::EvmTranscript;
 use snark_verifier::system::halo2::{compile, Config};
-use snark_verifier::verifier::{Plonk as PlonkApp, PlonkVerifier};
-use snark_verifier_sdk::evm::{encode_calldata, evm_verify, gen_evm_proof, gen_evm_proof_shplonk};
+use snark_verifier::verifier::PlonkVerifier;
+use snark_verifier_sdk::evm::{encode_calldata, evm_verify, gen_evm_proof_shplonk};
 use snark_verifier_sdk::halo2::aggregation::PublicAggregationCircuit;
 use snark_verifier_sdk::halo2::{gen_proof_shplonk, gen_snark_shplonk};
 use snark_verifier_sdk::Plonk;
-use snark_verifier_sdk::{gen_pk, CircuitExt, Plonk as PlonkAgg, LIMBS};
+use snark_verifier_sdk::{gen_pk, CircuitExt, LIMBS};
 use std::env::set_var;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
@@ -191,27 +184,29 @@ pub async fn prove_app(param_path: &str, circuit_config_path: &str, pk_path: &st
         writer.write_all(&proof).unwrap();
         writer.flush().unwrap();
     };
-    let (header_starts, header_substrs): (Vec<usize>, Vec<String>) = header_substrs
-        .into_iter()
-        .map(|s| {
-            let s = s.unwrap();
-            (s.0, s.1)
-        })
-        .unzip();
-    let (body_starts, body_substrs): (Vec<usize>, Vec<String>) = body_substrs
-        .into_iter()
-        .map(|s| {
-            let s = s.unwrap();
-            (s.0, s.1)
-        })
-        .unzip();
+    let mut header_starts_vec = vec![];
+    let mut header_substrs_vec = vec![];
+    for s in header_substrs.into_iter() {
+        if let Some(s) = s {
+            header_starts_vec.push(s.0);
+            header_substrs_vec.push(s.1);
+        }
+    }
+    let mut body_starts_vec = vec![];
+    let mut body_substrs_vec = vec![];
+    for s in body_substrs.into_iter() {
+        if let Some(s) = s {
+            body_starts_vec.push(s.0);
+            body_substrs_vec.push(s.1);
+        }
+    }
     let public_input = EmailVerifyPublicInput {
         headerhash: format!("0x{}", hex::encode(&headerhash)),
         public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
-        header_starts,
-        header_substrs,
-        body_starts,
-        body_substrs,
+        header_starts: header_starts_vec,
+        header_substrs: header_substrs_vec,
+        body_starts: body_starts_vec,
+        body_substrs: body_substrs_vec,
     };
     {
         let public_input_str = serde_json::to_string(&public_input).unwrap();
@@ -247,27 +242,29 @@ pub async fn evm_prove_app(param_path: &str, circuit_config_path: &str, pk_path:
         write!(file, "0x{}", proof_hex).unwrap();
         file.flush().unwrap();
     };
-    let (header_starts, header_substrs): (Vec<usize>, Vec<String>) = header_substrs
-        .into_iter()
-        .map(|s| {
-            let s = s.unwrap();
-            (s.0, s.1)
-        })
-        .unzip();
-    let (body_starts, body_substrs): (Vec<usize>, Vec<String>) = body_substrs
-        .into_iter()
-        .map(|s| {
-            let s = s.unwrap();
-            (s.0, s.1)
-        })
-        .unzip();
+    let mut header_starts_vec = vec![];
+    let mut header_substrs_vec = vec![];
+    for s in header_substrs.into_iter() {
+        if let Some(s) = s {
+            header_starts_vec.push(s.0);
+            header_substrs_vec.push(s.1);
+        }
+    }
+    let mut body_starts_vec = vec![];
+    let mut body_substrs_vec = vec![];
+    for s in body_substrs.into_iter() {
+        if let Some(s) = s {
+            body_starts_vec.push(s.0);
+            body_substrs_vec.push(s.1);
+        }
+    }
     let public_input = EmailVerifyPublicInput {
         headerhash: format!("0x{}", hex::encode(&headerhash)),
         public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
-        header_starts,
-        header_substrs,
-        body_starts,
-        body_substrs,
+        header_starts: header_starts_vec,
+        header_substrs: header_substrs_vec,
+        body_starts: body_starts_vec,
+        body_substrs: body_substrs_vec,
     };
     {
         let public_input_str = serde_json::to_string(&public_input).unwrap();
@@ -340,27 +337,29 @@ pub async fn evm_prove_agg(
         write!(file, "0x{}", proof_hex).unwrap();
         file.flush().unwrap();
     };
-    let (header_starts, header_substrs): (Vec<usize>, Vec<String>) = header_substrs
-        .into_iter()
-        .map(|s| {
-            let s = s.unwrap();
-            (s.0, s.1)
-        })
-        .unzip();
-    let (body_starts, body_substrs): (Vec<usize>, Vec<String>) = body_substrs
-        .into_iter()
-        .map(|s| {
-            let s = s.unwrap();
-            (s.0, s.1)
-        })
-        .unzip();
+    let mut header_starts_vec = vec![];
+    let mut header_substrs_vec = vec![];
+    for s in header_substrs.into_iter() {
+        if let Some(s) = s {
+            header_starts_vec.push(s.0);
+            header_substrs_vec.push(s.1);
+        }
+    }
+    let mut body_starts_vec = vec![];
+    let mut body_substrs_vec = vec![];
+    for s in body_substrs.into_iter() {
+        if let Some(s) = s {
+            body_starts_vec.push(s.0);
+            body_substrs_vec.push(s.1);
+        }
+    }
     let public_input = EmailVerifyPublicInput {
         headerhash: format!("0x{}", hex::encode(&headerhash)),
         public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
-        header_starts,
-        header_substrs,
-        body_starts,
-        body_substrs,
+        header_starts: header_starts_vec,
+        header_substrs: header_substrs_vec,
+        body_starts: body_starts_vec,
+        body_substrs: body_substrs_vec,
     };
     {
         let public_input_str = serde_json::to_string(&public_input).unwrap();
@@ -484,8 +483,8 @@ pub fn evm_verify_app(circuit_config_path: &str, bytecode_path: &str, proof_path
             &public_key_n_bytes,
             header_substrs,
             body_substrs,
-            config_params.header_max_byte_size,
-            config_params.body_max_byte_size,
+            config_params.header_config.max_byte_size,
+            config_params.body_config.max_byte_size,
         );
         let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
         let public_fr = {
@@ -560,8 +559,8 @@ pub fn evm_verify_agg(
             &public_key_n_bytes,
             header_substrs,
             body_substrs,
-            config_params.header_max_byte_size,
-            config_params.body_max_byte_size,
+            config_params.header_config.max_byte_size,
+            config_params.body_config.max_byte_size,
         );
         let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
         let public_fr = {
@@ -605,7 +604,7 @@ async fn gen_circuit_from_email_path(email_path: &str) -> (DefaultEmailVerifyCir
     let header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
     let body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
     let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-    let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, config_params.header_substr_regexes, config_params.body_substr_regexes);
+    let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, config_params.header_config.substr_regexes, config_params.body_config.substr_regexes);
     let circuit = DefaultEmailVerifyCircuit {
         header_bytes: canonicalized_header,
         body_bytes: canonicalized_body,

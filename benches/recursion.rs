@@ -2,10 +2,11 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, Fr, G1Affine};
 use halo2_base::halo2_proofs::poly::{commitment::Params, kzg::commitment::ParamsKZG};
 use halo2_base::{gates::range::RangeConfig, utils::PrimeField, Context};
+use halo2_zk_email::DefaultEmailVerifyCircuit;
 use halo2_zk_email::{downsize_param, evm_prove_agg, gen_agg_key, gen_app_key, gen_param, EMAIL_VERIFY_CONFIG_ENV};
-use halo2_zk_email::{DefaultEmailVerifyCircuit, EmailVerifyConfig};
 use sha2::{self, Digest, Sha256};
 use snark_verifier_sdk::halo2::{aggregation::AggregationCircuit, gen_proof_shplonk, gen_snark_shplonk};
+use std::env::set_var;
 use std::{
     fs::File,
     io::{prelude::*, BufReader, BufWriter},
@@ -45,36 +46,32 @@ fn gen_or_get_params(path: &str, k: u32) -> ParamsKZG<Bn256> {
 //     }
 // }
 
-const AGG_PARAMS_K: u32 = 24;
+const AGG_PARAMS_K: u32 = 22;
+const APP_CONFIG_PATH: &'static str = "./configs/app_recursion_bench.config";
+const AGG_CONFIG_PATH: &'static str = "./configs/agg_bench.config";
 
 fn bench_email_verify_recursion1(c: &mut Criterion) {
     let mut group = c.benchmark_group("email bench1 with recursion");
     group.sample_size(10);
-    // set_var(EMAIL_VERIFY_CONFIG_ENV, "./configs/bench_agg_email_verify.config");
+    set_var(EMAIL_VERIFY_CONFIG_ENV, APP_CONFIG_PATH);
     let app_config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
     let agg_params_path = format!("benches/params_{}.bin", AGG_PARAMS_K);
     let app_params_path = format!("benches/params_{}.bin", app_config_params.degree);
-    let agg_params = gen_or_get_params(&agg_params_path, AGG_PARAMS_K);
+    gen_or_get_params(&agg_params_path, AGG_PARAMS_K);
     downsize_param(&agg_params_path, &app_params_path, app_config_params.degree).unwrap();
     println!("gen_params");
     let runtime = Runtime::new().unwrap();
     runtime.block_on(async {
-        gen_app_key(
-            &app_params_path,
-            "configs/bench_app_email_verify.config",
-            "test_data/test_email1.eml",
-            "benches/app.pk",
-            "benches/app.vk",
-        )
-        .await
-        .unwrap()
+        gen_app_key(&app_params_path, APP_CONFIG_PATH, "test_data/test_email1.eml", "benches/app.pk", "benches/app.vk")
+            .await
+            .unwrap()
     });
     runtime.block_on(async {
         gen_agg_key(
             &app_params_path,
             &agg_params_path,
-            "configs/bench_app_email_verify.config",
-            "configs/bench_agg_email_verify.config",
+            APP_CONFIG_PATH,
+            AGG_CONFIG_PATH,
             "test_data/test_email1.eml",
             "benches/app.pk",
             "benches/agg.pk",
@@ -84,6 +81,22 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
         .unwrap()
     });
 
+    // runtime.block_on(async {
+    //     evm_prove_agg(
+    //         &app_params_path,
+    //         &agg_params_path,
+    //         APP_CONFIG_PATH,
+    //         AGG_CONFIG_PATH,
+    //         "test_data/test_email1.eml",
+    //         "benches/app.pk",
+    //         "benches/agg.pk",
+    //         "benches/acc.hex",
+    //         "benches/proof.hex",
+    //         "benches/public_input.json",
+    //     )
+    //     .await
+    //     .unwrap();
+    // });
     // set_var(EMAIL_VERIFY_CONFIG_ENV, "./configs/bench_agg_email_verify.config");
     // let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
     // let mut rng = thread_rng();
@@ -136,8 +149,8 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
                 evm_prove_agg(
                     &app_params_path,
                     &agg_params_path,
-                    "configs/bench_app_email_verify.config",
-                    "configs/bench_agg_email_verify.config",
+                    APP_CONFIG_PATH,
+                    AGG_CONFIG_PATH,
                     "test_data/test_email1.eml",
                     "benches/app.pk",
                     "benches/agg.pk",
@@ -145,6 +158,8 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
                     "benches/proof.hex",
                     "benches/public_input.json",
                 )
+                .await
+                .unwrap();
             })
         })
     });

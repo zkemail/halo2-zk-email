@@ -72,13 +72,9 @@ temp-env = "0.3.3"
 name = "email_verify"
 harness = false
 
-# [[bench]]
-# name = "recursion"
-# harness = false
-
-# [[bench]]
-# name = "recursion_without_sha2"
-# harness = false
+[[bench]]
+name = "recursion"
+harness = false
 
 [[bin]]
 name = "zkemail"
