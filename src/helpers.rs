@@ -3,6 +3,7 @@ use crate::utils::{get_email_circuit_public_hash_input, get_email_substrs};
 use crate::vrm::DecomposedRegexConfig;
 use crate::{DefaultEmailVerifyCircuit, EMAIL_VERIFY_CONFIG_ENV};
 use cfdkim::{canonicalize_signed_email, resolve_public_key};
+use ethereum_types::Address;
 use halo2_base::halo2_proofs::circuit::Value;
 use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, Fq, Fr, G1Affine};
 use halo2_base::halo2_proofs::halo2curves::FieldExt;
@@ -20,7 +21,7 @@ use regex_simple::Regex;
 use rsa::PublicKeyParts;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use snark_verifier::loader::evm::{compile_yul, EvmLoader};
+use snark_verifier::loader::evm::{compile_yul, EvmLoader, ExecutorBuilder};
 use snark_verifier::loader::LoadedScalar;
 use snark_verifier::pcs::kzg::{Bdfg21, Kzg};
 use snark_verifier::system::halo2::transcript::evm::EvmTranscript;
@@ -50,22 +51,22 @@ pub struct EmailVerifyPublicInput {
     pub body_substrs: Vec<String>,
 }
 
-pub fn gen_param(param_path: &str, k: u32) -> Result<(), Error> {
+pub fn gen_params(params_path: &str, k: u32) -> Result<(), Error> {
     let rng = thread_rng();
     let params = ParamsKZG::<Bn256>::setup(k, rng);
-    let f = File::create(param_path).unwrap();
+    let f = File::create(params_path).unwrap();
     let mut writer = BufWriter::new(f);
     params.write(&mut writer).unwrap();
     writer.flush().unwrap();
     Ok(())
 }
 
-pub fn downsize_param(original_param_path: &str, new_param_path: &str, k: u32) -> Result<(), Error> {
-    let f = File::open(Path::new(original_param_path)).unwrap();
+pub fn downsize_params(original_params_path: &str, new_params_path: &str, k: u32) -> Result<(), Error> {
+    let f = File::open(Path::new(original_params_path)).unwrap();
     let mut reader = BufReader::new(f);
     let mut params = ParamsKZG::<Bn256>::read(&mut reader).unwrap();
     params.downsize(k);
-    let f = File::create(new_param_path).unwrap();
+    let f = File::create(new_params_path).unwrap();
     let mut writer = BufWriter::new(f);
     params.write(&mut writer).unwrap();
     writer.flush().unwrap();
@@ -104,8 +105,8 @@ pub async fn gen_app_key(param_path: &str, circuit_config_path: &str, email_path
 }
 
 pub async fn gen_agg_key(
-    app_param_path: &str,
-    agg_param_path: &str,
+    app_params_path: &str,
+    agg_params_path: &str,
     app_circuit_config_path: &str,
     agg_circuit_config_path: &str,
     email_path: &str,
@@ -116,13 +117,13 @@ pub async fn gen_agg_key(
     set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config_path);
     set_var(VERIFY_CONFIG_KEY, agg_circuit_config_path);
     let agg_params = {
-        let f = File::open(Path::new(agg_param_path)).unwrap();
+        let f = File::open(Path::new(agg_params_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
     // let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
     let app_params = {
-        let f = File::open(Path::new(app_param_path)).unwrap();
+        let f = File::open(Path::new(app_params_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
@@ -159,10 +160,10 @@ pub async fn gen_agg_key(
     Ok(())
 }
 
-pub async fn prove_app(param_path: &str, circuit_config_path: &str, pk_path: &str, email_path: &str, proof_path: &str, public_input_path: &str) -> Result<(), Error> {
+pub async fn prove_app(params_path: &str, circuit_config_path: &str, pk_path: &str, email_path: &str, proof_path: &str, public_input_path: &str) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let mut params = {
-        let f = File::open(Path::new(param_path)).unwrap();
+        let f = File::open(Path::new(params_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
@@ -217,10 +218,10 @@ pub async fn prove_app(param_path: &str, circuit_config_path: &str, pk_path: &st
     Ok(())
 }
 
-pub async fn evm_prove_app(param_path: &str, circuit_config_path: &str, pk_path: &str, email_path: &str, proof_path: &str, public_input_path: &str) -> Result<(), Error> {
+pub async fn evm_prove_app(params_path: &str, circuit_config_path: &str, pk_path: &str, email_path: &str, proof_path: &str, public_input_path: &str) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let mut params = {
-        let f = File::open(Path::new(param_path)).unwrap();
+        let f = File::open(Path::new(params_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
@@ -276,8 +277,8 @@ pub async fn evm_prove_app(param_path: &str, circuit_config_path: &str, pk_path:
 }
 
 pub async fn evm_prove_agg(
-    app_param_path: &str,
-    agg_param_path: &str,
+    app_params_path: &str,
+    agg_params_path: &str,
     app_circuit_config_path: &str,
     agg_circuit_config_path: &str,
     email_path: &str,
@@ -290,7 +291,7 @@ pub async fn evm_prove_agg(
     set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config_path);
     set_var(VERIFY_CONFIG_KEY, agg_circuit_config_path);
     let agg_params = {
-        let f = File::open(Path::new(agg_param_path)).unwrap();
+        let f = File::open(Path::new(agg_params_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
@@ -301,7 +302,7 @@ pub async fn evm_prove_agg(
     //     params
     // };
     let app_params = {
-        let f = File::open(Path::new(app_param_path)).unwrap();
+        let f = File::open(Path::new(app_params_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
@@ -370,10 +371,10 @@ pub async fn evm_prove_agg(
     Ok(())
 }
 
-pub async fn gen_evm_verifier(param_path: &str, circuit_config_path: &str, vk_path: &str, bytecode_path: &str, solidity_path: &str) -> Result<(), Error> {
+pub async fn gen_evm_verifier(params_path: &str, circuit_config_path: &str, vk_path: &str, bytecode_path: &str, solidity_path: &str) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let mut params = {
-        let f = File::open(Path::new(param_path)).unwrap();
+        let f = File::open(Path::new(params_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
@@ -409,7 +410,7 @@ pub async fn gen_evm_verifier(param_path: &str, circuit_config_path: &str, vk_pa
 }
 
 pub async fn gen_agg_evm_verifier(
-    agg_param_path: &str,
+    agg_params_path: &str,
     app_circuit_config_path: &str,
     agg_circuit_config_path: &str,
     vk_path: &str,
@@ -419,7 +420,7 @@ pub async fn gen_agg_evm_verifier(
     set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config_path);
     set_var(VERIFY_CONFIG_KEY, agg_circuit_config_path);
     let params = {
-        let f = File::open(Path::new(agg_param_path)).unwrap();
+        let f = File::open(Path::new(agg_params_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
@@ -499,7 +500,22 @@ pub fn evm_verify_app(circuit_config_path: &str, bytecode_path: &str, proof_path
         vec![public_fr]
     };
     println!("instances {:?}", instances);
-    evm_verify(deployment_code, vec![instances], proof);
+    // let calldata = encode_calldata(&vec![instances], &proof);
+    // let success = {
+    //     let mut evm = ExecutorBuilder::default().with_gas_limit(u64::MAX.into()).build();
+
+    //     let caller = Address::from_low_u64_be(0xfe);
+    //     let result = evm.deploy(caller, deployment_code.into(), 0.into());
+    //     println!("result {:?}", result);
+    //     let verifier = result.address.unwrap();
+    //     let result = evm.call_raw(caller, verifier, calldata.into(), 0.into());
+
+    //     dbg!(result.gas_used);
+
+    //     !result.reverted
+    // };
+    // assert!(success);
+    evm_verify(deployment_code, false, vec![instances], proof);
     Ok(())
 }
 
@@ -575,7 +591,7 @@ pub fn evm_verify_agg(
         vec![acc, vec![public_fr]].concat()
     };
     println!("instances {:?}", instances);
-    evm_verify(deployment_code, vec![instances], proof);
+    evm_verify(deployment_code, false, vec![instances], proof);
     Ok(())
 }
 

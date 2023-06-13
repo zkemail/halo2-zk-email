@@ -31,7 +31,7 @@ cargo build --release
 To generate a sample circuit and it's non aggregated EVM verifier, do:
 ```bash
 cargo build --release
-cargo run --release -- gen-param --k 19
+cargo run --release -- gen-params --k 18
 cargo run --release -- gen-app-key
 cargo run --release -- gen-evm-verifier
 cargo run --release -- evm-verify-app
