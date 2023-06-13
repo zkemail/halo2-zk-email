@@ -8,7 +8,7 @@ function catchAllWithoutRNRegexStr() {
 }
 
 function textContextPrefix() {
-    return `Content-Type: text/plain; charset="UTF-8"\r\n\r\n`;
+    return `Content-Type: text/plain; charset=UTF-8\r\n\r\n`;
 }
 
 function formatRegexPrintable(s) {
