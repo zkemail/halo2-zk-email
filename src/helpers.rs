@@ -501,7 +501,7 @@ pub fn evm_verify_app(circuit_config_path: &str, bytecode_path: &str, proof_path
         vec![public_fr]
     };
     println!("instances {:?}", instances);
-    evm_verify(deployment_code, vec![instances], proof);
+    evm_verify(deployment_code, false, vec![instances], proof);
     Ok(())
 }
 
@@ -577,7 +577,7 @@ pub fn evm_verify_agg(
         vec![acc, vec![public_fr]].concat()
     };
     println!("instances {:?}", instances);
-    evm_verify(deployment_code, vec![instances], proof);
+    evm_verify(deployment_code, false, vec![instances], proof);
     Ok(())
 }
 
