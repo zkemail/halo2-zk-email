@@ -25,33 +25,14 @@ pub struct RegexSha2Result<'a, F: PrimeField> {
 
 #[derive(Debug, Clone)]
 pub struct RegexSha2Config<F: PrimeField> {
-    // pub(crate) sha256_config: Sha256DynamicConfig<F>,
     pub(crate) regex_config: RegexVerifyConfig<F>,
     pub max_byte_size: usize,
 }
 
 impl<F: PrimeField> RegexSha2Config<F> {
-    pub fn configure(
-        meta: &mut ConstraintSystem<F>,
-        max_byte_size: usize,
-        // num_sha2_compression_per_column: usize,
-        range_config: RangeConfig<F>,
-        regex_defs: Vec<RegexDefs>,
-    ) -> Self {
-        // let sha256_comp_configs = (0..num_sha2_compression_per_column)
-        //     .map(|_| Sha256CompressionConfig::configure(meta))
-        //     .collect();
-        // let sha256_config = Sha256DynamicConfig::construct(
-        //     sha256_comp_configs,
-        //     max_byte_size,
-        //     range_config.clone(),
-        // );
+    pub fn configure(meta: &mut ConstraintSystem<F>, max_byte_size: usize, range_config: RangeConfig<F>, regex_defs: Vec<RegexDefs>) -> Self {
         let regex_config = RegexVerifyConfig::configure(meta, max_byte_size, range_config.gate().clone(), regex_defs);
-        Self {
-            // sha256_config,
-            regex_config,
-            max_byte_size,
-        }
+        Self { regex_config, max_byte_size }
     }
 
     pub fn match_and_hash<'v: 'a, 'a>(&self, ctx: &mut Context<'v, F>, sha256_config: &mut Sha256DynamicConfig<F>, input: &[u8]) -> Result<RegexSha2Result<'a, F>, Error> {
@@ -81,14 +62,6 @@ impl<F: PrimeField> RegexSha2Config<F> {
         Ok(result)
     }
 
-    // pub fn range(&self) -> &RangeConfig<F> {
-    //     self.sha256_config.range()
-    // }
-
-    // pub fn gate(&self) -> &FlexGateConfig<F> {
-    //     self.range().gate()
-    // }
-
     pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.regex_config.load(layouter)?;
         // self.range().load_lookup_table(layouter)?;
@@ -115,9 +88,11 @@ mod test {
     use halo2_base::halo2_proofs::poly::kzg::multiopen::{ProverGWC, VerifierGWC};
     use halo2_base::halo2_proofs::poly::kzg::strategy::SingleStrategy;
     use halo2_base::halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
+    use halo2_regex::vrm::DecomposedRegexConfig;
     use rand::rngs::OsRng;
     use std::collections::HashSet;
     use std::marker::PhantomData;
+    use std::path::Path;
 
     use super::*;
 
@@ -171,7 +146,7 @@ mod test {
             // let sha256_comp_configs = (0..Self::NUM_SHA2_COMP)
             //     .map(|_| Sha256CompressionConfig::configure(meta))
             //     .collect();
-            let sha256_config = Sha256DynamicConfig::construct(vec![Self::MAX_BYTE_SIZE], range_config.clone(), false);
+            let sha256_config = Sha256DynamicConfig::configure(meta, vec![Self::MAX_BYTE_SIZE], range_config.clone(), 16, 1, false);
             // let lookup_filepath = "./test_data/regex_test_lookup.txt";
             // let regex_def = AllstrRegexDef::read_from_text("");
             // let substr_def1 = SubstrRegexDef::new(
@@ -196,12 +171,16 @@ mod test {
             // );
             let regex_defs = vec![
                 RegexDefs {
-                    allstr: AllstrRegexDef::read_from_text("./test_data/regex_from.txt"),
-                    substrs: vec![SubstrRegexDef::read_from_text("./test_data/substr_from.txt")],
+                    allstr: AllstrRegexDef::read_from_text("./test_data/from_allstr.txt"),
+                    substrs: vec![SubstrRegexDef::read_from_text("./test_data/from_substr_0.txt")],
                 },
                 RegexDefs {
-                    allstr: AllstrRegexDef::read_from_text("./test_data/regex_subject.txt"),
-                    substrs: vec![SubstrRegexDef::read_from_text("./test_data/substr_subject.txt")],
+                    allstr: AllstrRegexDef::read_from_text("./test_data/subject_allstr.txt"),
+                    substrs: vec![
+                        SubstrRegexDef::read_from_text("./test_data/subject_substr_0.txt"),
+                        SubstrRegexDef::read_from_text("./test_data/subject_substr_1.txt"),
+                        SubstrRegexDef::read_from_text("./test_data/subject_substr_2.txt"),
+                    ],
                 },
             ];
             let inner = RegexSha2Config::configure(meta, Self::MAX_BYTE_SIZE, range_config, regex_defs);
@@ -223,6 +202,7 @@ mod test {
         fn synthesize(&self, mut config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
             config.inner.load(&mut layouter)?;
             config.sha256_config.range().load_lookup_table(&mut layouter)?;
+            config.sha256_config.load(&mut layouter)?;
             let mut first_pass = SKIP_FIRST_PASS;
             let mut hash_bytes_cell = vec![];
             let mut masked_str_cell = vec![];
@@ -279,15 +259,33 @@ mod test {
     impl<F: PrimeField> TestRegexSha2<F> {
         const MAX_BYTE_SIZE: usize = 1024;
         // const NUM_SHA2_COMP: usize = 1; // ~130 columns per extra SHA2 coloumn
-        const NUM_ADVICE: usize = 25;
+        const NUM_ADVICE: usize = 12;
         const NUM_FIXED: usize = 1;
         const NUM_LOOKUP_ADVICE: usize = 1;
-        const LOOKUP_BITS: usize = 17;
-        const K: u32 = 18;
+        const LOOKUP_BITS: usize = 18;
+        const K: u32 = 19;
     }
 
     #[test]
     fn test_regex_sha2_valid_case1() {
+        let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+        regex_from_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_subject_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/subject_defs.json").unwrap()).unwrap();
+        regex_subject_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/subject_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/subject_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
         let email_bytes = {
             let mut f = File::open("./test_data/test_email1.eml").unwrap();
             let mut buf = Vec::new();

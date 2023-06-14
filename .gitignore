@@ -15,3 +15,14 @@ Cargo.lock
 /target
 /Cargo.lock
 /build
+/test_data/*.txt
+*.bin
+*.hex
+*.sol
+/benches/*.pk
+/benches/*.vk
+/benches/*.hex
+/benches/*.bin
+/benches/*.json
+*.log
+.DS_Store

@@ -17,9 +17,9 @@ halo2-ecc = { version = "0.2.2", default-features = false, features = [
     "display",
 ], git = "https://github.com/axiom-crypto/halo2-lib.git" }
 # halo2-dynamic-sha256 = { path = "../halo2-dynamic-sha256-1" }
-halo2-dynamic-sha256 = { git = "https://github.com/zkemail/halo2-dynamic-sha256.git", version = "0.1.0", branch = "feat/main_gate_base" }
+halo2-dynamic-sha256 = { git = "https://github.com/zkemail/halo2-dynamic-sha256.git", version = "0.1.0", branch = "feat/lookup" }
 halo2-rsa = { git = "https://github.com/zkemail/halo2-rsa.git", version = "0.1.0", branch = "feat/new_bigint", default-features = false }
-halo2-regex = { git = "https://github.com/zkemail/halo2-regex.git", version = "0.1.0", branch = "feat/multi_regex" }
+halo2-regex = { git = "https://github.com/zkemail/halo2-regex.git", version = "0.1.0", branch = "feat/multi_path" }
 # halo2-regex = { path = "../halo2-regex-2", version = "0.1.0" }
 halo2-base64 = { git = "https://github.com/zkemail/halo2-base64.git", version = "0.1.0", branch = "main" }
 num-traits = "0.2.15"
@@ -37,9 +37,9 @@ snark-verifier-sdk = { git = "https://github.com/zkemail/snark-verifier.git", ve
     "halo2-pse",
 ] }
 ark-std = { version = "0.4.0", features = ["print-trace"] }
-# ethereum-types = { version = "0.14", default-features = false, features = [
-#     "std",
-# ] }
+ethereum-types = { version = "0.14", default-features = false, features = [
+    "std",
+] }
 itertools = "0.10.3"
 clap = { version = "4.2.1", features = ["derive"] }
 serde_json = "1.0.95"
@@ -65,20 +65,16 @@ graph-cycles = "0.1.0"
 thiserror = "1.0.40"
 
 [dev-dependencies]
-criterion = { version = "0.4" }
+criterion = { version = "0.3" }
 temp-env = "0.3.3"
 
 [[bench]]
 name = "email_verify"
 harness = false
 
-# [[bench]]
-# name = "recursion"
-# harness = false
-
-# [[bench]]
-# name = "recursion_without_sha2"
-# harness = false
+[[bench]]
+name = "recursion"
+harness = false
 
 [[bin]]
 name = "zkemail"
