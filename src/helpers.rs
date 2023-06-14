@@ -1,7 +1,7 @@
 // use crate::snark_verifier_sdk::*;
-use crate::utils::{get_email_circuit_public_hash_input, get_email_substrs};
+use crate::utils::{get_email_circuit_public_hash_input, get_email_substrs, read_default_circuit_config_params};
 use crate::vrm::DecomposedRegexConfig;
-use crate::{DefaultEmailVerifyCircuit, EMAIL_VERIFY_CONFIG_ENV};
+use crate::EMAIL_VERIFY_CONFIG_ENV;
 use cfdkim::{canonicalize_signed_email, resolve_public_key};
 use ethereum_types::Address;
 use halo2_base::halo2_proofs::circuit::Value;
@@ -41,16 +41,6 @@ use std::rc::Rc;
 pub const NUM_ACC_INSTANCES: usize = 4 * LIMBS;
 pub const VERIFY_CONFIG_KEY: &'static str = "VERIFY_CONFIG";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmailVerifyPublicInput {
-    pub headerhash: String,
-    pub public_key_n_bytes: String,
-    pub header_starts: Vec<usize>,
-    pub header_substrs: Vec<String>,
-    pub body_starts: Vec<usize>,
-    pub body_substrs: Vec<String>,
-}
-
 pub fn gen_params(params_path: &str, k: u32) -> Result<(), Error> {
     let rng = thread_rng();
     let params = ParamsKZG::<Bn256>::setup(k, rng);
@@ -73,7 +63,7 @@ pub fn downsize_params(original_params_path: &str, new_params_path: &str, k: u32
     Ok(())
 }
 
-pub async fn gen_app_key(param_path: &str, circuit_config_path: &str, email_path: &str, pk_path: &str, vk_path: &str) -> Result<(), Error> {
+pub async fn gen_app_key<C: CircuitExt<Fr>>(param_path: &str, circuit_config_path: &str, pk_path: &str, vk_path: &str, circuit: C) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
 
     let mut params = {
@@ -81,12 +71,12 @@ pub async fn gen_app_key(param_path: &str, circuit_config_path: &str, email_path
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    let app_config = read_default_circuit_config_params();
     if params.k() > app_config.degree {
         params.downsize(app_config.degree);
     }
-    let (circuit, _, _, _, _) = gen_circuit_from_email_path(email_path).await;
-    let pk = gen_pk::<DefaultEmailVerifyCircuit<Fr>>(&params, &circuit, None);
+    // let (circuit, _, _, _, _) = gen_circuit_from_email_path(email_path).await;
+    let pk = gen_pk::<C>(&params, &circuit, None);
     println!("app pk generated");
     {
         let f = File::create(pk_path).unwrap();
@@ -105,15 +95,15 @@ pub async fn gen_app_key(param_path: &str, circuit_config_path: &str, email_path
     Ok(())
 }
 
-pub async fn gen_agg_key(
+pub async fn gen_agg_key<C: CircuitExt<Fr>>(
     app_params_path: &str,
     agg_params_path: &str,
     app_circuit_config_path: &str,
     agg_circuit_config_path: &str,
-    email_path: &str,
     app_pk_path: &str,
     agg_pk_path: &str,
     agg_vk_path: &str,
+    app_circuit: C,
 ) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config_path);
     set_var(VERIFY_CONFIG_KEY, agg_circuit_config_path);
@@ -133,11 +123,11 @@ pub async fn gen_agg_key(
     //     params.downsize(app_config.degree);
     //     params
     // };
-    let (app_circuit, _, _, _, _) = gen_circuit_from_email_path(email_path).await;
+    // let (app_circuit, _, _, _, _) = gen_circuit_from_email_path(email_path).await;
     let app_pk = {
         let f = File::open(Path::new(app_pk_path)).unwrap();
         let mut reader = BufReader::new(f);
-        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
+        ProvingKey::<G1Affine>::read::<_, C>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
     let snark = gen_snark_shplonk(&app_params, &app_pk, app_circuit, &mut OsRng, None::<&str>);
     println!("snark generated");
@@ -161,23 +151,31 @@ pub async fn gen_agg_key(
     Ok(())
 }
 
-pub async fn prove_app(params_path: &str, circuit_config_path: &str, pk_path: &str, email_path: &str, proof_path: &str, public_input_path: &str) -> Result<(), Error> {
+pub async fn prove_app<C: CircuitExt<Fr>>(
+    params_path: &str,
+    circuit_config_path: &str,
+    pk_path: &str,
+    // email_path: &str,
+    proof_path: &str,
+    circuit: C,
+    // public_input_path: &str,
+) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let mut params = {
         let f = File::open(Path::new(params_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    let app_config = read_default_circuit_config_params();
     if params.k() > app_config.degree {
         params.downsize(app_config.degree);
     }
     let pk = {
         let f = File::open(Path::new(pk_path)).unwrap();
         let mut reader = BufReader::new(f);
-        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
+        ProvingKey::<G1Affine>::read::<_, C>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
-    let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
+    // let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
     let instances = circuit.instances();
     let proof = gen_proof_shplonk(&params, &pk, circuit, instances, &mut OsRng, None);
     {
@@ -186,56 +184,63 @@ pub async fn prove_app(params_path: &str, circuit_config_path: &str, pk_path: &s
         writer.write_all(&proof).unwrap();
         writer.flush().unwrap();
     };
-    let mut header_starts_vec = vec![];
-    let mut header_substrs_vec = vec![];
-    for s in header_substrs.into_iter() {
-        if let Some(s) = s {
-            header_starts_vec.push(s.0);
-            header_substrs_vec.push(s.1);
-        }
-    }
-    let mut body_starts_vec = vec![];
-    let mut body_substrs_vec = vec![];
-    for s in body_substrs.into_iter() {
-        if let Some(s) = s {
-            body_starts_vec.push(s.0);
-            body_substrs_vec.push(s.1);
-        }
-    }
-    let public_input = EmailVerifyPublicInput {
-        headerhash: format!("0x{}", hex::encode(&headerhash)),
-        public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
-        header_starts: header_starts_vec,
-        header_substrs: header_substrs_vec,
-        body_starts: body_starts_vec,
-        body_substrs: body_substrs_vec,
-    };
-    {
-        let public_input_str = serde_json::to_string(&public_input).unwrap();
-        let mut file = File::create(public_input_path)?;
-        write!(file, "{}", public_input_str).unwrap();
-        file.flush().unwrap();
-    }
+    // let mut header_starts_vec = vec![];
+    // let mut header_substrs_vec = vec![];
+    // for s in header_substrs.into_iter() {
+    //     if let Some(s) = s {
+    //         header_starts_vec.push(s.0);
+    //         header_substrs_vec.push(s.1);
+    //     }
+    // }
+    // let mut body_starts_vec = vec![];
+    // let mut body_substrs_vec = vec![];
+    // for s in body_substrs.into_iter() {
+    //     if let Some(s) = s {
+    //         body_starts_vec.push(s.0);
+    //         body_substrs_vec.push(s.1);
+    //     }
+    // }
+    // let public_input = EmailVerifyPublicInput {
+    //     headerhash: format!("0x{}", hex::encode(&headerhash)),
+    //     public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
+    //     header_starts: header_starts_vec,
+    //     header_substrs: header_substrs_vec,
+    //     body_starts: body_starts_vec,
+    //     body_substrs: body_substrs_vec,
+    // };
+    // {
+    //     let public_input_str = serde_json::to_string(&public_input).unwrap();
+    //     let mut file = File::create(public_input_path)?;
+    //     write!(file, "{}", public_input_str).unwrap();
+    //     file.flush().unwrap();
+    // }
     Ok(())
 }
 
-pub async fn evm_prove_app(params_path: &str, circuit_config_path: &str, pk_path: &str, email_path: &str, proof_path: &str, public_input_path: &str) -> Result<(), Error> {
+pub async fn evm_prove_app<C: CircuitExt<Fr>>(
+    params_path: &str,
+    circuit_config_path: &str,
+    pk_path: &str,
+    // email_path: &str,
+    proof_path: &str,
+    circuit: C,
+) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let mut params = {
         let f = File::open(Path::new(params_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    let app_config = read_default_circuit_config_params();
     if params.k() > app_config.degree {
         params.downsize(app_config.degree);
     }
     let pk = {
         let f = File::open(Path::new(pk_path)).unwrap();
         let mut reader = BufReader::new(f);
-        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
+        ProvingKey::<G1Affine>::read::<_, C>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
-    let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
+    // let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
     let instances = circuit.instances();
     let proof = gen_evm_proof_shplonk(&params, &pk, circuit, instances, &mut OsRng);
     {
@@ -244,50 +249,51 @@ pub async fn evm_prove_app(params_path: &str, circuit_config_path: &str, pk_path
         write!(file, "0x{}", proof_hex).unwrap();
         file.flush().unwrap();
     };
-    let mut header_starts_vec = vec![];
-    let mut header_substrs_vec = vec![];
-    for s in header_substrs.into_iter() {
-        if let Some(s) = s {
-            header_starts_vec.push(s.0);
-            header_substrs_vec.push(s.1);
-        }
-    }
-    let mut body_starts_vec = vec![];
-    let mut body_substrs_vec = vec![];
-    for s in body_substrs.into_iter() {
-        if let Some(s) = s {
-            body_starts_vec.push(s.0);
-            body_substrs_vec.push(s.1);
-        }
-    }
-    let public_input = EmailVerifyPublicInput {
-        headerhash: format!("0x{}", hex::encode(&headerhash)),
-        public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
-        header_starts: header_starts_vec,
-        header_substrs: header_substrs_vec,
-        body_starts: body_starts_vec,
-        body_substrs: body_substrs_vec,
-    };
-    {
-        let public_input_str = serde_json::to_string(&public_input).unwrap();
-        let mut file = File::create(public_input_path)?;
-        write!(file, "{}", public_input_str).unwrap();
-        file.flush().unwrap();
-    }
+    // let mut header_starts_vec = vec![];
+    // let mut header_substrs_vec = vec![];
+    // for s in header_substrs.into_iter() {
+    //     if let Some(s) = s {
+    //         header_starts_vec.push(s.0);
+    //         header_substrs_vec.push(s.1);
+    //     }
+    // }
+    // let mut body_starts_vec = vec![];
+    // let mut body_substrs_vec = vec![];
+    // for s in body_substrs.into_iter() {
+    //     if let Some(s) = s {
+    //         body_starts_vec.push(s.0);
+    //         body_substrs_vec.push(s.1);
+    //     }
+    // }
+    // let public_input = EmailVerifyPublicInput {
+    //     headerhash: format!("0x{}", hex::encode(&headerhash)),
+    //     public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
+    //     header_starts: header_starts_vec,
+    //     header_substrs: header_substrs_vec,
+    //     body_starts: body_starts_vec,
+    //     body_substrs: body_substrs_vec,
+    // };
+    // {
+    //     let public_input_str = serde_json::to_string(&public_input).unwrap();
+    //     let mut file = File::create(public_input_path)?;
+    //     write!(file, "{}", public_input_str).unwrap();
+    //     file.flush().unwrap();
+    // }
     Ok(())
 }
 
-pub async fn evm_prove_agg(
+pub async fn evm_prove_agg<C: CircuitExt<Fr>>(
     app_params_path: &str,
     agg_params_path: &str,
     app_circuit_config_path: &str,
     agg_circuit_config_path: &str,
-    email_path: &str,
+    // email_path: &str,
     app_pk_path: &str,
     agg_pk_path: &str,
     acc_path: &str,
     proof_path: &str,
-    public_input_path: &str,
+    app_circuit: C,
+    // public_input_path: &str,
 ) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config_path);
     set_var(VERIFY_CONFIG_KEY, agg_circuit_config_path);
@@ -307,11 +313,11 @@ pub async fn evm_prove_agg(
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    let (app_circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
+    // let (app_circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
     let app_pk = {
         let f = File::open(Path::new(app_pk_path)).unwrap();
         let mut reader = BufReader::new(f);
-        ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
+        ProvingKey::<G1Affine>::read::<_, C>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
     let snark = gen_snark_shplonk(&app_params, &app_pk, app_circuit, &mut OsRng, None::<&str>);
     println!("snark generated");
@@ -339,59 +345,59 @@ pub async fn evm_prove_agg(
         write!(file, "0x{}", proof_hex).unwrap();
         file.flush().unwrap();
     };
-    let mut header_starts_vec = vec![];
-    let mut header_substrs_vec = vec![];
-    for s in header_substrs.into_iter() {
-        if let Some(s) = s {
-            header_starts_vec.push(s.0);
-            header_substrs_vec.push(s.1);
-        }
-    }
-    let mut body_starts_vec = vec![];
-    let mut body_substrs_vec = vec![];
-    for s in body_substrs.into_iter() {
-        if let Some(s) = s {
-            body_starts_vec.push(s.0);
-            body_substrs_vec.push(s.1);
-        }
-    }
-    let public_input = EmailVerifyPublicInput {
-        headerhash: format!("0x{}", hex::encode(&headerhash)),
-        public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
-        header_starts: header_starts_vec,
-        header_substrs: header_substrs_vec,
-        body_starts: body_starts_vec,
-        body_substrs: body_substrs_vec,
-    };
-    {
-        let public_input_str = serde_json::to_string(&public_input).unwrap();
-        let mut file = File::create(public_input_path)?;
-        write!(file, "{}", public_input_str).unwrap();
-        file.flush().unwrap();
-    }
+    // let mut header_starts_vec = vec![];
+    // let mut header_substrs_vec = vec![];
+    // for s in header_substrs.into_iter() {
+    //     if let Some(s) = s {
+    //         header_starts_vec.push(s.0);
+    //         header_substrs_vec.push(s.1);
+    //     }
+    // }
+    // let mut body_starts_vec = vec![];
+    // let mut body_substrs_vec = vec![];
+    // for s in body_substrs.into_iter() {
+    //     if let Some(s) = s {
+    //         body_starts_vec.push(s.0);
+    //         body_substrs_vec.push(s.1);
+    //     }
+    // }
+    // let public_input = EmailVerifyPublicInput {
+    //     headerhash: format!("0x{}", hex::encode(&headerhash)),
+    //     public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
+    //     header_starts: header_starts_vec,
+    //     header_substrs: header_substrs_vec,
+    //     body_starts: body_starts_vec,
+    //     body_substrs: body_substrs_vec,
+    // };
+    // {
+    //     let public_input_str = serde_json::to_string(&public_input).unwrap();
+    //     let mut file = File::create(public_input_path)?;
+    //     write!(file, "{}", public_input_str).unwrap();
+    //     file.flush().unwrap();
+    // }
     Ok(())
 }
 
-pub async fn gen_evm_verifier(params_path: &str, circuit_config_path: &str, vk_path: &str, bytecode_path: &str, solidity_path: &str) -> Result<(), Error> {
+pub async fn gen_evm_verifier<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str, vk_path: &str, bytecode_path: &str, solidity_path: &str) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let mut params = {
         let f = File::open(Path::new(params_path)).unwrap();
         let mut reader = BufReader::new(f);
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
-    let app_config = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    let app_config = read_default_circuit_config_params();
     if params.k() > app_config.degree {
         params.downsize(app_config.degree);
     }
     let vk = {
         let f = File::open(vk_path).unwrap();
         let mut reader = BufReader::new(f);
-        VerifyingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
+        VerifyingKey::<G1Affine>::read::<_, C>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
     // let circuit = gen_circuit_from_email_path(email_path).await;
     // let num_instance = DefaultEmailVerifyCircuit::<Fr>::num_instances(0);
     let num_instance = vec![1];
-    let verifier_yul = gen_evm_verifier_yul::<DefaultEmailVerifyCircuit<Fr>>(&params, &vk, num_instance);
+    let verifier_yul = gen_evm_verifier_yul::<C>(&params, &vk, num_instance);
     {
         let bytecode = compile_yul(&verifier_yul);
         let f = File::create(bytecode_path).unwrap();
@@ -450,7 +456,7 @@ pub async fn gen_agg_evm_verifier(
     Ok(())
 }
 
-pub fn evm_verify_app(circuit_config_path: &str, bytecode_path: &str, proof_path: &str, public_input_path: &str) -> Result<(), Error> {
+pub fn evm_verify_app(circuit_config_path: &str, bytecode_path: &str, proof_path: &str, instances: Vec<Fr>) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let deployment_code = {
         let f = File::open(bytecode_path).unwrap();
@@ -463,43 +469,43 @@ pub fn evm_verify_app(circuit_config_path: &str, bytecode_path: &str, proof_path
         let hex = fs::read_to_string(proof_path).unwrap();
         hex::decode(&hex[2..]).unwrap()
     };
-    let instances = {
-        let public_input = serde_json::from_reader::<File, EmailVerifyPublicInput>(File::open(public_input_path).unwrap()).unwrap();
-        let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-        let headerhash = hex::decode(&public_input.headerhash[2..]).unwrap();
-        let public_key_n_bytes = hex::decode(&public_input.public_key_n_bytes[2..]).unwrap();
-        let header_substrs = public_input
-            .header_starts
-            .into_iter()
-            .zip(public_input.header_substrs.into_iter())
-            .map(|(start, substr)| Some((start, substr)))
-            .collect_vec();
-        let body_substrs = public_input
-            .body_starts
-            .into_iter()
-            .zip(public_input.body_substrs.into_iter())
-            .map(|(start, substr)| Some((start, substr)))
-            .collect_vec();
-        let public_hash_input = get_email_circuit_public_hash_input(
-            &headerhash,
-            &public_key_n_bytes,
-            header_substrs,
-            body_substrs,
-            config_params.header_config.max_byte_size,
-            config_params.body_config.max_byte_size,
-        );
-        let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
-        let public_fr = {
-            let lo = Fr::from_u128(u128::from_le_bytes(public_hash[0..16].try_into().unwrap()));
-            let mut hi_bytes = [0; 16];
-            for idx in 0..15 {
-                hi_bytes[idx] = public_hash[16 + idx];
-            }
-            let hi = Fr::from_u128(u128::from_le_bytes(hi_bytes));
-            hi * Fr::from(2).pow_const(128) + lo
-        };
-        vec![public_fr]
-    };
+    // let instances = {
+    //     let public_input = serde_json::from_reader::<File, EmailVerifyPublicInput>(File::open(public_input_path).unwrap()).unwrap();
+    //     let config_params = read_default_circuit_config_params();
+    //     let headerhash = hex::decode(&public_input.headerhash[2..]).unwrap();
+    //     let public_key_n_bytes = hex::decode(&public_input.public_key_n_bytes[2..]).unwrap();
+    //     let header_substrs = public_input
+    //         .header_starts
+    //         .into_iter()
+    //         .zip(public_input.header_substrs.into_iter())
+    //         .map(|(start, substr)| Some((start, substr)))
+    //         .collect_vec();
+    //     let body_substrs = public_input
+    //         .body_starts
+    //         .into_iter()
+    //         .zip(public_input.body_substrs.into_iter())
+    //         .map(|(start, substr)| Some((start, substr)))
+    //         .collect_vec();
+    //     let public_hash_input = get_email_circuit_public_hash_input(
+    //         &headerhash,
+    //         &public_key_n_bytes,
+    //         header_substrs,
+    //         body_substrs,
+    //         config_params.header_config.max_byte_size,
+    //         config_params.body_config.max_byte_size,
+    //     );
+    //     let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
+    //     let public_fr = {
+    //         let lo = Fr::from_u128(u128::from_le_bytes(public_hash[0..16].try_into().unwrap()));
+    //         let mut hi_bytes = [0; 16];
+    //         for idx in 0..15 {
+    //             hi_bytes[idx] = public_hash[16 + idx];
+    //         }
+    //         let hi = Fr::from_u128(u128::from_le_bytes(hi_bytes));
+    //         hi * Fr::from(2).pow_const(128) + lo
+    //     };
+    //     vec![public_fr]
+    // };
     println!("instances {:?}", instances);
     // let calldata = encode_calldata(&vec![instances], &proof);
     // let success = {
@@ -525,8 +531,7 @@ pub fn evm_verify_agg(
     agg_circuit_config_path: &str,
     bytecode_path: &str,
     proof_path: &str,
-    acc_path: &str,
-    public_input_path: &str,
+    instances: Vec<Fr>, // public_input_path: &str,
 ) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, app_circuit_config_path);
     set_var(VERIFY_CONFIG_KEY, agg_circuit_config_path);
@@ -541,94 +546,59 @@ pub fn evm_verify_agg(
         let hex = fs::read_to_string(proof_path).unwrap();
         hex::decode(&hex[2..]).unwrap()
     };
-    let instances = {
-        let acc = {
-            let hex = fs::read_to_string(acc_path).unwrap();
-            hex::decode(&hex[2..])
-                .unwrap()
-                .chunks(32)
-                .map(|bytes| {
-                    let mut bytes = bytes.to_vec();
-                    bytes.reverse();
-                    Fr::from_bytes(bytes[..].try_into().unwrap()).unwrap()
-                })
-                .collect_vec()
-        };
-        assert_eq!(acc.len(), NUM_ACC_INSTANCES);
-        let public_input = serde_json::from_reader::<File, EmailVerifyPublicInput>(File::open(public_input_path).unwrap()).unwrap();
-        let headerhash = hex::decode(&public_input.headerhash[2..]).unwrap();
-        let public_key_n_bytes = hex::decode(&public_input.public_key_n_bytes[2..]).unwrap();
-        let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-        let header_substrs = public_input
-            .header_starts
-            .into_iter()
-            .zip(public_input.header_substrs.into_iter())
-            .map(|(start, substr)| Some((start, substr)))
-            .collect_vec();
-        let body_substrs = public_input
-            .body_starts
-            .into_iter()
-            .zip(public_input.body_substrs.into_iter())
-            .map(|(start, substr)| Some((start, substr)))
-            .collect_vec();
-        let public_hash_input = get_email_circuit_public_hash_input(
-            &headerhash,
-            &public_key_n_bytes,
-            header_substrs,
-            body_substrs,
-            config_params.header_config.max_byte_size,
-            config_params.body_config.max_byte_size,
-        );
-        let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
-        let public_fr = {
-            let lo = Fr::from_u128(u128::from_le_bytes(public_hash[0..16].try_into().unwrap()));
-            let mut hi_bytes = [0; 16];
-            for idx in 0..15 {
-                hi_bytes[idx] = public_hash[16 + idx];
-            }
-            let hi = Fr::from_u128(u128::from_le_bytes(hi_bytes));
-            hi * Fr::from(2).pow_const(128) + lo
-        };
-        vec![acc, vec![public_fr]].concat()
-    };
+    // let instances = {
+    //     let acc = {
+    //         let hex = fs::read_to_string(acc_path).unwrap();
+    //         hex::decode(&hex[2..])
+    //             .unwrap()
+    //             .chunks(32)
+    //             .map(|bytes| {
+    //                 let mut bytes = bytes.to_vec();
+    //                 bytes.reverse();
+    //                 Fr::from_bytes(bytes[..].try_into().unwrap()).unwrap()
+    //             })
+    //             .collect_vec()
+    //     };
+    //     assert_eq!(acc.len(), NUM_ACC_INSTANCES);
+    //     let public_input = serde_json::from_reader::<File, EmailVerifyPublicInput>(File::open(public_input_path).unwrap()).unwrap();
+    //     let headerhash = hex::decode(&public_input.headerhash[2..]).unwrap();
+    //     let public_key_n_bytes = hex::decode(&public_input.public_key_n_bytes[2..]).unwrap();
+    //     let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
+    //     let header_substrs = public_input
+    //         .header_starts
+    //         .into_iter()
+    //         .zip(public_input.header_substrs.into_iter())
+    //         .map(|(start, substr)| Some((start, substr)))
+    //         .collect_vec();
+    //     let body_substrs = public_input
+    //         .body_starts
+    //         .into_iter()
+    //         .zip(public_input.body_substrs.into_iter())
+    //         .map(|(start, substr)| Some((start, substr)))
+    //         .collect_vec();
+    //     let public_hash_input = get_email_circuit_public_hash_input(
+    //         &headerhash,
+    //         &public_key_n_bytes,
+    //         header_substrs,
+    //         body_substrs,
+    //         config_params.header_config.max_byte_size,
+    //         config_params.body_config.max_byte_size,
+    //     );
+    //     let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
+    //     let public_fr = {
+    //         let lo = Fr::from_u128(u128::from_le_bytes(public_hash[0..16].try_into().unwrap()));
+    //         let mut hi_bytes = [0; 16];
+    //         for idx in 0..15 {
+    //             hi_bytes[idx] = public_hash[16 + idx];
+    //         }
+    //         let hi = Fr::from_u128(u128::from_le_bytes(hi_bytes));
+    //         hi * Fr::from(2).pow_const(128) + lo
+    //     };
+    //     vec![acc, vec![public_fr]].concat()
+    // };
     println!("instances {:?}", instances);
     evm_verify(deployment_code, false, vec![instances], proof);
     Ok(())
-}
-
-async fn gen_circuit_from_email_path(email_path: &str) -> (DefaultEmailVerifyCircuit<Fr>, Vec<u8>, BigUint, Vec<Option<(usize, String)>>, Vec<Option<(usize, String)>>) {
-    let email_bytes = {
-        let mut f = File::open(email_path).unwrap();
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf).unwrap();
-        buf
-    };
-    println!("email {}", String::from_utf8(email_bytes.clone()).unwrap());
-    let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-    let headerhash = Sha256::digest(&canonicalized_header).to_vec();
-    let public_key_n = {
-        let logger = slog::Logger::root(slog::Discard, slog::o!());
-        match resolve_public_key(&logger, &email_bytes).await.unwrap() {
-            cfdkim::DkimPublicKey::Rsa(_pk) => BigUint::from_radix_le(&_pk.n().clone().to_radix_le(16), 16).unwrap(),
-            _ => {
-                panic!("Only RSA keys are supported.");
-            }
-        }
-    };
-    let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-    let public_key = RSAPublicKey::<Fr>::new(Value::known(public_key_n.clone()), e);
-    let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-    let header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
-    let body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
-    let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-    let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, config_params.header_config.substr_regexes, config_params.body_config.substr_regexes);
-    let circuit = DefaultEmailVerifyCircuit {
-        header_bytes: canonicalized_header,
-        body_bytes: canonicalized_body,
-        public_key,
-        signature,
-    };
-    (circuit, headerhash, public_key_n, header_substrs, body_substrs)
 }
 
 pub fn gen_evm_verifier_yul<C>(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, num_instance: Vec<usize>) -> String
@@ -693,7 +663,6 @@ pub fn fix_verifier_sol(input_file: PathBuf) -> Result<String, Box<dyn std::erro
     }
 
     let num_pubinputs = if let Some(s) = start { end.unwrap() - s } else { 0 };
-    println!("num_pubinputs {}", num_pubinputs);
 
     let mut max_pubinputs_addr = 0;
     if num_pubinputs > 0 {

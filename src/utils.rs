@@ -1,5 +1,9 @@
+use std::fs::File;
+
 use fancy_regex::Regex;
 use itertools::Itertools;
+
+use crate::{DefaultEmailVerifyConfigParams, EMAIL_VERIFY_CONFIG_ENV};
 
 pub fn get_email_circuit_public_hash_input(
     headerhash: &[u8],
@@ -88,4 +92,14 @@ pub fn get_substr(input_str: &str, regexes: &[String]) -> Option<(usize, String)
     // println!("substr {}", substr);
     // println!("start {}", start);
     Some((start, substr.to_string()))
+}
+
+pub fn read_default_circuit_config_params() -> DefaultEmailVerifyConfigParams {
+    let path = std::env::var(EMAIL_VERIFY_CONFIG_ENV).expect("You should set the configure file path to EMAIL_VERIFY_CONFIG.");
+    let contents = std::fs::read(path.clone()).expect("Failed to read file");
+    let contents_str = String::from_utf8(contents).unwrap();
+
+    let params: DefaultEmailVerifyConfigParams =
+        serde_json::from_reader(File::open(path.as_str()).expect(&format!("{} does not exist.", path))).expect("File is found but invalid.");
+    params
 }
