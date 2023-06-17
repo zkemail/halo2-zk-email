@@ -269,7 +269,7 @@ async fn main() {
             vk_path,
         } => {
             set_var(EMAIL_VERIFY_CONFIG_ENV, &circuit_config_path);
-            let (circuit, _, _, _, _) = gen_circuit_from_email_path(&email_path).await;
+            let (circuit, _, _, _, _) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
             gen_app_key::<DefaultEmailVerifyCircuit<Fr>>(&params_path, &circuit_config_path, &pk_path, &vk_path, circuit)
                 .await
                 .unwrap()
@@ -286,7 +286,7 @@ async fn main() {
         } => {
             set_var(EMAIL_VERIFY_CONFIG_ENV, &app_circuit_config_path);
             set_var(VERIFY_CONFIG_KEY, &agg_circuit_config_path);
-            let (circuit, _, _, _, _) = gen_circuit_from_email_path(&email_path).await;
+            let (circuit, _, _, _, _) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
             gen_agg_key::<DefaultEmailVerifyCircuit<Fr>>(
                 &app_params_path,
                 &agg_params_path,
@@ -309,11 +309,12 @@ async fn main() {
             public_input_path,
         } => {
             set_var(EMAIL_VERIFY_CONFIG_ENV, &circuit_config_path);
-            let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(&email_path).await;
+            let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
             prove_app::<DefaultEmailVerifyCircuit<Fr>>(&params_path, &circuit_config_path, &pk_path, &proof_path, circuit)
                 .await
                 .unwrap();
-            gen_default_public_input(headerhash, public_key_n, header_substrs, body_substrs, &public_input_path).await;
+            let public_input = DefaultEmailVerifyPublicInput::new(headerhash, public_key_n, header_substrs, body_substrs);
+            public_input.write_file(&public_input_path);
         }
         Commands::EVMProveApp {
             params_path,
@@ -324,11 +325,12 @@ async fn main() {
             public_input_path,
         } => {
             set_var(EMAIL_VERIFY_CONFIG_ENV, &circuit_config_path);
-            let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(&email_path).await;
+            let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
             evm_prove_app::<DefaultEmailVerifyCircuit<Fr>>(&params_path, &circuit_config_path, &pk_path, &proof_path, circuit)
                 .await
                 .unwrap();
-            gen_default_public_input(headerhash, public_key_n, header_substrs, body_substrs, &public_input_path).await;
+            let public_input = DefaultEmailVerifyPublicInput::new(headerhash, public_key_n, header_substrs, body_substrs);
+            public_input.write_file(&public_input_path);
         }
         Commands::EVMProveAgg {
             app_params_path,
@@ -344,7 +346,7 @@ async fn main() {
         } => {
             set_var(EMAIL_VERIFY_CONFIG_ENV, &app_circuit_config_path);
             set_var(VERIFY_CONFIG_KEY, &agg_circuit_config_path);
-            let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(&email_path).await;
+            let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
             evm_prove_agg::<DefaultEmailVerifyCircuit<Fr>>(
                 &app_params_path,
                 &agg_params_path,
@@ -358,7 +360,8 @@ async fn main() {
             )
             .await
             .unwrap();
-            gen_default_public_input(headerhash, public_key_n, header_substrs, body_substrs, &public_input_path).await;
+            let public_input = DefaultEmailVerifyPublicInput::new(headerhash, public_key_n, header_substrs, body_substrs);
+            public_input.write_file(&public_input_path);
         }
         Commands::GenEVMVerifier {
             params_path,
@@ -393,7 +396,7 @@ async fn main() {
             public_input_path,
         } => {
             set_var(EMAIL_VERIFY_CONFIG_ENV, &circuit_config_path);
-            let instances = get_instances_from_default_public_input(&public_input_path);
+            let instances = DefaultEmailVerifyCircuit::<Fr>::get_instances_from_default_public_input(&public_input_path);
             evm_verify_app(&circuit_config_path, &bytecode_path, &proof_path, instances).unwrap()
         }
         Commands::EVMVerifyAgg {
@@ -417,134 +420,7 @@ async fn main() {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DefaultEmailVerifyPublicInput {
-    pub headerhash: String,
-    pub public_key_n_bytes: String,
-    pub header_starts: Vec<usize>,
-    pub header_substrs: Vec<String>,
-    pub body_starts: Vec<usize>,
-    pub body_substrs: Vec<String>,
-}
-
-async fn gen_default_public_input(
-    headerhash: Vec<u8>,
-    public_key_n: BigUint,
-    header_substrs: Vec<Option<(usize, String)>>,
-    body_substrs: Vec<Option<(usize, String)>>,
-    public_input_path: &str,
-) {
-    // let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
-    let mut header_starts_vec = vec![];
-    let mut header_substrs_vec = vec![];
-    for s in header_substrs.into_iter() {
-        if let Some(s) = s {
-            header_starts_vec.push(s.0);
-            header_substrs_vec.push(s.1);
-        }
-    }
-    let mut body_starts_vec = vec![];
-    let mut body_substrs_vec = vec![];
-    for s in body_substrs.into_iter() {
-        if let Some(s) = s {
-            body_starts_vec.push(s.0);
-            body_substrs_vec.push(s.1);
-        }
-    }
-    let public_input = DefaultEmailVerifyPublicInput {
-        headerhash: format!("0x{}", hex::encode(&headerhash)),
-        public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
-        header_starts: header_starts_vec,
-        header_substrs: header_substrs_vec,
-        body_starts: body_starts_vec,
-        body_substrs: body_substrs_vec,
-    };
-    {
-        let public_input_str = serde_json::to_string(&public_input).unwrap();
-        let mut file = File::create(public_input_path).expect("public_input_path creation failed");
-        write!(file, "{}", public_input_str).unwrap();
-        file.flush().unwrap();
-    }
-}
-
-async fn gen_circuit_from_email_path(email_path: &str) -> (DefaultEmailVerifyCircuit<Fr>, Vec<u8>, BigUint, Vec<Option<(usize, String)>>, Vec<Option<(usize, String)>>) {
-    let email_bytes = {
-        let mut f = File::open(email_path).unwrap();
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf).unwrap();
-        buf
-    };
-    println!("email {}", String::from_utf8(email_bytes.clone()).unwrap());
-    let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-    let headerhash = Sha256::digest(&canonicalized_header).to_vec();
-    let public_key_n = {
-        let logger = slog::Logger::root(slog::Discard, slog::o!());
-        match resolve_public_key(&logger, &email_bytes).await.unwrap() {
-            cfdkim::DkimPublicKey::Rsa(_pk) => BigUint::from_radix_le(&_pk.n().clone().to_radix_le(16), 16).unwrap(),
-            _ => {
-                panic!("Only RSA keys are supported.");
-            }
-        }
-    };
-    let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-    let public_key = RSAPublicKey::<Fr>::new(Value::known(public_key_n.clone()), e);
-    let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-    let header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
-    let body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
-    let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-    let header_config = config_params.header_config.expect("header_config is required");
-    let body_config = config_params.body_config.expect("body_config is required");
-    let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, header_config.substr_regexes, body_config.substr_regexes);
-    let circuit = DefaultEmailVerifyCircuit {
-        header_bytes: canonicalized_header,
-        body_bytes: canonicalized_body,
-        public_key,
-        signature,
-    };
-    (circuit, headerhash, public_key_n, header_substrs, body_substrs)
-}
-
-fn get_instances_from_default_public_input(public_input_path: &str) -> Vec<Fr> {
-    let public_input = serde_json::from_reader::<File, DefaultEmailVerifyPublicInput>(File::open(public_input_path).unwrap()).unwrap();
-    let config_params = read_default_circuit_config_params();
-    let header_config = config_params.header_config.expect("header_config is required");
-    let body_config = config_params.body_config.expect("body_config is required");
-    let headerhash = hex::decode(&public_input.headerhash[2..]).unwrap();
-    let public_key_n_bytes = hex::decode(&public_input.public_key_n_bytes[2..]).unwrap();
-    let header_substrs = public_input
-        .header_starts
-        .into_iter()
-        .zip(public_input.header_substrs.into_iter())
-        .map(|(start, substr)| Some((start, substr)))
-        .collect_vec();
-    let body_substrs = public_input
-        .body_starts
-        .into_iter()
-        .zip(public_input.body_substrs.into_iter())
-        .map(|(start, substr)| Some((start, substr)))
-        .collect_vec();
-    let public_hash_input = get_email_circuit_public_hash_input(
-        &headerhash,
-        &public_key_n_bytes,
-        header_substrs,
-        body_substrs,
-        header_config.max_byte_size,
-        body_config.max_byte_size,
-    );
-    let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
-    let public_fr = {
-        let lo = Fr::from_u128(u128::from_le_bytes(public_hash[0..16].try_into().unwrap()));
-        let mut hi_bytes = [0; 16];
-        for idx in 0..15 {
-            hi_bytes[idx] = public_hash[16 + idx];
-        }
-        let hi = Fr::from_u128(u128::from_le_bytes(hi_bytes));
-        hi * Fr::from(2).pow_const(128) + lo
-    };
-    vec![public_fr]
-}
-
-fn get_agg_instances_from_default_public_input(public_input_path: &str, acc_path: &str) -> Vec<Fr> {
+pub fn get_agg_instances_from_default_public_input(public_input_path: &str, acc_path: &str) -> Vec<Fr> {
     let acc = {
         let hex = fs::read_to_string(acc_path).unwrap();
         hex::decode(&hex[2..])
@@ -558,6 +434,6 @@ fn get_agg_instances_from_default_public_input(public_input_path: &str, acc_path
             .collect_vec()
     };
     assert_eq!(acc.len(), NUM_ACC_INSTANCES);
-    let public_fr = get_instances_from_default_public_input(public_input_path);
+    let public_fr = DefaultEmailVerifyCircuit::<Fr>::get_instances_from_default_public_input(public_input_path);
     vec![acc, public_fr].concat()
 }

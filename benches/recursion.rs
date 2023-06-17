@@ -3,7 +3,7 @@ use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, Fr, G1Affine};
 use halo2_base::halo2_proofs::poly::{commitment::Params, kzg::commitment::ParamsKZG};
 use halo2_base::{gates::range::RangeConfig, utils::PrimeField, Context};
 use halo2_zk_email::DefaultEmailVerifyCircuit;
-use halo2_zk_email::{downsize_param, evm_prove_agg, gen_agg_key, gen_app_key, gen_param, EMAIL_VERIFY_CONFIG_ENV};
+use halo2_zk_email::{downsize_params, evm_prove_agg, gen_agg_key, gen_app_key, gen_params, EMAIL_VERIFY_CONFIG_ENV};
 use sha2::{self, Digest, Sha256};
 use snark_verifier_sdk::halo2::{aggregation::AggregationCircuit, gen_proof_shplonk, gen_snark_shplonk};
 use std::env::set_var;
@@ -16,7 +16,7 @@ use tokio::runtime::Runtime;
 
 fn gen_or_get_params(path: &str, k: u32) -> ParamsKZG<Bn256> {
     if !Path::new(&path).is_file() {
-        gen_param(&path, k).unwrap();
+        gen_params(&path, k).unwrap();
     }
     let mut reader = BufReader::new(File::open(&path).unwrap());
     ParamsKZG::read(&mut reader).unwrap()
@@ -58,24 +58,24 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
     let agg_params_path = format!("benches/params_{}.bin", AGG_PARAMS_K);
     let app_params_path = format!("benches/params_{}.bin", app_config_params.degree);
     gen_or_get_params(&agg_params_path, AGG_PARAMS_K);
-    downsize_param(&agg_params_path, &app_params_path, app_config_params.degree).unwrap();
+    downsize_params(&agg_params_path, &app_params_path, app_config_params.degree).unwrap();
     println!("gen_params");
     let runtime = Runtime::new().unwrap();
     runtime.block_on(async {
-        gen_app_key(&app_params_path, APP_CONFIG_PATH, "test_data/test_email1.eml", "benches/app.pk", "benches/app.vk")
-            .await
-            .unwrap()
+        let (circuit, _, _, _, _) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path("test_data/test_email1.eml").await;
+        gen_app_key(&app_params_path, APP_CONFIG_PATH, "benches/app.pk", "benches/app.vk", circuit).await.unwrap()
     });
     runtime.block_on(async {
+        let (circuit, _, _, _, _) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path("test_data/test_email1.eml").await;
         gen_agg_key(
             &app_params_path,
             &agg_params_path,
             APP_CONFIG_PATH,
             AGG_CONFIG_PATH,
-            "test_data/test_email1.eml",
             "benches/app.pk",
             "benches/agg.pk",
             "benches/app.vk",
+            circuit,
         )
         .await
         .unwrap()
@@ -146,17 +146,17 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
     group.bench_function("bench 1", |b| {
         b.iter(|| {
             runtime.block_on(async {
+                let (circuit, _, _, _, _) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path("test_data/test_email1.eml").await;
                 evm_prove_agg(
                     &app_params_path,
                     &agg_params_path,
                     APP_CONFIG_PATH,
                     AGG_CONFIG_PATH,
-                    "test_data/test_email1.eml",
                     "benches/app.pk",
                     "benches/agg.pk",
                     "benches/acc.hex",
                     "benches/proof.hex",
-                    "benches/public_input.json",
+                    circuit,
                 )
                 .await
                 .unwrap();

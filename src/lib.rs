@@ -4,44 +4,44 @@ pub mod regex_sha2;
 pub mod regex_sha2_base64;
 pub mod sign_verify;
 pub mod utils;
+use std::fs::File;
+
 pub use crate::helpers::*;
 use crate::regex_sha2::RegexSha2Config;
 use crate::sign_verify::*;
 use crate::utils::*;
-use cfdkim::{canonicalize_signed_email, SignerBuilder};
-use fancy_regex::Regex;
-use halo2_base::halo2_proofs::circuit::{AssignedCell, Cell, Region, SimpleFloorPlanner, Value};
+use cfdkim::canonicalize_signed_email;
+use cfdkim::resolve_public_key;
+use halo2_base::halo2_proofs::circuit::{SimpleFloorPlanner, Value};
 use halo2_base::halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
-use halo2_base::utils::{decompose, decompose_fe_to_u64_limbs, value_to_option};
-use halo2_base::{gates::range::RangeStrategy::Vertical, ContextParams, SKIP_FIRST_PASS};
+use halo2_base::utils::{decompose_fe_to_u64_limbs, value_to_option};
+use halo2_base::QuantumCell;
+use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
 use halo2_base::{
-    gates::{flex_gate::FlexGateConfig, range::RangeConfig, GateInstructions, RangeInstructions},
+    gates::{range::RangeConfig, GateInstructions, RangeInstructions},
     utils::PrimeField,
-    Context,
 };
-use halo2_base::{AssignedValue, QuantumCell};
-pub use halo2_base64::*;
-pub use halo2_dynamic_sha256::*;
+pub use halo2_base64;
+pub use halo2_dynamic_sha256;
+use halo2_dynamic_sha256::*;
 // pub use halo2_dynamic_sha256::{AssignedHashResult, Sha256DynamicConfig};
 // use halo2_regex::defs::RegexDefs;
+pub use halo2_regex;
 use halo2_regex::defs::{AllstrRegexDef, RegexDefs, SubstrRegexDef};
-pub use halo2_regex::*;
-pub use halo2_rsa::*;
+use halo2_regex::*;
+pub use halo2_rsa;
+use halo2_rsa::*;
 // use halo2_rsa::{AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstructions, RSAPubE, RSAPublicKey, RSASignature};
 use itertools::Itertools;
-use mailparse::parse_mail;
 use num_bigint::BigUint;
-use num_traits::FromPrimitive;
-use rand::{thread_rng, CryptoRng, Rng, RngCore};
 use regex_sha2_base64::RegexSha2Base64Config;
-use rsa::{PublicKeyParts, RsaPrivateKey};
-use serde_json;
+use rsa::PublicKeyParts;
+use rsa::RsaPublicKey;
 use sha2::{Digest, Sha256};
 use snark_verifier::loader::LoadedScalar;
-
 use snark_verifier_sdk::CircuitExt;
-use std::fs::File;
+use std::io::{Read, Write};
 
 // #[derive(Debug, Clone)]
 // pub struct EmailVerifyResult<'a, F: PrimeField> {
@@ -202,6 +202,52 @@ pub struct DefaultEmailVerifyConfigParams {
     pub sign_verify_config: Option<SignVerifyConfigParams>,
     pub header_config: Option<HeaderConfigParams>,
     pub body_config: Option<BodyConfigParams>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DefaultEmailVerifyPublicInput {
+    pub headerhash: String,
+    pub public_key_n_bytes: String,
+    pub header_starts: Vec<usize>,
+    pub header_substrs: Vec<String>,
+    pub body_starts: Vec<usize>,
+    pub body_substrs: Vec<String>,
+}
+
+impl DefaultEmailVerifyPublicInput {
+    pub fn new(headerhash: Vec<u8>, public_key_n: BigUint, header_substrs: Vec<Option<(usize, String)>>, body_substrs: Vec<Option<(usize, String)>>) -> Self {
+        let mut header_starts_vec = vec![];
+        let mut header_substrs_vec = vec![];
+        for s in header_substrs.into_iter() {
+            if let Some(s) = s {
+                header_starts_vec.push(s.0);
+                header_substrs_vec.push(s.1);
+            }
+        }
+        let mut body_starts_vec = vec![];
+        let mut body_substrs_vec = vec![];
+        for s in body_substrs.into_iter() {
+            if let Some(s) = s {
+                body_starts_vec.push(s.0);
+                body_substrs_vec.push(s.1);
+            }
+        }
+        DefaultEmailVerifyPublicInput {
+            headerhash: format!("0x{}", hex::encode(&headerhash)),
+            public_key_n_bytes: format!("0x{}", hex::encode(&public_key_n.to_bytes_le())),
+            header_starts: header_starts_vec,
+            header_substrs: header_substrs_vec,
+            body_starts: body_starts_vec,
+            body_substrs: body_substrs_vec,
+        }
+    }
+
+    pub fn write_file(&self, public_input_path: &str) {
+        let public_input_str = serde_json::to_string(&self).unwrap();
+        let mut file = File::create(public_input_path).expect("public_input_path creation failed");
+        write!(file, "{}", public_input_str).unwrap();
+        file.flush().unwrap();
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -489,6 +535,83 @@ impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
     pub fn read_config_params() -> DefaultEmailVerifyConfigParams {
         read_default_circuit_config_params()
     }
+
+    pub async fn gen_circuit_from_email_path(email_path: &str) -> (Self, Vec<u8>, BigUint, Vec<Option<(usize, String)>>, Vec<Option<(usize, String)>>) {
+        let email_bytes = {
+            let mut f = File::open(email_path).unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            buf
+        };
+        println!("email {}", String::from_utf8(email_bytes.clone()).unwrap());
+        let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
+        let headerhash = Sha256::digest(&canonicalized_header).to_vec();
+        let public_key_n = {
+            let logger = slog::Logger::root(slog::Discard, slog::o!());
+            match resolve_public_key(&logger, &email_bytes).await.unwrap() {
+                cfdkim::DkimPublicKey::Rsa(_pk) => BigUint::from_radix_le(&_pk.n().clone().to_radix_le(16), 16).unwrap(),
+                _ => {
+                    panic!("Only RSA keys are supported.");
+                }
+            }
+        };
+        let e = RSAPubE::Fix(BigUint::from(Self::DEFAULT_E));
+        let public_key = RSAPublicKey::<F>::new(Value::known(public_key_n.clone()), e);
+        let signature = RSASignature::<F>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
+        let header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
+        let body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
+        let config_params = Self::read_config_params();
+        let header_config = config_params.header_config.expect("header_config is required");
+        let body_config = config_params.body_config.expect("body_config is required");
+        let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, header_config.substr_regexes, body_config.substr_regexes);
+        let circuit = Self {
+            header_bytes: canonicalized_header,
+            body_bytes: canonicalized_body,
+            public_key,
+            signature,
+        };
+        (circuit, headerhash, public_key_n, header_substrs, body_substrs)
+    }
+
+    pub fn get_instances_from_default_public_input(public_input_path: &str) -> Vec<F> {
+        let public_input = serde_json::from_reader::<File, DefaultEmailVerifyPublicInput>(File::open(public_input_path).unwrap()).unwrap();
+        let config_params = read_default_circuit_config_params();
+        let header_config = config_params.header_config.expect("header_config is required");
+        let body_config = config_params.body_config.expect("body_config is required");
+        let headerhash = hex::decode(&public_input.headerhash[2..]).unwrap();
+        let public_key_n_bytes = hex::decode(&public_input.public_key_n_bytes[2..]).unwrap();
+        let header_substrs = public_input
+            .header_starts
+            .into_iter()
+            .zip(public_input.header_substrs.into_iter())
+            .map(|(start, substr)| Some((start, substr)))
+            .collect_vec();
+        let body_substrs = public_input
+            .body_starts
+            .into_iter()
+            .zip(public_input.body_substrs.into_iter())
+            .map(|(start, substr)| Some((start, substr)))
+            .collect_vec();
+        let public_hash_input = get_email_circuit_public_hash_input(
+            &headerhash,
+            &public_key_n_bytes,
+            header_substrs,
+            body_substrs,
+            header_config.max_byte_size,
+            body_config.max_byte_size,
+        );
+        let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
+        let public_fr = {
+            let lo = F::from_u128(u128::from_le_bytes(public_hash[0..16].try_into().unwrap()));
+            let mut hi_bytes = [0; 16];
+            for idx in 0..15 {
+                hi_bytes[idx] = public_hash[16 + idx];
+            }
+            let hi = F::from_u128(u128::from_le_bytes(hi_bytes));
+            hi * F::from(2).pow_const(128) + lo
+        };
+        vec![public_fr]
+    }
 }
 
 #[cfg(test)]
@@ -507,7 +630,7 @@ mod test {
     use rand::thread_rng;
     use rsa::{PublicKeyParts, RsaPrivateKey};
     use snark_verifier_sdk::CircuitExt;
-    use std::{io::Read, path::Path};
+    use std::{fs::File, io::Read, path::Path};
     use temp_env;
 
     #[test]
