@@ -16,25 +16,53 @@ use halo2_regex::{
 };
 use sha2::{Digest, Sha256};
 
+/// Output type definition of [`RegexSha2Config`].
 #[derive(Debug, Clone, Default)]
 pub struct RegexSha2Result<'a, F: PrimeField> {
+    /// The output of [`RegexVerifyConfig`].
     pub regex: AssignedRegexResult<'a, F>,
+    /// The assigned bytes of the SHA256 hash value constrained in [`Sha256DynamicConfig`].
     pub hash_bytes: Vec<AssignedValue<'a, F>>,
+    /// The actual bytes of the SHA256 hash value.
     pub hash_value: Vec<u8>,
 }
 
+/// Configuration to combine the [`RegexVerifyConfig`] and [`Sha256DynamicConfig`] for the same bytes.  
 #[derive(Debug, Clone)]
 pub struct RegexSha2Config<F: PrimeField> {
+    /// Configuration for [`RegexVerifyConfig`].
     pub(crate) regex_config: RegexVerifyConfig<F>,
+    /// The maximum byte size that this configuration can support.
+    /// # Panics
+    /// Panics if `max_byte_size` is not multiple of 64.
     pub max_byte_size: usize,
 }
 
 impl<F: PrimeField> RegexSha2Config<F> {
+    /// Configure a new [`RegexSha2Config`].
+    ///
+    /// # Arguments
+    /// * `meta` - a constrain system in which contraints are defined.
+    /// * `max_byte_size` - the maximum byte size that this configuration can support.
+    /// * `range_config` - a configuration for [`RangeConfig`].
+    /// * `regex_defs` - a definition of regexes that the input string must satisfy.
+    ///
+    /// # Return values
+    /// Returns a new [`RegexSha2Config`].
     pub fn configure(meta: &mut ConstraintSystem<F>, max_byte_size: usize, range_config: RangeConfig<F>, regex_defs: Vec<RegexDefs>) -> Self {
         let regex_config = RegexVerifyConfig::configure(meta, max_byte_size, range_config.gate().clone(), regex_defs);
         Self { regex_config, max_byte_size }
     }
 
+    /// Returns a SHA256 hash value and extracted substrings of the input string.
+    ///
+    /// # Arguments
+    /// * `ctx` - a region context.
+    /// * `sha256_config` - a configuration for [`Sha256DynamicConfig`].
+    /// * `input` - the bytes of the input string.
+    ///
+    /// # Returns
+    /// Returns the SHA256 hash value and extracted substrings of the input string as [`RegexSha2Result`].
     pub fn match_and_hash<'v: 'a, 'a>(&self, ctx: &mut Context<'v, F>, sha256_config: &mut Sha256DynamicConfig<F>, input: &[u8]) -> Result<RegexSha2Result<'a, F>, Error> {
         let max_input_size = self.max_byte_size;
         // 1. Let's match sub strings!
@@ -62,6 +90,10 @@ impl<F: PrimeField> RegexSha2Config<F> {
         Ok(result)
     }
 
+    /// Load lookup tables used in the [`RegexSha2Config`].
+    ///
+    /// # Arguments
+    /// * `layouter` - a [`Layouter`] in which the lookup tables are loaded.
     pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.regex_config.load(layouter)?;
         // self.range().load_lookup_table(layouter)?;
