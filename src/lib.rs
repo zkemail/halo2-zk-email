@@ -369,6 +369,9 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
         let mut first_pass = SKIP_FIRST_PASS;
         let mut public_hash_cell = vec![];
         let params = Self::read_config_params();
+        if let Some(sign_config) = params.sign_verify_config.as_ref() {
+            self.public_key.n.as_ref().map(|v| assert_eq!(v.bits() as usize, sign_config.public_key_bits));
+        }
         layouter.assign_region(
             || "zkemail",
             |region| {
