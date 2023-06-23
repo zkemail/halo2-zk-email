@@ -13,33 +13,45 @@ use halo2_base::{
 };
 use halo2_base64::Base64Config;
 use halo2_dynamic_sha256::Sha256DynamicConfig;
+use halo2_regex::RegexVerifyConfig;
 use halo2_regex::{
     defs::{AllstrRegexDef, RegexDefs, SubstrRegexDef},
     AssignedRegexResult,
 };
 use sha2::{Digest, Sha256};
 
+/// Output type definition of [`RegexSha2Base64Config`].
 #[derive(Debug, Clone)]
 pub struct RegexSha2Base64Result<'a, F: PrimeField> {
+    /// The output of [`AssignedRegexResult`].
     pub regex: AssignedRegexResult<'a, F>,
+    /// The assigned bytes of the base64 encoded SHA256 hash value constrained in [`Sha256DynamicConfig`].
     pub encoded_hash: Vec<AssignedCell<F, F>>,
+    /// The actual bytes of the base64 encoded SHA256 hash value.
     pub encoded_hash_value: Vec<u8>,
 }
 
+/// Configuration to combine the [`RegexVerifyConfig`], [`Sha256DynamicConfig`], and [`Base64Config`] for the same bytes.  
 #[derive(Debug, Clone)]
 pub struct RegexSha2Base64Config<F: PrimeField> {
+    /// Configuration for [`RegexSha2Config`].
     pub(crate) regex_sha2: RegexSha2Config<F>,
+    /// Configuration for [`Base64Config`].
     pub(crate) base64_config: Base64Config<F>,
 }
 
 impl<F: PrimeField> RegexSha2Base64Config<F> {
-    pub fn configure(
-        meta: &mut ConstraintSystem<F>,
-        max_byte_size: usize,
-        // num_sha2_compression_per_column: usize,
-        range_config: RangeConfig<F>,
-        regex_defs: Vec<RegexDefs>,
-    ) -> Self {
+    /// Configure a new [`RegexSha2Base64Config`].
+    ///
+    /// # Arguments
+    /// * `meta` - a constrain system in which contraints are defined.
+    /// * `max_byte_size` - the maximum byte size that this configuration can support.
+    /// * `range_config` - a configuration for [`RangeConfig`].
+    /// * `regex_defs` - a definition of regexes that the input string must satisfy.
+    ///
+    /// # Return values
+    /// Returns a new [`RegexSha2Base64Config`].
+    pub fn configure(meta: &mut ConstraintSystem<F>, max_byte_size: usize, range_config: RangeConfig<F>, regex_defs: Vec<RegexDefs>) -> Self {
         let regex_sha2 = RegexSha2Config::configure(
             meta,
             max_byte_size,
@@ -51,6 +63,15 @@ impl<F: PrimeField> RegexSha2Base64Config<F> {
         Self { regex_sha2, base64_config }
     }
 
+    /// Returns a base64 encoded SHA256 hash value and extracted substrings of the input string.
+    ///
+    /// # Arguments
+    /// * `ctx` - a region context.
+    /// * `sha256_config` - a configuration for [`Sha256DynamicConfig`].
+    /// * `input` - the bytes of the input string.
+    ///
+    /// # Returns
+    /// Returns the base64 encoded SHA256 hash value and extracted substrings of the input string as [`RegexSha2Result`].
     pub fn match_hash_and_base64<'v: 'a, 'a>(
         &self,
         ctx: &mut Context<'v, F>,
@@ -80,25 +101,325 @@ impl<F: PrimeField> RegexSha2Base64Config<F> {
         Ok(result)
     }
 
-    // pub fn range(&self) -> &RangeConfig<F> {
-    //     self.regex_sha2.range()
-    // }
-
-    // pub fn gate(&self) -> &FlexGateConfig<F> {
-    //     self.range().gate()
-    // }
-
+    /// Load lookup tables used in the [`RegexSha2Base64Config`].
+    ///
+    /// # Arguments
+    /// * `layouter` - a [`Layouter`] in which the lookup tables are loaded.
     pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.regex_sha2.load(layouter)?;
         self.base64_config.load(layouter)?;
         Ok(())
     }
+}
 
-    // pub fn new_context<'a, 'b>(&'b self, region: Region<'a, F>) -> Context<'a, F> {
-    //     self.regex_sha2.new_context(region)
-    // }
+#[cfg(test)]
+mod test {
+    use cfdkim::canonicalize_signed_email;
+    use halo2_base::halo2_proofs::plonk::ConstraintSystem;
+    use halo2_regex::vrm::DecomposedRegexConfig;
+    use std::marker::PhantomData;
+    use std::path::Path;
 
-    // pub fn finalize(&self, ctx: &mut Context<F>) {
-    //     self.regex_sha2.finalize(ctx);
-    // }
+    use super::*;
+
+    use crate::utils::*;
+    use halo2_base::halo2_proofs::{
+        circuit::{Cell, SimpleFloorPlanner},
+        dev::MockProver,
+        halo2curves::bn256::Fr,
+        plonk::{Circuit, Column, Instance},
+    };
+    use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
+    use sha2::{self, Digest, Sha256};
+    use std::fs::File;
+    use std::io::Read;
+
+    #[macro_export]
+    macro_rules! impl_regex_sha2_base64_circuit {
+        ($config_name:ident, $circuit_name:ident, $regex_defs:expr, $max_byte_size:expr, $num_advice:expr, $num_lookup_advice:expr, $lookup_bits:expr, $k:expr) => {
+            #[derive(Debug, Clone)]
+            struct $config_name<F: PrimeField> {
+                inner: RegexSha2Base64Config<F>,
+                sha256_config: Sha256DynamicConfig<F>,
+                hash_instance: Column<Instance>,
+                masked_str_instance: Column<Instance>,
+                substr_ids_instance: Column<Instance>,
+            }
+
+            #[derive(Debug, Clone)]
+            struct $circuit_name<F: PrimeField> {
+                input: Vec<u8>,
+                _f: PhantomData<F>,
+            }
+
+            impl<F: PrimeField> Circuit<F> for $circuit_name<F> {
+                type Config = $config_name<F>;
+                type FloorPlanner = SimpleFloorPlanner;
+
+                fn without_witnesses(&self) -> Self {
+                    Self { input: vec![], _f: PhantomData }
+                }
+
+                fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+                    let range_config = RangeConfig::configure(
+                        meta,
+                        Vertical,
+                        &[Self::NUM_ADVICE],
+                        &[Self::NUM_LOOKUP_ADVICE],
+                        Self::NUM_FIXED,
+                        Self::LOOKUP_BITS,
+                        0,
+                        Self::K as usize,
+                    );
+                    let sha256_config = Sha256DynamicConfig::configure(meta, vec![Self::MAX_BYTE_SIZE], range_config.clone(), 16, 1, false);
+                    let regex_defs = $regex_defs;
+                    let inner = RegexSha2Base64Config::configure(meta, Self::MAX_BYTE_SIZE, range_config, regex_defs);
+                    let hash_instance = meta.instance_column();
+                    meta.enable_equality(hash_instance);
+                    let masked_str_instance = meta.instance_column();
+                    meta.enable_equality(masked_str_instance);
+                    let substr_ids_instance = meta.instance_column();
+                    meta.enable_equality(substr_ids_instance);
+                    Self::Config {
+                        inner,
+                        sha256_config,
+                        hash_instance,
+                        masked_str_instance,
+                        substr_ids_instance,
+                    }
+                }
+
+                fn synthesize(&self, mut config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
+                    config.inner.load(&mut layouter)?;
+                    config.sha256_config.range().load_lookup_table(&mut layouter)?;
+                    config.sha256_config.load(&mut layouter)?;
+                    let mut first_pass = SKIP_FIRST_PASS;
+                    let mut hash_bytes_cell = vec![];
+                    let mut masked_str_cell = vec![];
+                    let mut substr_id_cell = vec![];
+
+                    layouter.assign_region(
+                        || "regex",
+                        |region| {
+                            if first_pass {
+                                first_pass = false;
+                                return Ok(());
+                            }
+                            let ctx = &mut config.sha256_config.new_context(region);
+                            let result = config.inner.match_hash_and_base64(ctx, &mut config.sha256_config, &self.input)?;
+                            config.sha256_config.range().finalize(ctx);
+                            hash_bytes_cell.append(&mut result.encoded_hash.into_iter().map(|byte| byte.cell()).collect::<Vec<Cell>>());
+                            masked_str_cell.append(&mut result.regex.masked_characters.into_iter().map(|character| character.cell()).collect::<Vec<Cell>>());
+                            substr_id_cell.append(&mut result.regex.all_substr_ids.into_iter().map(|id| id.cell()).collect::<Vec<Cell>>());
+                            Ok(())
+                        },
+                    )?;
+                    for (idx, cell) in hash_bytes_cell.into_iter().enumerate() {
+                        layouter.constrain_instance(cell, config.hash_instance, idx)?;
+                    }
+                    for (idx, cell) in masked_str_cell.into_iter().enumerate() {
+                        layouter.constrain_instance(cell, config.masked_str_instance, idx)?;
+                    }
+                    for (idx, cell) in substr_id_cell.into_iter().enumerate() {
+                        layouter.constrain_instance(cell, config.substr_ids_instance, idx)?;
+                    }
+
+                    Ok(())
+                }
+            }
+
+            impl<F: PrimeField> $circuit_name<F> {
+                const MAX_BYTE_SIZE: usize = $max_byte_size;
+                const NUM_ADVICE: usize = $num_advice;
+                const NUM_FIXED: usize = 1;
+                const NUM_LOOKUP_ADVICE: usize = $num_lookup_advice;
+                const LOOKUP_BITS: usize = $lookup_bits;
+                const K: u32 = $k;
+            }
+        };
+    }
+
+    impl_regex_sha2_base64_circuit!(
+        TestRegexSha2Base64Config1,
+        TestRegexSha2Base64Circuit1,
+        vec![
+            RegexDefs {
+                allstr: AllstrRegexDef::read_from_text("./test_data/from_allstr.txt"),
+                substrs: vec![SubstrRegexDef::read_from_text("./test_data/from_substr_0.txt")],
+            },
+            RegexDefs {
+                allstr: AllstrRegexDef::read_from_text("./test_data/subject_allstr.txt"),
+                substrs: vec![
+                    SubstrRegexDef::read_from_text("./test_data/subject_substr_0.txt"),
+                    SubstrRegexDef::read_from_text("./test_data/subject_substr_1.txt"),
+                    SubstrRegexDef::read_from_text("./test_data/subject_substr_2.txt"),
+                ],
+            },
+        ],
+        1024,
+        12,
+        1,
+        18,
+        19
+    );
+
+    #[test]
+    fn test_regex_sha2_base64_valid_case1() {
+        let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+        regex_from_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_subject_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/subject_defs.json").unwrap()).unwrap();
+        regex_subject_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/subject_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/subject_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let email_bytes = {
+            let mut f = File::open("./test_data/test_email1.eml").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            buf
+        };
+        let (input, _, _) = canonicalize_signed_email(&email_bytes).unwrap();
+        let input_str = String::from_utf8(input.clone()).unwrap();
+        let circuit: TestRegexSha2Base64Circuit1<Fr> = TestRegexSha2Base64Circuit1::<Fr> { input, _f: PhantomData };
+        let actual_hash = Sha256::digest(&circuit.input);
+        let mut expected_output = vec![];
+        expected_output.resize(44, 0);
+        general_purpose::STANDARD
+            .encode_slice(&actual_hash, &mut expected_output)
+            .expect("fail to convert the hash bytes into the base64 strings");
+
+        let hash_fs = expected_output.iter().map(|byte| Fr::from(*byte as u64)).collect::<Vec<Fr>>();
+        let mut expected_masked_chars = vec![Fr::from(0); TestRegexSha2Base64Circuit1::<Fr>::MAX_BYTE_SIZE];
+        let mut expected_substr_ids = vec![Fr::from(0); TestRegexSha2Base64Circuit1::<Fr>::MAX_BYTE_SIZE];
+        let correct_substrs = vec![
+            get_substr(&input_str, &[r"(?<=from:).*@.*(?=\r)".to_string()]).unwrap(),
+            get_substr(&input_str, &[r"(?<=subject:).*(?=\r)".to_string()]).unwrap(),
+        ];
+        for (substr_idx, (start, chars)) in correct_substrs.iter().enumerate() {
+            for (idx, char) in chars.as_bytes().iter().enumerate() {
+                expected_masked_chars[start + idx] = Fr::from(*char as u64);
+                expected_substr_ids[start + idx] = Fr::from(substr_idx as u64 + 1);
+            }
+        }
+        let prover = MockProver::run(TestRegexSha2Base64Circuit1::<Fr>::K, &circuit, vec![hash_fs, expected_masked_chars, expected_substr_ids]).unwrap();
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    impl_regex_sha2_base64_circuit!(
+        TestRegexSha2Base64Config2,
+        TestRegexSha2Base64Circuit2,
+        vec![
+            RegexDefs {
+                allstr: AllstrRegexDef::read_from_text("./test_data/bodyhash_allstr.txt"),
+                substrs: vec![SubstrRegexDef::read_from_text("./test_data/bodyhash_substr_0.txt")],
+            },
+            RegexDefs {
+                allstr: AllstrRegexDef::read_from_text("./test_data/from_allstr.txt"),
+                substrs: vec![SubstrRegexDef::read_from_text("./test_data/from_substr_0.txt")],
+            },
+            RegexDefs {
+                allstr: AllstrRegexDef::read_from_text("./test_data/to_allstr.txt"),
+                substrs: vec![SubstrRegexDef::read_from_text("./test_data/to_substr_0.txt")],
+            },
+            RegexDefs {
+                allstr: AllstrRegexDef::read_from_text("./test_data/subject_allstr.txt"),
+                substrs: vec![
+                    SubstrRegexDef::read_from_text("./test_data/subject_substr_0.txt"),
+                    SubstrRegexDef::read_from_text("./test_data/subject_substr_1.txt"),
+                    SubstrRegexDef::read_from_text("./test_data/subject_substr_2.txt"),
+                ],
+            },
+        ],
+        1024,
+        12,
+        1,
+        18,
+        19
+    );
+
+    #[test]
+    fn test_regex_sha2_base64_valid_case2() {
+        let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+        regex_bodyhash_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+        regex_from_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_to_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/to_defs.json").unwrap()).unwrap();
+        regex_to_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/to_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/to_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_subject_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/subject_defs.json").unwrap()).unwrap();
+        regex_subject_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/subject_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/subject_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let email_bytes = {
+            let mut f = File::open("./test_data/test_email2.eml").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            buf
+        };
+        let (input, _, _) = canonicalize_signed_email(&email_bytes).unwrap();
+        let input_str = String::from_utf8(input.clone()).unwrap();
+        let circuit = TestRegexSha2Base64Circuit2::<Fr> { input, _f: PhantomData };
+        let actual_hash = Sha256::digest(&circuit.input);
+        let mut expected_output = vec![];
+        expected_output.resize(44, 0);
+        general_purpose::STANDARD
+            .encode_slice(&actual_hash, &mut expected_output)
+            .expect("fail to convert the hash bytes into the base64 strings");
+        let hash_fs = expected_output.iter().map(|byte| Fr::from(*byte as u64)).collect::<Vec<Fr>>();
+        let mut expected_masked_chars = vec![Fr::from(0); TestRegexSha2Base64Circuit2::<Fr>::MAX_BYTE_SIZE];
+        let mut expected_substr_ids = vec![Fr::from(0); TestRegexSha2Base64Circuit2::<Fr>::MAX_BYTE_SIZE];
+        let correct_substrs = vec![
+            get_substr(
+                &input_str,
+                &[
+                    r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)"
+                        .to_string(),
+                ],
+            )
+            .unwrap(),
+            get_substr(&input_str, &[r"(?<=from:).*@.*(?=\r)".to_string()]).unwrap(),
+            get_substr(&input_str, &[r"(?<=to:).*@.*(?=\r)".to_string()]).unwrap(),
+            get_substr(&input_str, &[r"(?<=subject:).*(?=\r)".to_string()]).unwrap(),
+        ];
+        for (substr_idx, (start, chars)) in correct_substrs.iter().enumerate() {
+            for (idx, char) in chars.as_bytes().iter().enumerate() {
+                expected_masked_chars[start + idx] = Fr::from(*char as u64);
+                expected_substr_ids[start + idx] = Fr::from(substr_idx as u64 + 1);
+            }
+        }
+        let prover = MockProver::run(TestRegexSha2Base64Circuit2::<Fr>::K, &circuit, vec![hash_fs, expected_masked_chars, expected_substr_ids]).unwrap();
+        assert_eq!(prover.verify(), Ok(()));
+    }
 }
