@@ -1,22 +1,33 @@
 //! Email verification circuit compatible with the [halo2 library developed by privacy-scaling-explorations team](https://github.com/privacy-scaling-explorations/halo2).
 //!
 //! Our email verification circuit [`DefaultEmailVerifyCircuit`] enables you to prove that
-//! - your email is authenticated by a domain server with an RSA digital signature.
+//! - your email is authenticated by a domain server with an RSA digital signature according to the DKIM protocol.
 //! - the string in your email satisfies regular expressions (regexes) specified in the circuit.
 //! - the string in the public input of the circuit is a correct substring in your email.
 //!
-//! You can specify the configuration of that circuit with the following two kinds of json files:
+//! You can specify the configuration of that circuit with two kinds of json files:
 //! 1. Decomposed regex json: defining a regex that the string in the email header/body must satisfy and which kinds of substring will be exposed in the public input.
 //! 2. Email configuration json: defining some parameters of the email, e.g., the max size of the email header and body, the RSA public key size, pathes to text files to describe the regex definitions.
 //!
-//! With these files, you can call our cli commands or helper functions to generate proving and verifying keys, proofs, and verifier Solidity contracts that conform to your configuration.
+//! With these files, you can call our CLI commands or helper functions to generate proving and verifying keys, proofs, and verifier Solidity contracts that conform to your configuration.
 //!
+//! Our circuit consists of three chips: [`RegexSha2Config`], [`RegexSha2Base64Config`], [`SignVerifyConfig`].
+//! - The [`RegexSha2Config`] verifies that the input string satisfies the specified regex, extracts its substrings, and computes its SHA256 hash.
+//! - The [`RegexSha2Base64Config`] additionally computes the base64 encoding of the SHA256 hash.
+//! - The [`SignVerifyConfig`] verifies the RSA signature with the given SHA256 hash and RSA public key.
+//!
+//! The [`RegexSha2Config`], [`RegexSha2Base64Config`], [`SignVerifyConfig`] are used for the email header, email body, and RSA signature, respectively.
+//! If you want to omit some verification in our circuit, you can build your own circuit with these chips.  
 
 #[cfg(not(target_arch = "wasm32"))]
 mod helpers;
+/// Regex verification + SHA256 computation.
 pub mod regex_sha2;
+/// Regex verification + SHA256 computation + base64 encoding.
 pub mod regex_sha2_base64;
+/// RSA signature verification.
 pub mod sign_verify;
+/// Util functions.
 pub mod utils;
 use std::fs::File;
 
@@ -33,15 +44,19 @@ use halo2_base::utils::{decompose_fe_to_u64_limbs, value_to_option};
 use halo2_base::QuantumCell;
 use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
 use halo2_base::{
-    gates::{range::RangeConfig, GateInstructions, RangeInstructions},
+    gates::{flex_gate::FlexGateConfig, range::RangeConfig, GateInstructions, RangeInstructions},
     utils::PrimeField,
 };
+/// Re-export [halo2_base64](https://github.com/zkemail/halo2-base64).
 pub use halo2_base64;
+/// Re-export [halo2_dynamic_sha256](https://github.com/zkemail/halo2-dynamic-sha256/tree/feat/lookup)
 pub use halo2_dynamic_sha256;
 use halo2_dynamic_sha256::*;
+/// Re-export [halo2_regex](https://github.com/zkemail/halo2-regex/tree/feat/multi_path)
 pub use halo2_regex;
 use halo2_regex::defs::{AllstrRegexDef, RegexDefs, SubstrRegexDef};
 use halo2_regex::*;
+/// Re-export [halo2_rsa](https://github.com/zkemail/halo2-rsa)
 pub use halo2_rsa;
 use halo2_rsa::*;
 use itertools::Itertools;
@@ -53,13 +68,20 @@ use snark_verifier::loader::LoadedScalar;
 use snark_verifier_sdk::CircuitExt;
 use std::io::{Read, Write};
 
+/// The name of variable for the path to the email configuration json.
 pub const EMAIL_VERIFY_CONFIG_ENV: &'static str = "EMAIL_VERIFY_CONFIG";
+
+/// Configuration parameters for [`Sha256DynamicConfig`]
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct Sha2ConfigParams {
+pub struct Sha256ConfigParams {
+    /// The bits of lookup table. It must be a divisor of 16, i.e., 1, 2, 4, 8, and 16.
     pub num_bits_lookup: usize,
+    /// The number of advice columns used to assign values in [`Sha256DynamicConfig`].
+    /// Specifying a larger number of columns increases the verification cost and decreases the proving cost.
     pub num_advice_columns: usize,
 }
 
+/// Configuration parameters for [`RegexSha2Config`].
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct HeaderConfigParams {
     pub bodyhash_allstr_filepath: String,
@@ -70,6 +92,7 @@ pub struct HeaderConfigParams {
     pub substr_regexes: Vec<Vec<String>>,
 }
 
+/// Configuration parameters for [`RegexSha2Base64Config`].
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct BodyConfigParams {
     pub allstr_filepathes: Vec<String>,
@@ -78,31 +101,53 @@ pub struct BodyConfigParams {
     pub substr_regexes: Vec<Vec<String>>,
 }
 
+/// Configuration parameters for [`SignVerifyConfig`].
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct SignVerifyConfigParams {
+    /// The bits of RSA public key.
     pub public_key_bits: usize,
 }
 
+/// Configuration parameters for [`DefaultEmailVerifyCircuit`].
+///
+/// Although the types of some parameters are defined as [`Option`], you will get an error if they are omitted for [`DefaultEmailVerifyCircuit`].
+/// You can build a circuit that accepts the same format configuration file except that some parameters are omitted.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct DefaultEmailVerifyConfigParams {
+    /// The degree of the number of rows, i.e., 2^(`degree`) rows are set.
     pub degree: u32,
+    /// The number of advice columns in [`FlexGateConfig`].
     pub num_flex_advice: usize,
+    /// The number of advice columns for lookup constraints in [`RangeConfig`].
     pub num_range_lookup_advice: usize,
+    /// The number of fix columns in [`FlexGateConfig`].
     pub num_flex_fixed: usize,
+    /// The bits of lookup table in [`RangeConfig`], which must be less than `degree`.
     pub range_lookup_bits: usize,
-    pub sha256_config: Option<Sha2ConfigParams>,
+    /// Configuration parameters for [`Sha256DynamicConfig`].
+    pub sha256_config: Option<Sha256ConfigParams>,
+    /// Configuration parameters for [`SignVerifyConfig`].
     pub sign_verify_config: Option<SignVerifyConfigParams>,
+    /// Configuration parameters for [`RegexSha2Config`].
     pub header_config: Option<HeaderConfigParams>,
+    /// Configuration parameters for [`RegexSha2Base64Config`].
     pub body_config: Option<BodyConfigParams>,
 }
 
+/// Public input definition of [`DefaultEmailVerifyCircuit`].
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DefaultEmailVerifyPublicInput {
+    /// A hex string of the SHA256 hash computed from the email header.
     pub headerhash: String,
+    /// A hex string of the n parameter in the RSA public key. (The e parameter is fixed to 65537.)
     pub public_key_n_bytes: String,
+    /// The start position of the substrings in the email header.
     pub header_starts: Vec<usize>,
+    /// The substrings in the email header.
     pub header_substrs: Vec<String>,
+    /// The start position of the substrings in the email body.
     pub body_starts: Vec<usize>,
+    /// The substrings in the email body.
     pub body_substrs: Vec<String>,
 }
 
@@ -142,20 +187,27 @@ impl DefaultEmailVerifyPublicInput {
     }
 }
 
+/// Configuration for [`DefaultEmailVerifyCircuit`].
 #[derive(Debug, Clone)]
 pub struct DefaultEmailVerifyConfig<F: PrimeField> {
-    sha256_config: Sha256DynamicConfig<F>,
-    sign_verify_config: SignVerifyConfig<F>,
-    header_config: RegexSha2Config<F>,
-    body_config: RegexSha2Base64Config<F>,
-    public_hash: Column<Instance>,
+    pub sha256_config: Sha256DynamicConfig<F>,
+    pub sign_verify_config: SignVerifyConfig<F>,
+    pub header_config: RegexSha2Config<F>,
+    pub body_config: RegexSha2Base64Config<F>,
+    /// An instance column for the SHA256 hash of the all public inputs, i.e., the SHA256 hash of the email header, the base64 encoded SHA256 hash of the email body, the RSA public key, and the substrings and their ids in the email header and body.
+    pub public_hash: Column<Instance>,
 }
 
+/// Default email verification circuit.
 #[derive(Debug, Clone)]
 pub struct DefaultEmailVerifyCircuit<F: PrimeField> {
+    /// Email header bytes.
     pub header_bytes: Vec<u8>,
+    /// Email body bytes.
     pub body_bytes: Vec<u8>,
+    /// RSA public key.
     pub public_key: RSAPublicKey<F>,
+    /// RSA digital signature.
     pub signature: RSASignature<F>,
 }
 
