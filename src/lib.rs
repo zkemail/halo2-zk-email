@@ -1,3 +1,17 @@
+//! Email verification circuit compatible with the [halo2 library developed by privacy-scaling-explorations team](https://github.com/privacy-scaling-explorations/halo2).
+//!
+//! Our email verification circuit [`DefaultEmailVerifyCircuit`] enables you to prove that
+//! - your email is authenticated by a domain server with an RSA digital signature.
+//! - the string in your email satisfies regular expressions (regexes) specified in the circuit.
+//! - the string in the public input of the circuit is a correct substring in your email.
+//!
+//! You can specify the configuration of that circuit with the following two kinds of json files:
+//! 1. Decomposed regex json: defining a regex that the string in the email header/body must satisfy and which kinds of substring will be exposed in the public input.
+//! 2. Email configuration json: defining some parameters of the email, e.g., the max size of the email header and body, the RSA public key size, pathes to text files to describe the regex definitions.
+//!
+//! With these files, you can call our cli commands or helper functions to generate proving and verifying keys, proofs, and verifier Solidity contracts that conform to your configuration.
+//!
+
 #[cfg(not(target_arch = "wasm32"))]
 mod helpers;
 pub mod regex_sha2;
@@ -25,141 +39,19 @@ use halo2_base::{
 pub use halo2_base64;
 pub use halo2_dynamic_sha256;
 use halo2_dynamic_sha256::*;
-// pub use halo2_dynamic_sha256::{AssignedHashResult, Sha256DynamicConfig};
-// use halo2_regex::defs::RegexDefs;
 pub use halo2_regex;
 use halo2_regex::defs::{AllstrRegexDef, RegexDefs, SubstrRegexDef};
 use halo2_regex::*;
 pub use halo2_rsa;
 use halo2_rsa::*;
-// use halo2_rsa::{AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstructions, RSAPubE, RSAPublicKey, RSASignature};
 use itertools::Itertools;
 use num_bigint::BigUint;
 use regex_sha2_base64::RegexSha2Base64Config;
 use rsa::PublicKeyParts;
-use rsa::RsaPublicKey;
 use sha2::{Digest, Sha256};
 use snark_verifier::loader::LoadedScalar;
 use snark_verifier_sdk::CircuitExt;
 use std::io::{Read, Write};
-
-// #[derive(Debug, Clone)]
-// pub struct EmailVerifyResult<'a, F: PrimeField> {
-//     pub assigned_headerhash: Vec<AssignedValue<'a, F>>,
-//     pub assigned_bodyhash: Vec<AssignedCell<F, F>>,
-//     pub header_result: AssignedRegexResult<'a, F>,
-//     pub body_result: AssignedRegexResult<'a, F>,
-//     pub headerhash_value: Vec<u8>,
-//     pub bodyhash_value: Vec<u8>,
-// }
-
-// #[derive(Debug, Clone)]
-// pub struct EmailVerifyConfig<F: PrimeField> {
-//     header_processer: RegexSha2Config<F>,
-//     body_processer: RegexSha2Base64Config<F>,
-//     rsa_config: RSAConfig<F>,
-// }
-
-// impl<F: PrimeField> EmailVerifyConfig<F> {
-//     pub fn configure(
-//         meta: &mut ConstraintSystem<F>,
-//         range_config: RangeConfig<F>,
-//         header_max_byte_size: usize,
-//         bodyhash_defs: RegexDefs,
-//         header_regex_defs: Vec<RegexDefs>,
-//         body_max_byte_size: usize,
-//         body_regex_defs: Vec<RegexDefs>,
-//         public_key_bits: usize,
-//     ) -> Self {
-//         let header_defs = [vec![bodyhash_defs], header_regex_defs].concat();
-//         let header_processer = RegexSha2Config::configure(meta, header_max_byte_size, range_config.clone(), header_defs);
-//         let body_processer = RegexSha2Base64Config::configure(meta, body_max_byte_size, range_config.clone(), body_regex_defs);
-//         let biguint_config = halo2_rsa::BigUintConfig::construct(range_config, 64);
-//         let rsa_config = RSAConfig::construct(biguint_config, public_key_bits, 5);
-//         Self {
-//             header_processer,
-//             body_processer,
-//             rsa_config,
-//         }
-//     }
-
-//     pub fn assign_public_key<'v>(&self, ctx: &mut Context<'v, F>, public_key: RSAPublicKey<F>) -> Result<AssignedRSAPublicKey<'v, F>, Error> {
-//         self.rsa_config.assign_public_key(ctx, public_key)
-//     }
-
-//     pub fn assign_signature<'v>(&self, ctx: &mut Context<'v, F>, signature: RSASignature<F>) -> Result<AssignedRSASignature<'v, F>, Error> {
-//         self.rsa_config.assign_signature(ctx, signature)
-//     }
-
-//     pub fn verify_email<'v: 'a, 'a>(
-//         &self,
-//         ctx: &mut Context<'v, F>,
-//         sha256_config: &mut Sha256DynamicConfig<F>,
-//         header_bytes: &[u8],
-//         body_bytes: &[u8],
-//         public_key: &AssignedRSAPublicKey<'v, F>,
-//         signature: &AssignedRSASignature<'v, F>,
-//     ) -> Result<EmailVerifyResult<'a, F>, Error> {
-//         let gate = sha256_config.range().gate.clone();
-
-//         // 1. Extract sub strings in the body and compute the base64 encoded hash of the body.
-//         let body_result = self.body_processer.match_hash_and_base64(ctx, sha256_config, body_bytes)?;
-
-//         // 2. Extract sub strings in the header, which includes the body hash, and compute the raw hash of the header.
-//         let header_result = self.header_processer.match_and_hash(ctx, sha256_config, header_bytes)?;
-
-//         // 3. Verify the rsa signature.
-//         let mut hashed_bytes = header_result.hash_bytes;
-//         hashed_bytes.reverse();
-//         let bytes_bits = hashed_bytes.len() * 8;
-//         let limb_bits = self.rsa_config.biguint_config().limb_bits;
-//         let limb_bytes = limb_bits / 8;
-//         let mut hashed_u64s = vec![];
-//         let bases = (0..limb_bytes)
-//             .map(|i| F::from((1u64 << (8 * i)) as u64))
-//             .map(QuantumCell::Constant)
-//             .collect::<Vec<QuantumCell<F>>>();
-//         for i in 0..(bytes_bits / limb_bits) {
-//             let left = hashed_bytes[limb_bytes * i..limb_bytes * (i + 1)]
-//                 .iter()
-//                 .map(QuantumCell::Existing)
-//                 .collect::<Vec<QuantumCell<F>>>();
-//             let sum = gate.inner_product(ctx, left, bases.clone());
-//             hashed_u64s.push(sum);
-//         }
-//         let is_sign_valid = self.rsa_config.verify_pkcs1v15_signature(ctx, public_key, &hashed_u64s, signature)?;
-//         gate.assert_is_const(ctx, &is_sign_valid, F::one());
-//         hashed_bytes.reverse();
-//         // [IMPORTANT] Here, we don't verify that the encoded hash value is equal to the value in the email header.
-//         // To constraint their equivalences, you should put these values in the instance column and specify the same hash bytes.
-
-//         // 4. Check that the encoded hash value is equal to the value in the email header.
-//         // let hash_body_substr = &header_result.regex.substrs_bytes[0];
-//         // let body_encoded_hash = body_result.encoded_hash;
-//         // debug_assert_eq!(hash_body_substr.len(), body_encoded_hash.len());
-//         // for (substr_byte, encoded_byte) in
-//         //     hash_body_substr.iter().zip(body_encoded_hash.into_iter())
-//         // {
-//         //     ctx.region
-//         //         .constrain_equal(substr_byte.cell(), encoded_byte.cell())?;
-//         // }
-//         // gate.assert_is_const(ctx, &header_result.substrs.substrs_length[0], F::from(44));
-//         Ok(EmailVerifyResult {
-//             assigned_headerhash: hashed_bytes,
-//             assigned_bodyhash: body_result.encoded_hash,
-//             header_result: header_result.regex,
-//             body_result: body_result.regex,
-//             headerhash_value: header_result.hash_value,
-//             bodyhash_value: body_result.encoded_hash_value,
-//         })
-//     }
-
-//     pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
-//         self.header_processer.load(layouter)?;
-//         self.body_processer.load(layouter)?;
-//         Ok(())
-//     }
-// }
 
 pub const EMAIL_VERIFY_CONFIG_ENV: &'static str = "EMAIL_VERIFY_CONFIG";
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -312,7 +204,7 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
             false,
         );
 
-        let sign_verify_config = SignVerifyConfig::configure(meta, range_config.clone(), sign_verify_config.public_key_bits);
+        let sign_verify_config = SignVerifyConfig::configure(range_config.clone(), sign_verify_config.public_key_bits);
 
         // assert_eq!(params.body_regex_filepathes.len(), params.body_substr_filepathes.len());
         let bodyhash_allstr_def = AllstrRegexDef::read_from_text(&header_config.bodyhash_allstr_filepath);

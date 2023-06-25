@@ -15,7 +15,7 @@ pub struct SignVerifyConfig<F: PrimeField> {
 }
 
 impl<F: PrimeField> SignVerifyConfig<F> {
-    pub fn configure(meta: &mut ConstraintSystem<F>, range_config: RangeConfig<F>, public_key_bits: usize) -> Self {
+    pub fn configure(range_config: RangeConfig<F>, public_key_bits: usize) -> Self {
         let biguint_config = halo2_rsa::BigUintConfig::construct(range_config, 64);
         let rsa_config = RSAConfig::construct(biguint_config, public_key_bits, 5);
         Self { rsa_config }
