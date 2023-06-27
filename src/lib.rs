@@ -68,7 +68,7 @@ use snark_verifier::loader::LoadedScalar;
 use snark_verifier_sdk::CircuitExt;
 use std::io::{Read, Write};
 
-/// The name of variable for the path to the email configuration json.
+/// The name of env variable for the path to the email configuration json.
 pub const EMAIL_VERIFY_CONFIG_ENV: &'static str = "EMAIL_VERIFY_CONFIG";
 
 /// Configuration parameters for [`Sha256DynamicConfig`]
@@ -152,6 +152,18 @@ pub struct DefaultEmailVerifyPublicInput {
 }
 
 impl DefaultEmailVerifyPublicInput {
+    /// Create a public input for [`DefaultEmailVerifyCircuit`].
+    ///
+    /// # Arguments
+    /// * `headerhash` - a hex string of the SHA256 hash computed from the email header.
+    /// * `public_key_n` - a hex string of the n parameter in the RSA public key.
+    /// * `header_substrs` the start position of the substrings in the email header.
+    /// * `header_substrs` - the substrings in the email header.
+    /// * `body_starts` - the start position of the substrings in the email body.
+    /// * `body_substrs` - the substrings in the email body.
+    ///
+    /// # Return values
+    /// Return a new [`DefaultEmailVerifyPublicInput`].
     pub fn new(headerhash: Vec<u8>, public_key_n: BigUint, header_substrs: Vec<Option<(usize, String)>>, body_substrs: Vec<Option<(usize, String)>>) -> Self {
         let mut header_starts_vec = vec![];
         let mut header_substrs_vec = vec![];
@@ -179,6 +191,10 @@ impl DefaultEmailVerifyPublicInput {
         }
     }
 
+    /// Output [`DefaultEmailVerifyPublicInput`] to a json file.
+    ///
+    /// # Arguments
+    /// * `public_input_path` - a file path of the output json file.
     pub fn write_file(&self, public_input_path: &str) {
         let public_input_str = serde_json::to_string(&self).unwrap();
         let mut file = File::create(public_input_path).expect("public_input_path creation failed");
@@ -479,10 +495,18 @@ impl<F: PrimeField> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
 impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
     pub const DEFAULT_E: u128 = 65537;
 
+    /// Read [`DefaultEmailVerifyConfigParams`] from a json file at the file path of [`EMAIL_VERIFY_CONFIG_ENV`].
     pub fn read_config_params() -> DefaultEmailVerifyConfigParams {
         read_default_circuit_config_params()
     }
 
+    /// Generate a new circuit from the given email file.
+    ///
+    /// # Arguments
+    /// * `email_path` - a file path of the email file.
+    ///
+    /// # Return values
+    /// Return a new [`DefaultEmailVerifyCircuit`], the SHA256 hash bytes of the email header, the `n` parameter of the RSA public key, a vector of (`start_position`, `substr`) in the email header, and a vector of (`start_position`, `substr`) in the email body.
     pub async fn gen_circuit_from_email_path(email_path: &str) -> (Self, Vec<u8>, BigUint, Vec<Option<(usize, String)>>, Vec<Option<(usize, String)>>) {
         let email_bytes = {
             let mut f = File::open(email_path).unwrap();
@@ -520,6 +544,13 @@ impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
         (circuit, headerhash, public_key_n, header_substrs, body_substrs)
     }
 
+    /// Retrieve instance values from the given [`DefaultEmailVerifyPublicInput`] json file.
+    ///
+    /// # Arguments
+    /// * `public_input_path` - a file path of the [`DefaultEmailVerifyPublicInput`] json file.
+    ///
+    /// # Return values
+    /// Return a vector of the instance values.
     pub fn get_instances_from_default_public_input(public_input_path: &str) -> Vec<F> {
         let public_input = serde_json::from_reader::<File, DefaultEmailVerifyPublicInput>(File::open(public_input_path).unwrap()).unwrap();
         let config_params = read_default_circuit_config_params();
