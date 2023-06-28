@@ -63,7 +63,7 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
     runtime.block_on(async {
         let (circuit, _, _, _, _) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path("test_data/test_email1.eml").await;
-        gen_app_key(&app_params_path, APP_CONFIG_PATH, "benches/app.pk", "benches/app.vk", circuit).await.unwrap()
+        gen_app_key(&app_params_path, APP_CONFIG_PATH, "benches/app.pk", "benches/app.vk", circuit).unwrap()
     });
     runtime.block_on(async {
         let (circuit, _, _, _, _) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path("test_data/test_email1.eml").await;
@@ -77,7 +77,6 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
             "benches/app.vk",
             circuit,
         )
-        .await
         .unwrap()
     });
 
@@ -158,7 +157,6 @@ fn bench_email_verify_recursion1(c: &mut Criterion) {
                     "benches/proof.hex",
                     circuit,
                 )
-                .await
                 .unwrap();
             })
         })
