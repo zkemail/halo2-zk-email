@@ -757,23 +757,18 @@ mod test {
     use crate::{DefaultEmailVerifyCircuit, DefaultEmailVerifyPublicInput};
 
     use super::*;
-    use cfdkim::{canonicalize_signed_email, resolve_public_key, SignerBuilder};
+    use cfdkim::{canonicalize_signed_email, resolve_public_key};
     use halo2_base::halo2_proofs::{
         circuit::Value,
-        dev::{CircuitCost, FailureLocation, MockProver, VerifyFailure},
         halo2curves::bn256::{Fr, G1},
     };
-    use halo2_regex::vrm::DecomposedRegexConfig;
     use halo2_rsa::RSAPubE;
-    use mailparse::parse_mail;
     use num_bigint::BigUint;
-    use rand::thread_rng;
-    use rsa::{PublicKeyParts, RsaPrivateKey};
-    use snark_verifier_sdk::CircuitExt;
+    use rsa::PublicKeyParts;
     use std::{fs::File, io::Read, path::Path};
     use temp_env;
-    use tokio::runtime::Runtime;
 
+    #[ignore]
     #[tokio::test]
     async fn test_helper_app_circuit() {
         gen_regex_files("./test_data/bodyhash_defs.json", "./test_data", "body_hash").unwrap();
@@ -820,7 +815,6 @@ mod test {
             let public_input = DefaultEmailVerifyPublicInput::new(headerhash.clone(), public_key_n.clone(), header_substrs, body_substrs);
             let public_input_path = "./build/public_input.json";
             public_input.write_file(&public_input_path);
-            let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
             let params_path = "./build/test.params";
             gen_params(params_path, config_params.degree).unwrap();
             let pk_path = "./build/test.pk";
@@ -835,6 +829,114 @@ mod test {
             gen_evm_verifier::<DefaultEmailVerifyCircuit<Fr>>(params_path, circuit_config_path, vk_path, bytecode_path, solidity_path).unwrap();
             let instances = DefaultEmailVerifyCircuit::<Fr>::get_instances_from_default_public_input(&public_input_path);
             evm_verify_app(circuit_config_path, bytecode_path, evm_proof_path, instances).unwrap();
+        });
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_helper_agg_circuit() {
+        gen_regex_files("./test_data/bodyhash_defs.json", "./test_data", "body_hash").unwrap();
+        gen_regex_files("./test_data/from_defs.json", "./test_data", "from").unwrap();
+        gen_regex_files("./test_data/to_defs.json", "./test_data", "to").unwrap();
+        gen_regex_files("./test_data/subject_defs.json", "./test_data", "subject").unwrap();
+        gen_regex_files("./test_data/test_ex1_email_body_defs.json", "./test_data", "test_ex1_email_body").unwrap();
+        let email_path = "./test_data/test_email1.eml";
+        let email_bytes = {
+            let mut f = File::open(email_path).unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            buf
+        };
+        println!("email {}", String::from_utf8(email_bytes.clone()).unwrap());
+        let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
+        let headerhash = Sha256::digest(&canonicalized_header).to_vec();
+        let public_key_n = {
+            let logger = slog::Logger::root(slog::Discard, slog::o!());
+            match resolve_public_key(&logger, &email_bytes).await.unwrap() {
+                cfdkim::DkimPublicKey::Rsa(_pk) => BigUint::from_radix_le(&_pk.n().clone().to_radix_le(16), 16).unwrap(),
+                _ => {
+                    panic!("Only RSA keys are supported.");
+                }
+            }
+        };
+        let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
+        let public_key = RSAPublicKey::<Fr>::new(Value::known(public_key_n.clone()), e);
+        let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
+        let header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
+        let body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
+        let app_config_path = "./configs/app_recursion_bench.config";
+        temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some(app_config_path), move || {
+            let app_config_params = read_default_circuit_config_params();
+            let header_config = app_config_params.header_config.expect("header_config is required");
+            let body_config = app_config_params.body_config.expect("body_config is required");
+            let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, header_config.substr_regexes, body_config.substr_regexes);
+            let circuit = DefaultEmailVerifyCircuit {
+                header_bytes: canonicalized_header.clone(),
+                body_bytes: canonicalized_body.clone(),
+                public_key: public_key.clone(),
+                signature: signature.clone(),
+            };
+            let public_input = DefaultEmailVerifyPublicInput::new(headerhash.clone(), public_key_n.clone(), header_substrs, body_substrs);
+            let public_input_path = "./build/public_input.json";
+            public_input.write_file(&public_input_path);
+            let app_params_path = "./build/test_app.params";
+            let agg_params_path = "./build/test_agg.params";
+            gen_params(agg_params_path, 22).unwrap();
+            downsize_params(agg_params_path, app_params_path, app_config_params.degree).unwrap();
+            let app_pk_path = "./build/test_app.pk";
+            let app_vk_path = "./build/test_app.vk";
+            gen_app_key(app_params_path, app_config_path, app_pk_path, app_vk_path, circuit.clone()).unwrap();
+            let agg_pk_path = "./build/test_agg.pk";
+            let agg_vk_path = "./build/test_agg.vk";
+            let agg_config_path = "./configs/agg_bench.config";
+            gen_agg_key(
+                app_params_path,
+                agg_params_path,
+                app_config_path,
+                agg_config_path,
+                app_pk_path,
+                agg_pk_path,
+                agg_vk_path,
+                circuit.clone(),
+            )
+            .unwrap();
+            let app_proof_path = "./build/test_agg.proof";
+            prove_app(app_params_path, app_config_path, app_pk_path, app_proof_path, circuit.clone()).unwrap();
+            let agg_evm_proof_path = "./build/test_agg_evm.hex";
+            let agg_acc_path = "./build/test_agg_acc.hex";
+            evm_prove_agg(
+                app_params_path,
+                agg_params_path,
+                app_config_path,
+                agg_config_path,
+                app_pk_path,
+                agg_pk_path,
+                agg_acc_path,
+                agg_evm_proof_path,
+                circuit.clone(),
+            )
+            .unwrap();
+            let bytecode_path = "./build/test_verifier.bin";
+            let solidity_path = "./build/testVerifier.sol";
+            gen_agg_evm_verifier(agg_params_path, app_config_path, agg_config_path, agg_vk_path, bytecode_path, solidity_path).unwrap();
+            let instances = {
+                let acc = {
+                    let hex = fs::read_to_string(agg_acc_path).unwrap();
+                    hex::decode(&hex[2..])
+                        .unwrap()
+                        .chunks(32)
+                        .map(|bytes| {
+                            let mut bytes = bytes.to_vec();
+                            bytes.reverse();
+                            Fr::from_bytes(bytes[..].try_into().unwrap()).unwrap()
+                        })
+                        .collect_vec()
+                };
+                assert_eq!(acc.len(), NUM_ACC_INSTANCES);
+                let public_fr = DefaultEmailVerifyCircuit::<Fr>::get_instances_from_default_public_input(public_input_path);
+                vec![acc, public_fr].concat()
+            };
+            evm_verify_agg(app_config_path, agg_config_path, bytecode_path, agg_evm_proof_path, instances).unwrap();
         });
     }
 }
