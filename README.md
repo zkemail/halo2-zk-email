@@ -1,6 +1,6 @@
 # halo2-zk-email
 
-**Email verification circuit in halo2.** Documentation coming soon.
+**Email verification circuit in halo2.**
 
 ## Disclaimer
 DO NOT USE THIS LIBRARY IN PRODUCTION. At this point, this is under development not audited. It has known and unknown bugs and security flaws.
@@ -26,6 +26,12 @@ git clone https://github.com/zkemail/halo2-zk-email.git
 cd halo2-zk-email
 cargo build --release
 ```
+
+## Usage
+You can open the API specification by executing `cargo doc --open`.
+
+## Test
+You can run the tests by executing `cargo test --release`.
 
 ## Description
 To generate a sample circuit and it's non aggregated EVM verifier, do:
