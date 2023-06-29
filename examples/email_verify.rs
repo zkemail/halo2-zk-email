@@ -98,7 +98,7 @@ fn main() {
         )
         .unwrap();
 
-    // 2. In this example, a dummy email is generated to construct an email verification circuit based on its configuration file ("./examples/example_email_verify.config").
+    // 2. In this example, we generate a dummy email to construct an email verification circuit based on its configuration file ("./examples/example_email_verify.config").
     set_var(EMAIL_VERIFY_CONFIG_ENV, "./examples/example_email_verify.config");
     let config_params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
     let sign_verify_config = config_params.sign_verify_config.expect("sign_verify_config is required");
@@ -137,7 +137,7 @@ fn main() {
         signature,
     };
 
-    // 3. Verify the circuit.
+    // 3. Assert the circuit.
     let instances = circuit.instances();
     let prover = MockProver::run(config_params.degree, &circuit, instances).unwrap();
     assert_eq!(prover.verify(), Ok(()));
