@@ -24,6 +24,12 @@ Cargo.lock
 /benches/*.hex
 /benches/*.bin
 /benches/*.json
+/examples/*.params
+/examples/*.pk
+/examples/*.vk
+/examples/*.hex
+/examples/*.bin
 /examples/*.txt
+/examples/*.json
 *.log
 .DS_Store
