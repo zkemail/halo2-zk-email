@@ -46,15 +46,17 @@ impl<F: PrimeField> RegexSha2Base64Config<F> {
     /// # Arguments
     /// * `meta` - a constrain system in which contraints are defined.
     /// * `max_byte_size` - the maximum byte size that this configuration can support.
+    /// * `skip_prefix_bytes_size` - the bytes of the skipped input string that do not satisfy the regexes.
     /// * `range_config` - a configuration for [`RangeConfig`].
     /// * `regex_defs` - a definition of regexes that the input string must satisfy.
     ///
     /// # Return values
     /// Returns a new [`RegexSha2Base64Config`].
-    pub fn configure(meta: &mut ConstraintSystem<F>, max_byte_size: usize, range_config: RangeConfig<F>, regex_defs: Vec<RegexDefs>) -> Self {
+    pub fn configure(meta: &mut ConstraintSystem<F>, max_byte_size: usize, skip_prefix_bytes_size: usize, range_config: RangeConfig<F>, regex_defs: Vec<RegexDefs>) -> Self {
         let regex_sha2 = RegexSha2Config::configure(
             meta,
             max_byte_size,
+            skip_prefix_bytes_size,
             // num_sha2_compression_per_column,
             range_config,
             regex_defs,
@@ -136,7 +138,7 @@ mod test {
 
     #[macro_export]
     macro_rules! impl_regex_sha2_base64_circuit {
-        ($config_name:ident, $circuit_name:ident, $regex_defs:expr, $max_byte_size:expr, $num_advice:expr, $num_lookup_advice:expr, $lookup_bits:expr, $k:expr) => {
+        ($config_name:ident, $circuit_name:ident, $regex_defs:expr, $max_bytes_size:expr, $skip_prefix_bytes_size:expr, $num_advice:expr, $num_lookup_advice:expr, $lookup_bits:expr, $k:expr) => {
             #[derive(Debug, Clone)]
             struct $config_name<F: PrimeField> {
                 inner: RegexSha2Base64Config<F>,
@@ -171,9 +173,9 @@ mod test {
                         0,
                         Self::K as usize,
                     );
-                    let sha256_config = Sha256DynamicConfig::configure(meta, vec![Self::MAX_BYTE_SIZE], range_config.clone(), 16, 1, false);
+                    let sha256_config = Sha256DynamicConfig::configure(meta, vec![Self::MAX_BYTES_SIZE], range_config.clone(), 16, 1, false);
                     let regex_defs = $regex_defs;
-                    let inner = RegexSha2Base64Config::configure(meta, Self::MAX_BYTE_SIZE, range_config, regex_defs);
+                    let inner = RegexSha2Base64Config::configure(meta, Self::MAX_BYTES_SIZE, Self::SKIP_PREFIX_BYTES_SIZE, range_config, regex_defs);
                     let hash_instance = meta.instance_column();
                     meta.enable_equality(hash_instance);
                     let masked_str_instance = meta.instance_column();
@@ -229,7 +231,8 @@ mod test {
             }
 
             impl<F: PrimeField> $circuit_name<F> {
-                const MAX_BYTE_SIZE: usize = $max_byte_size;
+                const MAX_BYTES_SIZE: usize = $max_bytes_size;
+                const SKIP_PREFIX_BYTES_SIZE: usize = $skip_prefix_bytes_size;
                 const NUM_ADVICE: usize = $num_advice;
                 const NUM_FIXED: usize = 1;
                 const NUM_LOOKUP_ADVICE: usize = $num_lookup_advice;
@@ -257,6 +260,7 @@ mod test {
             },
         ],
         1024,
+        0,
         12,
         1,
         18,
@@ -291,17 +295,8 @@ mod test {
         };
         let (input, _, _) = canonicalize_signed_email(&email_bytes).unwrap();
         let input_str = String::from_utf8(input.clone()).unwrap();
-        let circuit: TestRegexSha2Base64Circuit1<Fr> = TestRegexSha2Base64Circuit1::<Fr> { input, _f: PhantomData };
-        let actual_hash = Sha256::digest(&circuit.input);
-        let mut expected_output = vec![];
-        expected_output.resize(44, 0);
-        general_purpose::STANDARD
-            .encode_slice(&actual_hash, &mut expected_output)
-            .expect("fail to convert the hash bytes into the base64 strings");
-
-        let hash_fs = expected_output.iter().map(|byte| Fr::from(*byte as u64)).collect::<Vec<Fr>>();
-        let mut expected_masked_chars = vec![Fr::from(0); TestRegexSha2Base64Circuit1::<Fr>::MAX_BYTE_SIZE];
-        let mut expected_substr_ids = vec![Fr::from(0); TestRegexSha2Base64Circuit1::<Fr>::MAX_BYTE_SIZE];
+        let mut expected_masked_chars = vec![Fr::from(0); TestRegexSha2Base64Circuit1::<Fr>::MAX_BYTES_SIZE];
+        let mut expected_substr_ids = vec![Fr::from(0); TestRegexSha2Base64Circuit1::<Fr>::MAX_BYTES_SIZE];
         let correct_substrs = vec![
             get_substr(&input_str, &[r"(?<=from:).*@.*(?=\r)".to_string()]).unwrap(),
             get_substr(&input_str, &[r"(?<=subject:).*(?=\r)".to_string()]).unwrap(),
@@ -312,6 +307,15 @@ mod test {
                 expected_substr_ids[start + idx] = Fr::from(substr_idx as u64 + 1);
             }
         }
+        let circuit = TestRegexSha2Base64Circuit1::<Fr> { input, _f: PhantomData };
+        let actual_hash = Sha256::digest(&circuit.input);
+        let mut expected_output = vec![];
+        expected_output.resize(44, 0);
+        general_purpose::STANDARD
+            .encode_slice(&actual_hash, &mut expected_output)
+            .expect("fail to convert the hash bytes into the base64 strings");
+
+        let hash_fs = expected_output.iter().map(|byte| Fr::from(*byte as u64)).collect::<Vec<Fr>>();
         let prover = MockProver::run(TestRegexSha2Base64Circuit1::<Fr>::K, &circuit, vec![hash_fs, expected_masked_chars, expected_substr_ids]).unwrap();
         assert_eq!(prover.verify(), Ok(()));
     }
@@ -342,6 +346,7 @@ mod test {
             },
         ],
         1024,
+        0,
         12,
         1,
         18,
@@ -390,16 +395,8 @@ mod test {
         };
         let (input, _, _) = canonicalize_signed_email(&email_bytes).unwrap();
         let input_str = String::from_utf8(input.clone()).unwrap();
-        let circuit = TestRegexSha2Base64Circuit2::<Fr> { input, _f: PhantomData };
-        let actual_hash = Sha256::digest(&circuit.input);
-        let mut expected_output = vec![];
-        expected_output.resize(44, 0);
-        general_purpose::STANDARD
-            .encode_slice(&actual_hash, &mut expected_output)
-            .expect("fail to convert the hash bytes into the base64 strings");
-        let hash_fs = expected_output.iter().map(|byte| Fr::from(*byte as u64)).collect::<Vec<Fr>>();
-        let mut expected_masked_chars = vec![Fr::from(0); TestRegexSha2Base64Circuit2::<Fr>::MAX_BYTE_SIZE];
-        let mut expected_substr_ids = vec![Fr::from(0); TestRegexSha2Base64Circuit2::<Fr>::MAX_BYTE_SIZE];
+        let mut expected_masked_chars = vec![Fr::from(0); TestRegexSha2Base64Circuit2::<Fr>::MAX_BYTES_SIZE];
+        let mut expected_substr_ids = vec![Fr::from(0); TestRegexSha2Base64Circuit2::<Fr>::MAX_BYTES_SIZE];
         let correct_substrs = vec![
             get_substr(
                 &input_str,
@@ -419,6 +416,14 @@ mod test {
                 expected_substr_ids[start + idx] = Fr::from(substr_idx as u64 + 1);
             }
         }
+        let circuit = TestRegexSha2Base64Circuit2::<Fr> { input, _f: PhantomData };
+        let actual_hash = Sha256::digest(&circuit.input);
+        let mut expected_output = vec![];
+        expected_output.resize(44, 0);
+        general_purpose::STANDARD
+            .encode_slice(&actual_hash, &mut expected_output)
+            .expect("fail to convert the hash bytes into the base64 strings");
+        let hash_fs = expected_output.iter().map(|byte| Fr::from(*byte as u64)).collect::<Vec<Fr>>();
         let prover = MockProver::run(TestRegexSha2Base64Circuit2::<Fr>::K, &circuit, vec![hash_fs, expected_masked_chars, expected_substr_ids]).unwrap();
         assert_eq!(prover.verify(), Ok(()));
     }
