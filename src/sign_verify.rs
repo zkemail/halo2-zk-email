@@ -11,7 +11,8 @@ use halo2_rsa::{AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstru
 
 #[derive(Debug, Clone)]
 pub struct SignVerifyConfig<F: PrimeField> {
-    rsa_config: RSAConfig<F>,
+    /// Configuration for [`RSAConfig`].
+    pub rsa_config: RSAConfig<F>,
 }
 
 impl<F: PrimeField> SignVerifyConfig<F> {

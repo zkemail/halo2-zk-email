@@ -28,7 +28,7 @@ pub struct RegexSha2Result<'a, F: PrimeField> {
 #[derive(Debug, Clone)]
 pub struct RegexSha2Config<F: PrimeField> {
     /// Configuration for [`RegexVerifyConfig`].
-    pub(crate) regex_config: RegexVerifyConfig<F>,
+    pub regex_config: RegexVerifyConfig<F>,
     /// The maximum byte size that this configuration can support.
     /// It must be multiple of 64.
     pub max_variable_byte_size: usize,

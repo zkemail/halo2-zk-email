@@ -35,9 +35,9 @@ pub struct RegexSha2Base64Result<'a, F: PrimeField> {
 #[derive(Debug, Clone)]
 pub struct RegexSha2Base64Config<F: PrimeField> {
     /// Configuration for [`RegexSha2Config`].
-    pub(crate) regex_sha2: RegexSha2Config<F>,
+    pub regex_sha2: RegexSha2Config<F>,
     /// Configuration for [`Base64Config`].
-    pub(crate) base64_config: Base64Config<F>,
+    pub base64_config: Base64Config<F>,
 }
 
 impl<F: PrimeField> RegexSha2Base64Config<F> {
