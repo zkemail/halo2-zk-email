@@ -69,12 +69,25 @@ criterion = { version = "0.3" }
 temp-env = "0.3.3"
 
 [[bench]]
-name = "email_verify"
+name = "regex"
 harness = false
 
 [[bench]]
-name = "recursion"
+name = "sha2"
 harness = false
+
+[[bench]]
+name = "sign_verify"
+harness = false
+
+
+# [[bench]]
+# name = "email_verify"
+# harness = false
+
+# [[bench]]
+# name = "recursion"
+# harness = false
 
 [[bin]]
 name = "zkemail"
