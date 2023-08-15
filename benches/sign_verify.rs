@@ -1,3 +1,4 @@
+use ark_std::{end_timer, start_timer};
 use cfdkim::{canonicalize_signed_email, resolve_public_key};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use halo2_base::halo2_proofs::halo2curves::bn256::Bn256;
@@ -93,6 +94,7 @@ macro_rules! impl_sign_verify_circuit {
             }
 
             fn synthesize(&self, mut config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
+                let witness_time = start_timer!(|| format!("Witness calculation"));
                 // config.inner.load(&mut layouter)?;
                 let range = config.inner.rsa_config.range().clone();
                 range.load_lookup_table(&mut layouter)?;
@@ -123,6 +125,7 @@ macro_rules! impl_sign_verify_circuit {
                         Ok(())
                     },
                 )?;
+                end_timer!(witness_time);
                 // for (idx, cell) in hash_bytes_cell.into_iter().enumerate() {
                 //     layouter.constrain_instance(cell, config.hash_instance, idx)?;
                 // }

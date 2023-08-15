@@ -1,7 +1,9 @@
+use ark_std::{end_timer, start_timer};
 use cfdkim::canonicalize_signed_email;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use halo2_base::halo2_proofs::halo2curves::bn256::Bn256;
 use halo2_base::halo2_proofs::plonk::ConstraintSystem;
+use halo2_base::halo2_proofs::poly::commitment::Params;
 use halo2_base::halo2_proofs::poly::kzg::commitment::ParamsKZG;
 use halo2_base::halo2_proofs::{
     circuit::{Cell, Layouter, SimpleFloorPlanner},
@@ -24,9 +26,12 @@ use halo2_zk_email::*;
 use rand::rngs::OsRng;
 use rand::thread_rng;
 use sha2::{self, Digest, Sha256};
-use snark_verifier_sdk::evm::{evm_verify, gen_evm_proof_shplonk, gen_evm_verifier_shplonk};
+use snark_verifier_sdk::evm::{encode_calldata, evm_verify, gen_evm_proof_shplonk, gen_evm_verifier_shplonk};
 use snark_verifier_sdk::gen_pk;
+use snark_verifier_sdk::halo2::aggregation::PublicAggregationCircuit;
+use snark_verifier_sdk::halo2::gen_snark_shplonk;
 use snark_verifier_sdk::CircuitExt;
+use std::env::set_var;
 use std::fs::File;
 use std::io::Read;
 use std::marker::PhantomData;
@@ -86,6 +91,7 @@ macro_rules! impl_sha2_circuit {
             }
 
             fn synthesize(&self, mut config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
+                let witness_time = start_timer!(|| format!("Witness calculation"));
                 // config.inner.load(&mut layouter)?;
                 config.sha256_config.range().load_lookup_table(&mut layouter)?;
                 config.sha256_config.load(&mut layouter)?;
@@ -111,6 +117,7 @@ macro_rules! impl_sha2_circuit {
                         Ok(())
                     },
                 )?;
+                end_timer!(witness_time);
                 // for (idx, cell) in hash_bytes_cell.into_iter().enumerate() {
                 //     layouter.constrain_instance(cell, config.hash_instance, idx)?;
                 // }
@@ -158,23 +165,7 @@ fn bench_sha2(c: &mut Criterion) {
         buf
     };
     let (input, _, _) = canonicalize_signed_email(&email_bytes).unwrap();
-    // let input_str = String::from_utf8(input.clone()).unwrap();
-    // let mut expected_masked_chars = vec![Fr::from(0); BenchRegexSha2Circuit1::<Fr>::MAX_BYTES_SIZE];
-    // let mut expected_substr_ids = vec![Fr::from(0); BenchRegexSha2Circuit1::<Fr>::MAX_BYTES_SIZE];
-    // let correct_substrs = vec![
-    //     get_substr(&input_str, &[r"(?<=from:).*@.*(?=\r)".to_string()]).unwrap(),
-    //     get_substr(&input_str, &[r"(?<=to:).*@.*(?=\r)".to_string()]).unwrap(),
-    //     get_substr(&input_str, &[r"(?<=subject:).*(?=\r)".to_string()]).unwrap(),
-    // ];
-    // for (substr_idx, (start, chars)) in correct_substrs.iter().enumerate() {
-    //     for (idx, char) in chars.as_bytes().iter().enumerate() {
-    //         expected_masked_chars[start + idx] = Fr::from(*char as u64);
-    //         expected_substr_ids[start + idx] = Fr::from(substr_idx as u64 + 1);
-    //     }
-    // }
     let circuit = BenchSha2Circuit1::<Fr> { input, _f: PhantomData };
-    // let expected_output = Sha256::digest(&circuit.input);
-    // let hash_fs = expected_output.iter().map(|byte| Fr::from(*byte as u64)).collect::<Vec<Fr>>();
     let prover = MockProver::run(BenchSha2Circuit1::<Fr>::K, &circuit, vec![vec![]]).unwrap();
     assert_eq!(prover.verify(), Ok(()));
     let rng = thread_rng();
@@ -189,5 +180,41 @@ fn bench_sha2(c: &mut Criterion) {
     group.bench_function("sha2", |b| b.iter(|| gen_evm_proof_shplonk(&params, &pk, circuit.clone(), vec![vec![]], &mut OsRng)));
 }
 
-criterion_group!(benches, bench_sha2);
+#[ignore]
+impl_sha2_circuit!(BenchSha2ClientConfig1, BenchSha2ClientCircuit1, 1024, 100, 1, 14, 2, 8, 15);
+#[ignore]
+const AGG_K: u32 = 20;
+#[ignore]
+fn bench_sha2_recursion(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sha2 1024 bytes");
+    group.sample_size(10);
+    set_var(VERIFY_CONFIG_KEY, "configs/agg_for_partial_bench.config");
+    let email_bytes = {
+        let mut f = File::open("./test_data/test_email2.eml").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+        buf
+    };
+    let (input, _, _) = canonicalize_signed_email(&email_bytes).unwrap();
+    let circuit = BenchSha2ClientCircuit1::<Fr> { input, _f: PhantomData };
+    let rng = thread_rng();
+    let agg_params = ParamsKZG::<Bn256>::setup(AGG_K, rng);
+    let mut app_params = agg_params.clone();
+    app_params.downsize(BenchSha2ClientCircuit1::<Fr>::K);
+    let app_pk = gen_pk::<BenchSha2ClientCircuit1<Fr>>(&app_params, &circuit, None);
+    println!("app pk generated");
+    let snark = gen_snark_shplonk(&app_params, &app_pk, circuit, &mut OsRng, None::<&str>);
+    let agg_circuit = PublicAggregationCircuit::new(&agg_params, vec![snark], false, &mut OsRng);
+    let agg_pk = gen_pk::<PublicAggregationCircuit>(&agg_params, &agg_circuit, None);
+    let agg_vk = agg_pk.get_vk();
+    let verifier_yul = gen_evm_verifier_shplonk::<PublicAggregationCircuit>(&agg_params, &agg_vk, agg_circuit.num_instance(), None);
+    let instances = agg_circuit.instances();
+    let proof = gen_evm_proof_shplonk(&agg_params, &agg_pk, agg_circuit.clone(), instances.clone(), &mut OsRng);
+    evm_verify(verifier_yul, true, instances.clone(), proof);
+    group.bench_function("sha2", |b| {
+        b.iter(|| gen_evm_proof_shplonk(&agg_params, &agg_pk, agg_circuit.clone(), instances.clone(), &mut OsRng))
+    });
+}
+
+criterion_group!(benches, bench_sha2,);
 criterion_main!(benches);

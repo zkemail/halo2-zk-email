@@ -1,3 +1,4 @@
+use ark_std::{end_timer, start_timer};
 use cfdkim::canonicalize_signed_email;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use halo2_base::halo2_proofs::halo2curves::bn256::Bn256;
@@ -76,6 +77,7 @@ macro_rules! impl_regex_circuit {
             }
 
             fn synthesize(&self, mut config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
+                let witness_time = start_timer!(|| format!("Witness calculation"));
                 config.inner.load(&mut layouter)?;
                 let mut first_pass = SKIP_FIRST_PASS;
                 let gate = config.inner.gate().clone();
@@ -103,6 +105,7 @@ macro_rules! impl_regex_circuit {
                         Ok(())
                     },
                 )?;
+                end_timer!(witness_time);
                 // for (idx, cell) in hash_bytes_cell.into_iter().enumerate() {
                 //     layouter.constrain_instance(cell, config.hash_instance, idx)?;
                 // }
@@ -144,7 +147,7 @@ impl_regex_circuit!(
         substrs: vec![SubstrRegexDef::read_from_text("./test_data/bodyhash_substr_0.txt")],
     },],
     1024,
-    4,
+    3,
     16
 );
 
@@ -156,7 +159,7 @@ impl_regex_circuit!(
         substrs: vec![SubstrRegexDef::read_from_text("./test_data/from_substr_0.txt")],
     },],
     1024,
-    4,
+    3,
     16
 );
 
@@ -172,7 +175,7 @@ impl_regex_circuit!(
         ],
     },],
     1024,
-    4,
+    3,
     16
 );
 
