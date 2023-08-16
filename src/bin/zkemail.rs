@@ -269,7 +269,7 @@ async fn main() {
             vk_path,
         } => {
             set_var(EMAIL_VERIFY_CONFIG_ENV, &circuit_config_path);
-            let (circuit, _, _, _, _) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
+            let (circuit, _, _, _) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
             gen_app_key::<DefaultEmailVerifyCircuit<Fr>>(&params_path, &circuit_config_path, &pk_path, &vk_path, circuit).unwrap()
         }
         Commands::GenAggKey {
@@ -284,7 +284,7 @@ async fn main() {
         } => {
             set_var(EMAIL_VERIFY_CONFIG_ENV, &app_circuit_config_path);
             set_var(VERIFY_CONFIG_KEY, &agg_circuit_config_path);
-            let (circuit, _, _, _, _) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
+            let (circuit, _, _, _) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
             gen_agg_key::<DefaultEmailVerifyCircuit<Fr>>(
                 &app_params_path,
                 &agg_params_path,
@@ -306,7 +306,8 @@ async fn main() {
             public_input_path,
         } => {
             set_var(EMAIL_VERIFY_CONFIG_ENV, &circuit_config_path);
-            let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
+            let (circuit, headerhash, header_substrs, body_substrs) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
+            let public_key_n = circuit.public_key_n.clone();
             prove_app::<DefaultEmailVerifyCircuit<Fr>>(&params_path, &circuit_config_path, &pk_path, &proof_path, circuit).unwrap();
             let public_input = DefaultEmailVerifyPublicInput::new(headerhash, public_key_n, header_substrs, body_substrs);
             public_input.write_file(&public_input_path);
@@ -320,7 +321,8 @@ async fn main() {
             public_input_path,
         } => {
             set_var(EMAIL_VERIFY_CONFIG_ENV, &circuit_config_path);
-            let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
+            let (circuit, headerhash, header_substrs, body_substrs) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
+            let public_key_n = circuit.public_key_n.clone();
             evm_prove_app::<DefaultEmailVerifyCircuit<Fr>>(&params_path, &circuit_config_path, &pk_path, &proof_path, circuit).unwrap();
             let public_input = DefaultEmailVerifyPublicInput::new(headerhash, public_key_n, header_substrs, body_substrs);
             public_input.write_file(&public_input_path);
@@ -339,7 +341,8 @@ async fn main() {
         } => {
             set_var(EMAIL_VERIFY_CONFIG_ENV, &app_circuit_config_path);
             set_var(VERIFY_CONFIG_KEY, &agg_circuit_config_path);
-            let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
+            let (circuit, headerhash, header_substrs, body_substrs) = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
+            let public_key_n = circuit.public_key_n.clone();
             evm_prove_agg::<DefaultEmailVerifyCircuit<Fr>>(
                 &app_params_path,
                 &agg_params_path,

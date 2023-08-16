@@ -125,24 +125,14 @@ fn main() {
         .build()
         .unwrap();
     let signature = signer.sign(&email).unwrap();
-    let new_msg = vec![signature.as_bytes(), b"\r\n", message].concat();
-    println!("dummy email:\n{}", String::from_utf8(new_msg.clone()).unwrap());
-    let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&new_msg).unwrap();
+    let email_bytes = vec![signature.as_bytes(), b"\r\n", message].concat();
+    let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
     let header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
     println!("canonicalized header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
     let body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
     println!("canonicalized body:\n{}", body_str);
-    let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-    let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
-    let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big.clone())), e);
-    let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-    let circuit = DefaultEmailVerifyCircuit {
-        header_bytes: canonicalized_header.clone(),
-        body_bytes: canonicalized_body.clone(),
-        public_key,
-        signature,
-    };
-
+    let public_key_n = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
+    let circuit = DefaultEmailVerifyCircuit::new(email_bytes, public_key_n);
     // 3. Assert the circuit.
     let instances = circuit.instances();
     let prover = MockProver::run(config_params.degree, &circuit, instances).unwrap();
@@ -153,7 +143,7 @@ fn main() {
     let body_config = config_params.body_config.expect("body_config is required");
     let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, header_config.substr_regexes, body_config.substr_regexes);
     let headerhash = Sha256::digest(&canonicalized_header).to_vec();
-    let public_input = DefaultEmailVerifyPublicInput::new(headerhash.clone(), n_big, header_substrs, body_substrs);
+    let public_input = DefaultEmailVerifyPublicInput::new(headerhash.clone(), circuit.public_key_n.clone(), header_substrs, body_substrs);
     let public_input_path = "./examples/public_input.json";
     public_input.write_file(&public_input_path);
     let params_path = "./examples/test.params";

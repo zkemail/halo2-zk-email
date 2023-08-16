@@ -795,9 +795,6 @@ mod test {
                 }
             }
         };
-        let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-        let public_key = RSAPublicKey::<Fr>::new(Value::known(public_key_n.clone()), e);
-        let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
         let header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
         let body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
         let circuit_config_path = "./configs/app_bench.config";
@@ -806,12 +803,7 @@ mod test {
             let header_config = config_params.header_config.expect("header_config is required");
             let body_config = config_params.body_config.expect("body_config is required");
             let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, header_config.substr_regexes, body_config.substr_regexes);
-            let circuit = DefaultEmailVerifyCircuit {
-                header_bytes: canonicalized_header.clone(),
-                body_bytes: canonicalized_body.clone(),
-                public_key: public_key.clone(),
-                signature: signature.clone(),
-            };
+            let circuit = DefaultEmailVerifyCircuit::new(email_bytes.clone(), public_key_n.clone());
             let public_input = DefaultEmailVerifyPublicInput::new(headerhash.clone(), public_key_n.clone(), header_substrs, body_substrs);
             let public_input_path = "./build/public_input.json";
             public_input.write_file(&public_input_path);
@@ -859,9 +851,6 @@ mod test {
                 }
             }
         };
-        let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-        let public_key = RSAPublicKey::<Fr>::new(Value::known(public_key_n.clone()), e);
-        let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
         let header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
         let body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
         let app_config_path = "./configs/app_recursion_bench.config";
@@ -870,12 +859,7 @@ mod test {
             let header_config = app_config_params.header_config.expect("header_config is required");
             let body_config = app_config_params.body_config.expect("body_config is required");
             let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, header_config.substr_regexes, body_config.substr_regexes);
-            let circuit = DefaultEmailVerifyCircuit {
-                header_bytes: canonicalized_header.clone(),
-                body_bytes: canonicalized_body.clone(),
-                public_key: public_key.clone(),
-                signature: signature.clone(),
-            };
+            let circuit = DefaultEmailVerifyCircuit::new(email_bytes.clone(), public_key_n.clone());
             let public_input = DefaultEmailVerifyPublicInput::new(headerhash.clone(), public_key_n.clone(), header_substrs, body_substrs);
             let public_input_path = "./build/public_input.json";
             public_input.write_file(&public_input_path);

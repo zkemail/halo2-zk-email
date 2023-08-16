@@ -30,6 +30,7 @@ pub mod sign_verify;
 /// Util functions.
 pub mod utils;
 use std::fs::File;
+use std::marker::PhantomData;
 
 pub use crate::helpers::*;
 use crate::regex_sha2::RegexSha2Config;
@@ -220,14 +221,16 @@ pub struct DefaultEmailVerifyConfig<F: PrimeField> {
 /// Default email verification circuit.
 #[derive(Debug, Clone)]
 pub struct DefaultEmailVerifyCircuit<F: PrimeField> {
-    /// Email header bytes.
-    pub header_bytes: Vec<u8>,
-    /// Email body bytes.
-    pub body_bytes: Vec<u8>,
+    // /// Email header bytes.
+    // pub header_bytes: Vec<u8>,
+    // /// Email body bytes.
+    // pub body_bytes: Vec<u8>,
+    pub email_bytes: Vec<u8>,
     /// RSA public key.
-    pub public_key: RSAPublicKey<F>,
-    /// RSA digital signature.
-    pub signature: RSASignature<F>,
+    pub public_key_n: BigUint, // pub public_key: RSAPublicKey<F>,
+    // / RSA digital signature.
+    // pub signature: RSASignature<F>,
+    _f: PhantomData<F>,
 }
 
 impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
@@ -236,10 +239,9 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
 
     fn without_witnesses(&self) -> Self {
         Self {
-            header_bytes: vec![],
-            body_bytes: vec![],
-            public_key: self.public_key.clone(),
-            signature: self.signature.clone(),
+            email_bytes: vec![],
+            public_key_n: self.public_key_n.clone(),
+            _f: PhantomData,
         }
     }
 
@@ -340,8 +342,12 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
         let mut public_hash_cell = vec![];
         let params = Self::read_config_params();
         if let Some(sign_config) = params.sign_verify_config.as_ref() {
-            self.public_key.n.as_ref().map(|v| assert_eq!(v.bits() as usize, sign_config.public_key_bits));
+            assert_eq!(self.public_key_n.bits() as usize, sign_config.public_key_bits);
         }
+        let (header_bytes, body_bytes, signature_bytes) = canonicalize_signed_email(&self.email_bytes).unwrap();
+        println!("canonicalized_header:\n{}", String::from_utf8(header_bytes.clone()).unwrap());
+        println!("canonicalized_body:\n{}", String::from_utf8(body_bytes.clone()).unwrap());
+
         layouter.assign_region(
             || "zkemail",
             |region| {
@@ -355,22 +361,23 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                 let body_params = params.body_config.expect("body_config is required");
 
                 // 1. Extract sub strings in the body and compute the base64 encoded hash of the body.
-                let body_result = config.body_config.match_hash_and_base64(ctx, &mut config.sha256_config, &self.body_bytes)?;
+                let body_result = config.body_config.match_hash_and_base64(ctx, &mut config.sha256_config, &body_bytes)?;
 
                 // 2. Extract sub strings in the header, which includes the body hash, and compute the raw hash of the header.
-                let header_result = config.header_config.match_and_hash(ctx, &mut config.sha256_config, &self.header_bytes)?;
+                let header_result = config.header_config.match_and_hash(ctx, &mut config.sha256_config, &header_bytes)?;
 
                 // 3. Verify the rsa signature.
-                let (assigned_public_key, _) = config
-                    .sign_verify_config
-                    .verify_signature(ctx, &header_result.hash_bytes, self.public_key.clone(), self.signature.clone())?;
+                let e = RSAPubE::Fix(BigUint::from(Self::DEFAULT_E));
+                let public_key = RSAPublicKey::<F>::new(Value::known(self.public_key_n.clone()), e);
+                let signature = RSASignature::<F>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
+                let (assigned_public_key, _) = config.sign_verify_config.verify_signature(ctx, &header_result.hash_bytes, public_key, signature.clone())?;
 
-                let header_str = String::from_utf8(self.header_bytes[header_params.skip_prefix_bytes_size.unwrap_or(0)..].to_vec()).unwrap();
-                let body_str = String::from_utf8(self.body_bytes[body_params.skip_prefix_bytes_size.unwrap_or(0)..].to_vec()).unwrap();
+                let header_str = String::from_utf8(header_bytes[header_params.skip_prefix_bytes_size.unwrap_or(0)..].to_vec()).unwrap();
+                let body_str = String::from_utf8(body_bytes[body_params.skip_prefix_bytes_size.unwrap_or(0)..].to_vec()).unwrap();
                 let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, header_params.substr_regexes, body_params.substr_regexes);
                 let public_hash_input = get_email_circuit_public_hash_input(
                     &header_result.hash_value,
-                    &value_to_option(self.public_key.n.clone()).unwrap().to_bytes_le(),
+                    &self.public_key_n.to_bytes_le(),
                     header_substrs,
                     body_substrs,
                     header_params.max_variable_byte_size,
@@ -469,20 +476,29 @@ impl<F: PrimeField> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
     }
 
     fn instances(&self) -> Vec<Vec<F>> {
-        let headerhash = Sha256::digest(&self.header_bytes).to_vec();
-        let header_str = String::from_utf8(self.header_bytes.clone()).unwrap();
-        let body_str = String::from_utf8(self.body_bytes.clone()).unwrap();
+        let (header_bytes, body_bytes, signature_bytes) = canonicalize_signed_email(&self.email_bytes).unwrap();
+        let headerhash = Sha256::digest(&header_bytes).to_vec();
+        let header_str = String::from_utf8(header_bytes).unwrap();
+        let body_str = String::from_utf8(body_bytes).unwrap();
         let params = Self::read_config_params();
         let header_params = params.header_config.expect("header_config is required");
         let body_params = params.body_config.expect("body_config is required");
         let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, header_params.substr_regexes, body_params.substr_regexes);
-        let public_input = DefaultEmailVerifyPublicInput::new(headerhash, value_to_option(self.public_key.n.clone()).unwrap(), header_substrs, body_substrs);
+        let public_input = DefaultEmailVerifyPublicInput::new(headerhash, self.public_key_n.clone(), header_substrs, body_substrs);
         vec![Self::_get_instances_from_default_public_input(public_input)]
     }
 }
 
 impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
     pub const DEFAULT_E: u128 = 65537;
+
+    pub fn new(email_bytes: Vec<u8>, public_key_n: BigUint) -> Self {
+        Self {
+            email_bytes,
+            public_key_n,
+            _f: PhantomData,
+        }
+    }
 
     /// Read [`DefaultEmailVerifyConfigParams`] from a json file at the file path of [`EMAIL_VERIFY_CONFIG_ENV`].
     pub fn read_config_params() -> DefaultEmailVerifyConfigParams {
@@ -495,8 +511,8 @@ impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
     /// * `email_path` - a file path of the email file.
     ///
     /// # Return values
-    /// Return a new [`DefaultEmailVerifyCircuit`], the SHA256 hash bytes of the email header, the `n` parameter of the RSA public key, a vector of (`start_position`, `substr`) in the email header, and a vector of (`start_position`, `substr`) in the email body.
-    pub async fn gen_circuit_from_email_path(email_path: &str) -> (Self, Vec<u8>, BigUint, Vec<Option<(usize, String)>>, Vec<Option<(usize, String)>>) {
+    /// Return a new [`DefaultEmailVerifyCircuit`], the SHA256 hash bytes of the email header, a vector of (`start_position`, `substr`) in the email header, and a vector of (`start_position`, `substr`) in the email body.
+    pub async fn gen_circuit_from_email_path(email_path: &str) -> (Self, Vec<u8>, Vec<Option<(usize, String)>>, Vec<Option<(usize, String)>>) {
         let email_bytes = {
             let mut f = File::open(email_path).unwrap();
             let mut buf = Vec::new();
@@ -515,9 +531,6 @@ impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
                 }
             }
         };
-        let e = RSAPubE::Fix(BigUint::from(Self::DEFAULT_E));
-        let public_key = RSAPublicKey::<F>::new(Value::known(public_key_n.clone()), e);
-        let signature = RSASignature::<F>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
         let header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
         let body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
         let config_params = Self::read_config_params();
@@ -525,12 +538,11 @@ impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
         let body_config = config_params.body_config.expect("body_config is required");
         let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, header_config.substr_regexes, body_config.substr_regexes);
         let circuit = Self {
-            header_bytes: canonicalized_header,
-            body_bytes: canonicalized_body,
-            public_key,
-            signature,
+            email_bytes,
+            public_key_n,
+            _f: PhantomData,
         };
-        (circuit, headerhash, public_key_n, header_substrs, body_substrs)
+        (circuit, headerhash, header_substrs, body_substrs)
     }
 
     /// Retrieve instance values from the given [`DefaultEmailVerifyPublicInput`] json file.
@@ -649,23 +661,10 @@ mod test {
                 .build()
                 .unwrap();
             let signature = signer.sign(&email).unwrap();
-            let new_msg = vec![signature.as_bytes(), b"\r\n", message].concat();
-            println!("email: {}", String::from_utf8(new_msg.clone()).unwrap());
-            let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&new_msg).unwrap();
-
-            println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
-            println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
-
-            let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-            let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
-            let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
-            let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-            let circuit = DefaultEmailVerifyCircuit {
-                header_bytes: canonicalized_header,
-                body_bytes: canonicalized_body,
-                public_key,
-                signature,
-            };
+            let email_bytes = vec![signature.as_bytes(), b"\r\n", message].concat();
+            println!("email: {}", String::from_utf8(email_bytes.clone()).unwrap());
+            let public_key_n = BigUint::from_bytes_be(&public_key.n().clone().to_bytes_be());
+            let circuit = DefaultEmailVerifyCircuit::<Fr>::new(email_bytes, public_key_n);
             let instances = circuit.instances();
             let prover = MockProver::run(params.degree, &circuit, instances).unwrap();
             assert_eq!(prover.verify(), Ok(()));
@@ -734,22 +733,9 @@ mod test {
                 .unwrap();
             let signature = signer.sign(&email).unwrap();
             println!("signature {}", signature);
-            let new_msg = vec![signature.as_bytes(), b"\r\n", message].concat();
-            let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&new_msg).unwrap();
-
-            println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
-            println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
-
-            let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-            let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
-            let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
-            let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-            let circuit = DefaultEmailVerifyCircuit {
-                header_bytes: canonicalized_header,
-                body_bytes: canonicalized_body,
-                public_key,
-                signature,
-            };
+            let email_bytes = vec![signature.as_bytes(), b"\r\n", message].concat();
+            let public_key_n = BigUint::from_bytes_be(&public_key.n().clone().to_bytes_be());
+            let circuit = DefaultEmailVerifyCircuit::<Fr>::new(email_bytes, public_key_n);
 
             let instances = circuit.instances();
             let prover = MockProver::run(params.degree, &circuit, instances).unwrap();
@@ -817,21 +803,13 @@ mod test {
         };
         temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex1_email_verify.config"), move || {
             let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-            let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-            println!("header len\n {}", canonicalized_header.len());
-            println!("body len\n {}", canonicalized_body.len());
-            println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
-            println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
-            let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-            let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
-            let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
-            let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-            let circuit = DefaultEmailVerifyCircuit {
-                header_bytes: canonicalized_header,
-                body_bytes: canonicalized_body,
-                public_key,
-                signature,
-            };
+            // let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
+            // println!("header len\n {}", canonicalized_header.len());
+            // println!("body len\n {}", canonicalized_body.len());
+            // println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
+            // println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
+            let public_key_n = BigUint::from_bytes_be(&public_key.n().clone().to_bytes_be());
+            let circuit = DefaultEmailVerifyCircuit::<Fr>::new(email_bytes.clone(), public_key_n);
 
             let instances = circuit.instances();
             let prover = MockProver::run(params.degree, &circuit, instances).unwrap();
@@ -899,22 +877,14 @@ mod test {
         };
         temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex2_email_verify.config"), move || {
             let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-            let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-            println!("header len\n {}", canonicalized_header.len());
-            println!("body len\n {}", canonicalized_body.len());
+            // let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
+            // println!("header len\n {}", canonicalized_header.len());
+            // println!("body len\n {}", canonicalized_body.len());
             // println!("body\n{:?}", canonicalized_body);
-            println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
-            println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
-            let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-            let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
-            let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
-            let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-            let circuit = DefaultEmailVerifyCircuit {
-                header_bytes: canonicalized_header,
-                body_bytes: canonicalized_body,
-                public_key,
-                signature,
-            };
+            // println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
+            // println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
+            let public_key_n = BigUint::from_bytes_be(&public_key.n().clone().to_bytes_be());
+            let circuit = DefaultEmailVerifyCircuit::<Fr>::new(email_bytes.clone(), public_key_n);
 
             let instances = circuit.instances();
             let prover = MockProver::run(params.degree, &circuit, instances).unwrap();
@@ -961,22 +931,14 @@ mod test {
         };
         temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex3_email_verify.config"), move || {
             let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-            let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-            println!("header len\n {}", canonicalized_header.len());
-            println!("body len\n {}", canonicalized_body.len());
+            // let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
+            // println!("header len\n {}", canonicalized_header.len());
+            // println!("body len\n {}", canonicalized_body.len());
             // println!("body\n{:?}", canonicalized_body);
-            println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
-            println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
-            let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-            let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
-            let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
-            let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-            let circuit = DefaultEmailVerifyCircuit {
-                header_bytes: canonicalized_header,
-                body_bytes: canonicalized_body,
-                public_key,
-                signature,
-            };
+            // println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
+            // println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
+            let public_key_n = BigUint::from_bytes_be(&public_key.n().clone().to_bytes_be());
+            let circuit = DefaultEmailVerifyCircuit::<Fr>::new(email_bytes.clone(), public_key_n);
 
             let instances = circuit.instances();
             let prover = MockProver::run(params.degree, &circuit, instances).unwrap();
@@ -1044,22 +1006,17 @@ mod test {
         };
         temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex1_email_verify.config"), move || {
             let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-            let (canonicalized_header, canonicalized_body, mut signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-            println!("header len\n {}", canonicalized_header.len());
-            println!("body len\n {}", canonicalized_body.len());
-            println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
-            println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
-            let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-            let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
-            let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
-            signature_bytes[0] = 0;
-            let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-            let circuit = DefaultEmailVerifyCircuit {
-                header_bytes: canonicalized_header,
-                body_bytes: canonicalized_body,
-                public_key,
-                signature,
-            };
+            // let (canonicalized_header, canonicalized_body, mut signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
+            // println!("header len\n {}", canonicalized_header.len());
+            // println!("body len\n {}", canonicalized_body.len());
+            // println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
+            // println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
+            let mut public_key_n_bytes = public_key.n().clone().to_bytes_be();
+            for i in 0..256 {
+                public_key_n_bytes[i] = 255;
+            }
+            let public_key_n = BigUint::from_bytes_be(&public_key_n_bytes);
+            let circuit = DefaultEmailVerifyCircuit::<Fr>::new(email_bytes.clone(), public_key_n);
 
             let instances = circuit.instances();
             let prover = MockProver::run(params.degree, &circuit, instances).unwrap();
@@ -1127,21 +1084,13 @@ mod test {
         };
         temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex1_email_verify.config"), move || {
             let params = DefaultEmailVerifyCircuit::<Fr>::read_config_params();
-            let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-            println!("header len\n {}", canonicalized_header.len());
-            println!("body len\n {}", canonicalized_body.len());
-            println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
-            println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
-            let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-            let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
-            let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
-            let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-            let circuit = DefaultEmailVerifyCircuit {
-                header_bytes: canonicalized_header,
-                body_bytes: canonicalized_body,
-                public_key,
-                signature,
-            };
+            // let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
+            // println!("header len\n {}", canonicalized_header.len());
+            // println!("body len\n {}", canonicalized_body.len());
+            // println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
+            // println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
+            let public_key_n = BigUint::from_bytes_be(&public_key.n().clone().to_bytes_be());
+            let circuit = DefaultEmailVerifyCircuit::<Fr>::new(email_bytes.clone(), public_key_n);
 
             let instances = circuit.instances();
             let prover = MockProver::run(params.degree, &circuit, instances).unwrap();
