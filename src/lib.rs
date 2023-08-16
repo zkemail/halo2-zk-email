@@ -19,6 +19,7 @@
 //! The [`RegexSha2Config`], [`RegexSha2Base64Config`], [`SignVerifyConfig`] are used for the email header, email body, and RSA signature, respectively.
 //! If you want to omit some verification in our circuit, you can build your own circuit with these chips.  
 
+pub mod eth;
 #[cfg(not(target_arch = "wasm32"))]
 mod helpers;
 /// Regex verification + SHA256 computation.
