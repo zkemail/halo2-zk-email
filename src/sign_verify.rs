@@ -1,9 +1,12 @@
 use std::marker::PhantomData;
 
-use crate::wtns_commit::{
-    assigned_commit_wtns_bytes,
-    poseidon_circuit::{poseidon_hash_fields, HasherChip, PoseidonChipBn254_8_58},
-    value_commit_wtns_bytes,
+use crate::{
+    config_params::{default_config_params, EmailVerifyConfigParams},
+    wtns_commit::{
+        assigned_commit_wtns_bytes,
+        poseidon_circuit::{poseidon_hash_fields, HasherChip, PoseidonChipBn254_8_58},
+        value_commit_wtns_bytes,
+    },
 };
 use halo2_base::halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
 use halo2_base::halo2_proofs::{
@@ -22,6 +25,8 @@ use itertools::Itertools;
 use num_bigint::BigUint;
 use snark_verifier_sdk::CircuitExt;
 
+pub const LIMB_BITS: usize = 64;
+
 /// Output type definition of [`SignVerifyConfig`].
 #[derive(Debug, Clone)]
 pub struct SignVerifyResult<'a, F: PrimeField> {
@@ -38,7 +43,7 @@ pub struct SignVerifyConfig<F: PrimeField> {
 
 impl<F: PrimeField> SignVerifyConfig<F> {
     pub fn configure(range_config: RangeConfig<F>, public_key_bits: usize) -> Self {
-        let biguint_config = halo2_rsa::BigUintConfig::construct(range_config, Self::LIMB_BITS);
+        let biguint_config = halo2_rsa::BigUintConfig::construct(range_config, LIMB_BITS);
         let rsa_config = RSAConfig::construct(biguint_config, public_key_bits, 5);
         Self { rsa_config }
     }
@@ -98,7 +103,6 @@ impl<F: PrimeField> SignVerifyConfig<F> {
 
 impl<F: PrimeField> SignVerifyConfig<F> {
     pub const DEFAULT_E: u32 = 65537;
-    pub const LIMB_BITS: usize = 64;
 }
 
 /// Configuration parameters for [`SignVerifyConfig`].
@@ -112,7 +116,7 @@ pub struct SignVerifyParams {
 
 #[macro_export]
 macro_rules! impl_sign_verify_circuit {
-    ($circuit_name:ident, $num_flex_advice:expr, $num_range_lookup_advice:expr, $range_lookup_bits:expr, $degree:expr, $public_key_bits:expr, $hide_public_key:expr) => {
+    ($circuit_name:ident, $num_flex_advice:expr, $num_flex_fixed:expr, $num_range_lookup_advice:expr, $range_lookup_bits:expr, $degree:expr, $public_key_bits:expr, $hide_public_key:expr) => {
         /// Circuit to verify the rsa signature for the given hash and public key.
         #[derive(Debug, Clone)]
         pub struct $circuit_name<F: PrimeField> {
@@ -122,7 +126,7 @@ macro_rules! impl_sign_verify_circuit {
             pub public_key_n: BigUint,
             /// The signature to be verified.
             pub signature: BigUint,
-            _f: PhantomData<F>,
+            pub tag: F,
         }
 
         #[derive(Debug, Clone)]
@@ -140,7 +144,7 @@ macro_rules! impl_sign_verify_circuit {
                     hash_bytes: vec![0; self.hash_bytes.len()],
                     public_key_n: self.public_key_n.clone(),
                     signature: self.signature.clone(),
-                    _f: PhantomData,
+                    tag: F::zero(),
                 }
             }
 
@@ -151,7 +155,7 @@ macro_rules! impl_sign_verify_circuit {
                     halo2_base::gates::range::RangeStrategy::Vertical,
                     &[$num_flex_advice],
                     &[$num_range_lookup_advice],
-                    $num_flex_advice,
+                    $num_flex_fixed,
                     $range_lookup_bits,
                     0,
                     $degree as usize,
@@ -203,6 +207,8 @@ macro_rules! impl_sign_verify_circuit {
                         range.finalize(ctx);
                         public_hash_cell.push(public_key_n_hash.cell());
                         public_hash_cell.push(hash_commit.cell());
+                        let assigned_tag = gate.load_witness(ctx, Value::known(self.tag));
+                        public_hash_cell.push(assigned_tag.cell());
                         Ok(())
                     },
                 )?;
@@ -215,45 +221,54 @@ macro_rules! impl_sign_verify_circuit {
 
         impl<F: PrimeField> CircuitExt<F> for $circuit_name<F> {
             fn num_instance(&self) -> Vec<usize> {
-                vec![2]
+                vec![3]
             }
 
             fn instances(&self) -> Vec<Vec<F>> {
                 // let config_params = read_default_circuit_config_params();
                 // let sign_verify_params = config_params.sign_verify_config.unwrap();
-                let limb_bits = SignVerifyConfig::<F>::LIMB_BITS;
-                let sign_rand = derive_sign_rand(&self.signature, $public_key_bits, limb_bits);
+                let sign_rand = derive_sign_rand(&self.signature, $public_key_bits);
                 let mut public_key_n_hash_input = vec![];
                 let hide_public_key: bool = $hide_public_key;
                 if hide_public_key {
                     public_key_n_hash_input.push(sign_rand);
                 }
-                let num_limbs = $public_key_bits / limb_bits;
+                let num_limbs = $public_key_bits / LIMB_BITS;
                 let public_key_n_limbs = decompose_biguint(&self.public_key_n, num_limbs, $public_key_bits);
                 public_key_n_hash_input.append(&mut public_key_n_limbs.to_vec());
                 let public_key_n_hash = poseidon_hash_fields(&public_key_n_hash_input);
                 let hash_commit = value_commit_wtns_bytes(&sign_rand, &self.hash_bytes);
-                vec![vec![public_key_n_hash, hash_commit]]
+                vec![vec![public_key_n_hash, hash_commit, self.tag]]
             }
         }
 
         impl<F: PrimeField> $circuit_name<F> {
-            pub fn new(hash_bytes: Vec<u8>, public_key_n: BigUint, signature: BigUint) -> Self {
+            pub fn new(hash_bytes: Vec<u8>, public_key_n: BigUint, signature: BigUint, tag: F) -> Self {
                 Self {
                     hash_bytes,
                     public_key_n,
                     signature,
-                    _f: PhantomData,
+                    tag,
                 }
             }
         }
     };
 }
 
-pub fn derive_sign_rand<F: PrimeField>(signature: &BigUint, public_key_bits: usize, limb_size: usize) -> F {
-    let num_limbs = public_key_bits / limb_size;
+pub fn derive_sign_rand<F: PrimeField>(signature: &BigUint, public_key_bits: usize) -> F {
+    let num_limbs = public_key_bits / LIMB_BITS;
     let limbs = decompose_biguint(signature, num_limbs, public_key_bits);
     poseidon_hash_fields(&limbs)
 }
 
-impl_sign_verify_circuit!(DummySignVerifyCircuit, 1, 1, 8, 5, 2048, false);
+// impl_sign_verify_circuit!(DummySignVerifyCircuit, 1, 1, 1, 8, 5, 2048, false);
+impl_sign_verify_circuit!(
+    SignVerifyCircuit,
+    default_config_params().num_flex_advice,
+    default_config_params().num_flex_fixed,
+    default_config_params().num_range_lookup_advice,
+    default_config_params().range_lookup_bits,
+    default_config_params().degree as usize,
+    default_config_params().sign_verify_config.as_ref().unwrap().public_key_bits,
+    default_config_params().sign_verify_config.as_ref().unwrap().hide_public_key.unwrap_or(false)
+);

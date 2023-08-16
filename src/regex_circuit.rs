@@ -4,6 +4,7 @@ use crate::wtns_commit::{
     value_commit_wtns_bytes,
 };
 use crate::*;
+use fancy_regex::Regex;
 use halo2_base::halo2_proofs::plonk::ConstraintSystem;
 use halo2_base::halo2_proofs::{
     circuit::{Cell, Layouter, SimpleFloorPlanner},
@@ -22,7 +23,7 @@ use halo2_regex::{
 use snark_verifier_sdk::CircuitExt;
 
 #[derive(Debug, Clone)]
-struct RegexInstanceConfig<F: PrimeField> {
+pub struct RegexInstanceConfig<F: PrimeField> {
     inner: RegexVerifyConfig<F>,
     instance: Column<Instance>,
 }
@@ -31,7 +32,7 @@ struct RegexInstanceConfig<F: PrimeField> {
 macro_rules! impl_regex_circuit {
     ($circuit_name:ident, $max_chars_size:expr, $num_flex_advice:expr, $num_flex_fixed:expr, $degree:expr) => {
         #[derive(Debug, Clone)]
-        struct $circuit_name<F: PrimeField> {
+        pub struct $circuit_name<F: PrimeField> {
             input: Vec<u8>,
             regex_def: RegexDefs,
             substr_regexes: Vec<Vec<String>>,
@@ -114,18 +115,7 @@ macro_rules! impl_regex_circuit {
             }
 
             fn instances(&self) -> Vec<Vec<F>> {
-                let input_str = String::from_utf8(self.input.clone()).unwrap();
-                let substrs = self.substr_regexes.iter().map(|regexes| get_substr(&input_str, regexes)).collect_vec();
-                let mut expected_masked_chars = vec![0u8; $max_chars_size];
-                let mut expected_substr_ids = vec![0u8; $max_chars_size]; // We only support up to 256 substring patterns.
-                for (substr_idx, m) in substrs.iter().enumerate() {
-                    if let Some((start, chars)) = m {
-                        for (idx, char) in chars.as_bytes().iter().enumerate() {
-                            expected_masked_chars[start + idx] = *char;
-                            expected_substr_ids[start + idx] = substr_idx as u8 + 1;
-                        }
-                    }
-                }
+                let (expected_masked_chars, expected_substr_ids) = get_expected_substr_chars_and_ids(&self.input, &self.substr_regexes);
                 let padding_size = $max_chars_size - self.input.len();
                 let input_bytes = vec![&self.input[..], &vec![0; padding_size]].concat();
                 let input_commit = value_commit_wtns_bytes(&self.sign_rand, &input_bytes);
@@ -148,5 +138,56 @@ macro_rules! impl_regex_circuit {
     };
 }
 
-// impl_base64_circuit!(DummyBase64Circuit, 1, 1, 1);
-impl_regex_circuit!(DummyRegexCircuit, 1, 1, 1, 1);
+pub fn get_expected_substr_chars_and_ids(input: &[u8], substr_regexes: &[Vec<String>]) -> (Vec<u8>, Vec<u8>) {
+    let input_str = String::from_utf8(input.to_vec()).unwrap();
+    let substrs = substr_regexes.iter().map(|regexes| get_substr(&input_str, regexes)).collect_vec();
+    let mut expected_masked_chars = vec![0u8; input.len()];
+    let mut expected_substr_ids = vec![0u8; input.len()]; // We only support up to 256 substring patterns.
+    for (substr_idx, m) in substrs.iter().enumerate() {
+        if let Some((start, chars)) = m {
+            for (idx, char) in chars.as_bytes().iter().enumerate() {
+                expected_masked_chars[start + idx] = *char;
+                expected_substr_ids[start + idx] = substr_idx as u8 + 1;
+            }
+        }
+    }
+    (expected_masked_chars, expected_substr_ids)
+}
+
+pub fn get_substr(input_str: &str, regexes: &[String]) -> Option<(usize, String)> {
+    let regexes = regexes.into_iter().map(|raw| Regex::new(&raw).unwrap()).collect_vec();
+    let mut start = 0;
+    let mut substr = input_str;
+    // println!("first regex {}", regexes[0]);
+    for regex in regexes.into_iter() {
+        // println!(r"regex {}", regex);
+        match regex.find(substr).unwrap() {
+            Some(m) => {
+                start += m.start();
+                substr = m.as_str();
+            }
+            None => {
+                return None;
+            }
+        };
+    }
+    // println!("substr {}", substr);
+    // println!("start {}", start);
+    Some((start, substr.to_string()))
+}
+
+// impl_regex_circuit!(DummyRegexCircuit, 1, 1, 1, 1);
+impl_regex_circuit!(
+    RegexHeaderCircuit,
+    default_config_params().header_config.as_ref().unwrap().max_variable_byte_size,
+    default_config_params().num_flex_advice,
+    default_config_params().num_flex_fixed,
+    default_config_params().degree as usize
+);
+impl_regex_circuit!(
+    RegexBodyCircuit,
+    default_config_params().body_config.as_ref().unwrap().max_variable_byte_size,
+    default_config_params().num_flex_advice,
+    default_config_params().num_flex_fixed,
+    default_config_params().degree as usize
+);

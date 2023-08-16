@@ -22,6 +22,8 @@
 pub mod base64_circuit;
 // #[cfg(not(target_arch = "wasm32"))]
 // mod helpers;
+pub mod chars_shift;
+pub mod config_params;
 pub mod regex_circuit;
 pub mod sha2_circuit;
 /// Regex verification + SHA256 computation.
@@ -31,17 +33,23 @@ pub mod sha2_circuit;
 /// RSA signature verification.
 pub mod sign_verify;
 /// Util functions.
-pub mod utils;
+// pub mod utils;
 pub mod wtns_commit;
 use std::fs::File;
 
 // pub use crate::helpers::*;
 // use crate::regex_sha2::RegexSha2Config;
 use crate::sign_verify::*;
-use crate::utils::*;
+// use crate::utils::*;
+use crate::wtns_commit::poseidon_circuit::*;
+use crate::wtns_commit::*;
+use base64::{engine::general_purpose, Engine as _};
 use cfdkim::canonicalize_signed_email;
 use cfdkim::resolve_public_key;
+use config_params::default_config_params;
+use config_params::EmailVerifyConfigParams;
 use halo2_base::halo2_proofs::circuit::{SimpleFloorPlanner, Value};
+use halo2_base::halo2_proofs::dev::MockProver;
 use halo2_base::halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
 use halo2_base::utils::{decompose_fe_to_u64_limbs, value_to_option};
@@ -50,6 +58,7 @@ use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
 use halo2_base::{
     gates::{flex_gate::FlexGateConfig, range::RangeConfig, GateInstructions, RangeInstructions},
     utils::PrimeField,
+    Context, ContextParams,
 };
 /// Re-export [halo2_base64](https://github.com/zkemail/halo2-base64).
 pub use halo2_base64;
@@ -65,83 +74,129 @@ pub use halo2_rsa;
 use halo2_rsa::*;
 use itertools::Itertools;
 use num_bigint::BigUint;
+use std::marker::PhantomData;
 // use regex_sha2_base64::RegexSha2Base64Config;
+use base64_circuit::*;
+use halo2_base64::Base64Config;
+use regex_circuit::*;
 use rsa::PublicKeyParts;
 use sha2::{Digest, Sha256};
+use sha2_circuit::*;
 use snark_verifier::loader::LoadedScalar;
 use snark_verifier_sdk::CircuitExt;
 use std::io::{Read, Write};
 
-/// The name of env variable for the path to the email configuration json.
-pub const EMAIL_VERIFY_CONFIG_ENV: &'static str = "EMAIL_VERIFY_CONFIG";
-
-/// Configuration parameters for [`Sha256DynamicConfig`]
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct Sha256ConfigParams {
-    /// The bits of lookup table. It must be a divisor of 16, i.e., 1, 2, 4, 8, and 16.
-    pub num_bits_lookup: usize,
-    /// The number of advice columns used to assign values in [`Sha256DynamicConfig`].
-    /// Specifying a larger number of columns increases the verification cost and decreases the proving cost.
-    pub num_advice_columns: usize,
+#[derive(Debug, Clone)]
+pub struct WtnsCommitments<F: PrimeField> {
+    header_bytes: F,
+    header_hash: F,
+    public_key_n_hash: F,
+    header_masked_substr: Vec<F>,
+    header_substr_ids: Vec<F>,
 }
 
-/// Configuration parameters for [`RegexSha2Config`].
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct HeaderConfigParams {
-    pub bodyhash_allstr_filepath: String,
-    pub bodyhash_substr_filepath: String,
-    pub allstr_filepathes: Vec<String>,
-    pub substr_filepathes: Vec<Vec<String>>,
-    pub max_variable_byte_size: usize,
-    pub substr_regexes: Vec<Vec<String>>,
-    /// The bytes of the skipped email header that do not satisfy the regexes.
-    /// It must be multiple of 64 and less than `max_variable_byte_size`.
-    pub skip_prefix_bytes_size: Option<usize>,
-}
-
-/// Configuration parameters for [`RegexSha2Base64Config`].
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct BodyConfigParams {
-    pub allstr_filepathes: Vec<String>,
-    pub substr_filepathes: Vec<Vec<String>>,
-    pub max_variable_byte_size: usize,
-    pub substr_regexes: Vec<Vec<String>>,
-    /// The bytes of the skipped email body that do not satisfy the regexes.
-    /// It must be multiple of 64 and less than `max_variable_byte_size`.
-    pub skip_prefix_bytes_size: Option<usize>,
-}
-
-// /// Configuration parameters for [`SignVerifyConfig`].
-// #[derive(serde::Serialize, serde::Deserialize)]
-// pub struct SignVerifyConfigParams {
-//     /// The bits of RSA public key.
-//     pub public_key_bits: usize,
+// #[derive(Debug, Clone)]
+// pub struct ExposedSubstrCircuits<F: PrimeField> {
+//     pub chars_shift: CharsShift,
+//     pub sha2: Sha256Circuit<F>,
 // }
 
-/// Configuration parameters for [`DefaultEmailVerifyCircuit`].
-///
-/// Although the types of some parameters are defined as [`Option`], you will get an error if they are omitted for [`DefaultEmailVerifyCircuit`].
-/// You can build a circuit that accepts the same format configuration file except that some parameters are omitted.
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct DefaultEmailVerifyConfigParams {
-    /// The degree of the number of rows, i.e., 2^(`degree`) rows are set.
-    pub degree: u32,
-    /// The number of advice columns in [`FlexGateConfig`].
-    pub num_flex_advice: usize,
-    /// The number of advice columns for lookup constraints in [`RangeConfig`].
-    pub num_range_lookup_advice: usize,
-    /// The number of fix columns in [`FlexGateConfig`].
-    pub num_flex_fixed: usize,
-    /// The bits of lookup table in [`RangeConfig`], which must be less than `degree`.
-    pub range_lookup_bits: usize,
-    /// Configuration parameters for [`Sha256DynamicConfig`].
-    pub sha256_config: Option<Sha256ConfigParams>,
-    /// Configuration parameters for [`SignVerifyConfig`].
-    pub sign_verify_config: Option<SignVerifyParams>,
-    /// Configuration parameters for [`RegexSha2Config`].
-    pub header_config: Option<HeaderConfigParams>,
-    /// Configuration parameters for [`RegexSha2Base64Config`].
-    pub body_config: Option<BodyConfigParams>,
+#[derive(Debug, Clone)]
+pub struct EmailVerifyCircuits<F: PrimeField> {
+    pub sha2_header: Sha256HeaderCircuit<F>,
+    pub sign_verify: SignVerifyCircuit<F>,
+    pub regex_headers: Vec<RegexHeaderCircuit<F>>,
+    pub sha2_header_masked_substrs: Option<Sha256HeaderMaskedSubstrsCircuit<F>>,
+    pub sha2_header_substr_ids: Option<Sha256HeaderSubstrIdsCircuit<F>>,
+    pub sha2_body: Option<Sha256BodyCircuit<F>>,
+    pub base64: Option<Base64Circuit<F>>,
+    pub regex_bodies: Option<Vec<RegexBodyCircuit<F>>>,
+    pub sha2_body_masked_substrs: Option<Sha256BodyMaskedSubstrsCircuit<F>>,
+    pub sha2_body_substr_ids: Option<Sha256BodySubstrIdsCircuit<F>>,
+    pub sign_rand: F,
+    pub tag: F,
+}
+
+impl<F: PrimeField> EmailVerifyCircuits<F> {
+    pub fn new(email_bytes: &[u8], public_key_n: BigUint, tag: F) -> Self {
+        let config_params = default_config_params();
+        let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).expect("fail to parse the given email bytes");
+        let signature = BigUint::from_bytes_be(&signature_bytes);
+        let sign_rand = derive_sign_rand(&signature, config_params.sign_verify_config.as_ref().unwrap().public_key_bits);
+        let sha2_header = Sha256HeaderCircuit::new(canonicalized_header.clone(), sign_rand);
+        let headerhash = Sha256::digest(&canonicalized_header).to_vec();
+        let sign_verify = SignVerifyCircuit::new(headerhash, public_key_n, signature, tag);
+        let header_config = config_params.header_config.as_ref().unwrap();
+        let regex_headers = header_config
+            .allstr_filepathes
+            .iter()
+            .zip(header_config.substr_filepathes.iter())
+            .zip(header_config.substr_regexes.iter())
+            .map(|((allstr_path, substr_pathes), substr_regexes)| {
+                let allstr = AllstrRegexDef::read_from_text(&allstr_path);
+                let substrs = substr_pathes.into_iter().map(|path| SubstrRegexDef::read_from_text(&path)).collect_vec();
+                let regex_def = RegexDefs { allstr, substrs };
+                RegexHeaderCircuit::new(canonicalized_header.clone(), regex_def, vec![substr_regexes.clone()], sign_rand)
+            })
+            .collect_vec();
+        let (sha2_header_masked_substrs, sha2_header_substr_ids) = if header_config.expose_substrs.unwrap_or(false) {
+            let (expected_masked_chars, expected_substr_ids) = get_expected_substr_chars_and_ids(&canonicalized_header, &header_config.substr_regexes);
+            let sha2_header_masked_substrs = Sha256HeaderMaskedSubstrsCircuit::new(expected_masked_chars, sign_rand);
+            let sha2_header_substr_ids = Sha256HeaderSubstrIdsCircuit::new(expected_substr_ids, sign_rand);
+            (Some(sha2_header_masked_substrs), Some(sha2_header_substr_ids))
+        } else {
+            (None, None)
+        };
+        let (sha2_body, base64, regex_bodies, sha2_body_masked_substrs, sha2_body_substr_ids) = if let Some(body_config) = config_params.body_config.as_ref() {
+            let (expected_masked_chars, expected_substr_ids) = get_expected_substr_chars_and_ids(&canonicalized_body, &body_config.substr_regexes);
+            let sha2_body = Sha256BodyCircuit::new(canonicalized_body.clone(), sign_rand);
+            let base64 = Base64Circuit::new(canonicalized_body.clone(), sign_rand);
+            let regex_bodies = body_config
+                .allstr_filepathes
+                .iter()
+                .zip(body_config.substr_filepathes.iter())
+                .zip(body_config.substr_regexes.iter())
+                .map(|((allstr_path, substr_pathes), substr_regexes)| {
+                    let allstr = AllstrRegexDef::read_from_text(&allstr_path);
+                    let substrs = substr_pathes.into_iter().map(|path| SubstrRegexDef::read_from_text(&path)).collect_vec();
+                    let regex_def = RegexDefs { allstr, substrs };
+                    RegexBodyCircuit::new(canonicalized_body.clone(), regex_def, vec![substr_regexes.clone()], sign_rand)
+                })
+                .collect_vec();
+            let (sha2_body_masked_substrs, sha2_body_substr_ids) = if body_config.expose_substrs.unwrap_or(false) {
+                let sha2_body_masked_substrs = Sha256BodyMaskedSubstrsCircuit::new(expected_masked_chars, sign_rand);
+                let sha2_body_substr_ids = Sha256BodySubstrIdsCircuit::new(expected_substr_ids, sign_rand);
+                (Some(sha2_body_masked_substrs), Some(sha2_body_substr_ids))
+            } else {
+                (None, None)
+            };
+            (Some(sha2_body), Some(base64), Some(regex_bodies), sha2_body_masked_substrs, sha2_body_substr_ids)
+        } else {
+            (None, None, None, None, None)
+        };
+        Self {
+            sha2_header,
+            sign_verify,
+            regex_headers,
+            sha2_header_masked_substrs,
+            sha2_header_substr_ids,
+            sha2_body,
+            base64,
+            regex_bodies,
+            sha2_body_masked_substrs,
+            sha2_body_substr_ids,
+            sign_rand,
+            tag,
+        }
+    }
+
+    // pub fn check_constraints(&self) {
+    //     let config_params = default_config_params();
+    //     {
+    //         let prover = MockProver::run(config_params.degree, &self.sha2_header, instances).unwrap();
+    //         assert_eq!(prover.verify(), Ok(()));
+    //     }
+    // }
 }
 
 // /// Public input definition of [`DefaultEmailVerifyCircuit`].

@@ -31,7 +31,7 @@ pub struct Base64InstanceConfig<F: PrimeField> {
 macro_rules! impl_base64_circuit {
     ($circuit_name:ident, $num_flex_advice:expr, $num_flex_fixed:expr, $degree:expr) => {
         #[derive(Debug, Clone)]
-        struct $circuit_name<F: PrimeField> {
+        pub struct $circuit_name<F: PrimeField> {
             input: Vec<u8>,
             sign_rand: F,
         }
@@ -135,4 +135,10 @@ macro_rules! impl_base64_circuit {
     };
 }
 
-impl_base64_circuit!(DummyBase64Circuit, 1, 1, 1);
+// impl_base64_circuit!(DummyBase64Circuit, 1, 1, 1);
+impl_base64_circuit!(
+    Base64Circuit,
+    default_config_params().num_flex_advice,
+    default_config_params().num_flex_fixed,
+    default_config_params().degree as usize
+);

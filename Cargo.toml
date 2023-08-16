@@ -64,6 +64,7 @@ js-sandbox = { version = "0.2.0-rc.1", git = "https://github.com/Bromeon/js-sand
 petgraph = "0.6.3"
 graph-cycles = "0.1.0"
 thiserror = "1.0.40"
+once_cell = "1.18.0"
 
 [dev-dependencies]
 criterion = { version = "0.3" }
@@ -90,10 +91,10 @@ harness = false
 # name = "recursion"
 # harness = false
 
-[[bin]]
-name = "zkemail"
-test = false
-bench = false
+# [[bin]]
+# name = "zkemail"
+# test = false
+# bench = false
 
 # [patch."https://github.com/axiom-crypto/halo2-lib.git"]
 # halo2-base = { version = "0.2.2", default-features = false, features = [

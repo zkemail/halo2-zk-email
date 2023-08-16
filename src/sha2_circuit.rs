@@ -19,7 +19,7 @@ use sha2::{self, Digest, Sha256};
 use snark_verifier_sdk::CircuitExt;
 
 #[derive(Debug, Clone)]
-struct Sha256InstanceConfig<F: PrimeField> {
+pub struct Sha256InstanceConfig<F: PrimeField> {
     inner: Sha256DynamicConfig<F>,
     instance: Column<Instance>,
 }
@@ -28,7 +28,7 @@ struct Sha256InstanceConfig<F: PrimeField> {
 macro_rules! impl_sha2_circuit {
     ($circuit_name:ident, $max_bytes_size:expr, $num_flex_advice:expr, $num_flex_fixed:expr, $num_range_lookup_advice:expr, $range_lookup_bits:expr, $degree:expr, $sha2_num_bits_lookup:expr, $sha2_num_advice_columns:expr, $skip_prefix_bytes_size:expr) => {
         #[derive(Debug, Clone)]
-        struct $circuit_name<F: PrimeField> {
+        pub struct $circuit_name<F: PrimeField> {
             input: Vec<u8>,
             sign_rand: F,
         }
@@ -143,4 +143,76 @@ macro_rules! impl_sha2_circuit {
     };
 }
 
-impl_sha2_circuit!(DummySha256Circuit, 128, 1, 0, 1, 8, 2, 8, 1, 0);
+// impl_sha2_circuit!(DummySha256Circuit, 128, 1, 0, 1, 8, 2, 8, 1, 0);
+impl_sha2_circuit!(
+    Sha256HeaderCircuit,
+    default_config_params().header_config.as_ref().unwrap().max_variable_byte_size,
+    default_config_params().num_flex_advice,
+    default_config_params().num_flex_fixed,
+    default_config_params().num_range_lookup_advice,
+    default_config_params().range_lookup_bits,
+    default_config_params().degree as usize,
+    default_config_params().sha256_config.as_ref().unwrap().num_bits_lookup,
+    default_config_params().sha256_config.as_ref().unwrap().num_advice_columns,
+    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0)
+);
+impl_sha2_circuit!(
+    Sha256BodyCircuit,
+    default_config_params().body_config.as_ref().unwrap().max_variable_byte_size,
+    default_config_params().num_flex_advice,
+    default_config_params().num_flex_fixed,
+    default_config_params().num_range_lookup_advice,
+    default_config_params().range_lookup_bits,
+    default_config_params().degree as usize,
+    default_config_params().sha256_config.as_ref().unwrap().num_bits_lookup,
+    default_config_params().sha256_config.as_ref().unwrap().num_advice_columns,
+    default_config_params().body_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0)
+);
+impl_sha2_circuit!(
+    Sha256HeaderMaskedSubstrsCircuit,
+    default_config_params().header_config.as_ref().unwrap().max_variable_byte_size,
+    default_config_params().num_flex_advice,
+    default_config_params().num_flex_fixed,
+    default_config_params().num_range_lookup_advice,
+    default_config_params().range_lookup_bits,
+    default_config_params().degree as usize,
+    default_config_params().sha256_config.as_ref().unwrap().num_bits_lookup,
+    default_config_params().sha256_config.as_ref().unwrap().num_advice_columns,
+    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0)
+);
+impl_sha2_circuit!(
+    Sha256HeaderSubstrIdsCircuit,
+    default_config_params().header_config.as_ref().unwrap().max_variable_byte_size,
+    default_config_params().num_flex_advice,
+    default_config_params().num_flex_fixed,
+    default_config_params().num_range_lookup_advice,
+    default_config_params().range_lookup_bits,
+    default_config_params().degree as usize,
+    default_config_params().sha256_config.as_ref().unwrap().num_bits_lookup,
+    default_config_params().sha256_config.as_ref().unwrap().num_advice_columns,
+    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0)
+);
+impl_sha2_circuit!(
+    Sha256BodyMaskedSubstrsCircuit,
+    default_config_params().body_config.as_ref().unwrap().max_variable_byte_size,
+    default_config_params().num_flex_advice,
+    default_config_params().num_flex_fixed,
+    default_config_params().num_range_lookup_advice,
+    default_config_params().range_lookup_bits,
+    default_config_params().degree as usize,
+    default_config_params().sha256_config.as_ref().unwrap().num_bits_lookup,
+    default_config_params().sha256_config.as_ref().unwrap().num_advice_columns,
+    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0)
+);
+impl_sha2_circuit!(
+    Sha256BodySubstrIdsCircuit,
+    default_config_params().body_config.as_ref().unwrap().max_variable_byte_size,
+    default_config_params().num_flex_advice,
+    default_config_params().num_flex_fixed,
+    default_config_params().num_range_lookup_advice,
+    default_config_params().range_lookup_bits,
+    default_config_params().degree as usize,
+    default_config_params().sha256_config.as_ref().unwrap().num_bits_lookup,
+    default_config_params().sha256_config.as_ref().unwrap().num_advice_columns,
+    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0)
+);
