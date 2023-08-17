@@ -46,6 +46,7 @@ use crate::wtns_commit::*;
 use base64::{engine::general_purpose, Engine as _};
 use cfdkim::canonicalize_signed_email;
 use cfdkim::resolve_public_key;
+use chars_shift::CharsShiftBodyHashCircuit;
 use config_params::default_config_params;
 use config_params::EmailVerifyConfigParams;
 use halo2_base::halo2_proofs::circuit::{SimpleFloorPlanner, Value};
@@ -86,38 +87,53 @@ use snark_verifier::loader::LoadedScalar;
 use snark_verifier_sdk::CircuitExt;
 use std::io::{Read, Write};
 
+pub const BODYHASH_BYTES: usize = 44;
+
 #[derive(Debug, Clone)]
-pub struct WtnsCommitments<F: PrimeField> {
+pub struct EmailVerifyInstances<F: PrimeField> {
     header_bytes: F,
     header_hash: F,
     public_key_n_hash: F,
-    header_masked_substr: Vec<F>,
-    header_substr_ids: Vec<F>,
+    tag: F,
+    header_masked_substr: F,
+    header_substr_ids: F,
+    header_masked_substr_hash: Option<Vec<F>>,
+    header_substr_ids_hash: Option<Vec<F>>,
+    bodyhash_masked_substr: Option<F>,
+    bodyhash_substr_ids: Option<F>,
+    bodyhash_base64: Option<F>,
+    body_bytes: Option<F>,
+    bodyhash: Option<F>,
+    body_masked_substr: Option<F>,
+    body_substr_ids: Option<F>,
+    body_masked_substr_hash: Option<Vec<F>>,
+    body_substr_ids_hash: Option<Vec<F>>,
 }
-
-// #[derive(Debug, Clone)]
-// pub struct ExposedSubstrCircuits<F: PrimeField> {
-//     pub chars_shift: CharsShift,
-//     pub sha2: Sha256Circuit<F>,
-// }
 
 #[derive(Debug, Clone)]
 pub struct EmailVerifyCircuits<F: PrimeField> {
     pub sha2_header: Sha256HeaderCircuit<F>,
     pub sign_verify: SignVerifyCircuit<F>,
-    pub regex_headers: Vec<RegexHeaderCircuit<F>>,
+    pub regex_header: RegexHeaderCircuit<F>,
     pub sha2_header_masked_substrs: Option<Sha256HeaderMaskedSubstrsCircuit<F>>,
     pub sha2_header_substr_ids: Option<Sha256HeaderSubstrIdsCircuit<F>>,
+    pub regex_bodyhash: Option<RegexBodyHashCircuit<F>>,
+    pub chars_shift_bodyhash: Option<CharsShiftBodyHashCircuit<F>>,
     pub sha2_body: Option<Sha256BodyCircuit<F>>,
     pub base64: Option<Base64Circuit<F>>,
-    pub regex_bodies: Option<Vec<RegexBodyCircuit<F>>>,
+    pub regex_body: Option<RegexBodyCircuit<F>>,
     pub sha2_body_masked_substrs: Option<Sha256BodyMaskedSubstrsCircuit<F>>,
     pub sha2_body_substr_ids: Option<Sha256BodySubstrIdsCircuit<F>>,
     pub sign_rand: F,
     pub tag: F,
+    pub header_expose_substrs: bool,
+    pub body_enable: bool,
+    pub body_expose_substrs: bool,
 }
 
 impl<F: PrimeField> EmailVerifyCircuits<F> {
+    const BODYHASH_REGEX: &'static str =
+        r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)";
     pub fn new(email_bytes: &[u8], public_key_n: BigUint, tag: F) -> Self {
         let config_params = default_config_params();
         let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).expect("fail to parse the given email bytes");
@@ -127,76 +143,314 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
         let headerhash = Sha256::digest(&canonicalized_header).to_vec();
         let sign_verify = SignVerifyCircuit::new(headerhash, public_key_n, signature, tag);
         let header_config = config_params.header_config.as_ref().unwrap();
-        let regex_headers = header_config
+        let header_regex_defs = header_config
             .allstr_filepathes
             .iter()
             .zip(header_config.substr_filepathes.iter())
-            .zip(header_config.substr_regexes.iter())
-            .map(|((allstr_path, substr_pathes), substr_regexes)| {
+            .map(|(allstr_path, substr_pathes)| {
                 let allstr = AllstrRegexDef::read_from_text(&allstr_path);
                 let substrs = substr_pathes.into_iter().map(|path| SubstrRegexDef::read_from_text(&path)).collect_vec();
-                let regex_def = RegexDefs { allstr, substrs };
-                RegexHeaderCircuit::new(canonicalized_header.clone(), regex_def, vec![substr_regexes.clone()], sign_rand)
+                RegexDefs { allstr, substrs }
             })
             .collect_vec();
+        let regex_header = RegexHeaderCircuit::new(canonicalized_header.clone(), header_regex_defs, header_config.substr_regexes.clone(), sign_rand);
         let (sha2_header_masked_substrs, sha2_header_substr_ids) = if header_config.expose_substrs.unwrap_or(false) {
-            let (expected_masked_chars, expected_substr_ids) = get_expected_substr_chars_and_ids(&canonicalized_header, &header_config.substr_regexes);
+            let (expected_masked_chars, expected_substr_ids) =
+                get_expected_substr_chars_and_ids(&canonicalized_header, &header_config.substr_regexes, header_config.max_variable_byte_size);
             let sha2_header_masked_substrs = Sha256HeaderMaskedSubstrsCircuit::new(expected_masked_chars, sign_rand);
             let sha2_header_substr_ids = Sha256HeaderSubstrIdsCircuit::new(expected_substr_ids, sign_rand);
             (Some(sha2_header_masked_substrs), Some(sha2_header_substr_ids))
         } else {
             (None, None)
         };
-        let (sha2_body, base64, regex_bodies, sha2_body_masked_substrs, sha2_body_substr_ids) = if let Some(body_config) = config_params.body_config.as_ref() {
-            let (expected_masked_chars, expected_substr_ids) = get_expected_substr_chars_and_ids(&canonicalized_body, &body_config.substr_regexes);
-            let sha2_body = Sha256BodyCircuit::new(canonicalized_body.clone(), sign_rand);
-            let base64 = Base64Circuit::new(canonicalized_body.clone(), sign_rand);
-            let regex_bodies = body_config
-                .allstr_filepathes
-                .iter()
-                .zip(body_config.substr_filepathes.iter())
-                .zip(body_config.substr_regexes.iter())
-                .map(|((allstr_path, substr_pathes), substr_regexes)| {
-                    let allstr = AllstrRegexDef::read_from_text(&allstr_path);
-                    let substrs = substr_pathes.into_iter().map(|path| SubstrRegexDef::read_from_text(&path)).collect_vec();
-                    let regex_def = RegexDefs { allstr, substrs };
-                    RegexBodyCircuit::new(canonicalized_body.clone(), regex_def, vec![substr_regexes.clone()], sign_rand)
-                })
-                .collect_vec();
-            let (sha2_body_masked_substrs, sha2_body_substr_ids) = if body_config.expose_substrs.unwrap_or(false) {
-                let sha2_body_masked_substrs = Sha256BodyMaskedSubstrsCircuit::new(expected_masked_chars, sign_rand);
-                let sha2_body_substr_ids = Sha256BodySubstrIdsCircuit::new(expected_substr_ids, sign_rand);
-                (Some(sha2_body_masked_substrs), Some(sha2_body_substr_ids))
+        let (regex_bodyhash, chars_shift_bodyhash, sha2_body, base64, regex_body, sha2_body_masked_substrs, sha2_body_substr_ids) =
+            if let Some(body_config) = config_params.body_config.as_ref() {
+                let bodyhash_regex_def = {
+                    let allstr = AllstrRegexDef::read_from_text(&header_config.bodyhash_allstr_filepath);
+                    let substr = SubstrRegexDef::read_from_text(&header_config.bodyhash_substr_filepath);
+                    RegexDefs { allstr, substrs: vec![substr] }
+                };
+                let bodyhash_substr_regexes = vec![vec![Self::BODYHASH_REGEX.to_string()]];
+                let (bodyhash_masked_chars, bodyhash_substr_ids) =
+                    get_expected_substr_chars_and_ids(&canonicalized_header, &bodyhash_substr_regexes, header_config.max_variable_byte_size);
+                let regex_bodyhash = RegexBodyHashCircuit::new(canonicalized_header.clone(), vec![bodyhash_regex_def], bodyhash_substr_regexes, sign_rand);
+                let chars_shift_bodyhash = CharsShiftBodyHashCircuit::new(1, bodyhash_masked_chars, bodyhash_substr_ids, BODYHASH_BYTES, sign_rand);
+                let (expected_masked_chars, expected_substr_ids) =
+                    get_expected_substr_chars_and_ids(&canonicalized_body, &body_config.substr_regexes, body_config.max_variable_byte_size);
+                let sha2_body = Sha256BodyCircuit::new(canonicalized_body.clone(), sign_rand);
+                let bodyhash = Sha256::digest(&canonicalized_body).to_vec();
+                let base64 = Base64Circuit::new(bodyhash, sign_rand);
+                let body_regex_defs = body_config
+                    .allstr_filepathes
+                    .iter()
+                    .zip(body_config.substr_filepathes.iter())
+                    .map(|(allstr_path, substr_pathes)| {
+                        let allstr = AllstrRegexDef::read_from_text(&allstr_path);
+                        let substrs = substr_pathes.into_iter().map(|path| SubstrRegexDef::read_from_text(&path)).collect_vec();
+                        RegexDefs { allstr, substrs }
+                    })
+                    .collect_vec();
+                let regex_body = RegexBodyCircuit::new(canonicalized_body.clone(), body_regex_defs, body_config.substr_regexes.clone(), sign_rand);
+                let (sha2_body_masked_substrs, sha2_body_substr_ids) = if body_config.expose_substrs.unwrap_or(false) {
+                    let sha2_body_masked_substrs = Sha256BodyMaskedSubstrsCircuit::new(expected_masked_chars, sign_rand);
+                    let sha2_body_substr_ids = Sha256BodySubstrIdsCircuit::new(expected_substr_ids, sign_rand);
+                    (Some(sha2_body_masked_substrs), Some(sha2_body_substr_ids))
+                } else {
+                    (None, None)
+                };
+                (
+                    Some(regex_bodyhash),
+                    Some(chars_shift_bodyhash),
+                    Some(sha2_body),
+                    Some(base64),
+                    Some(regex_body),
+                    sha2_body_masked_substrs,
+                    sha2_body_substr_ids,
+                )
             } else {
-                (None, None)
+                (None, None, None, None, None, None, None)
             };
-            (Some(sha2_body), Some(base64), Some(regex_bodies), sha2_body_masked_substrs, sha2_body_substr_ids)
+        let header_expose_substrs = header_config.expose_substrs.unwrap_or(false);
+        let body_enable = config_params.body_config.is_some();
+        let body_expose_substrs = if let Some(body_config) = config_params.body_config.as_ref() {
+            body_config.expose_substrs.unwrap_or(false)
         } else {
-            (None, None, None, None, None)
+            false
         };
         Self {
             sha2_header,
             sign_verify,
-            regex_headers,
+            regex_header,
             sha2_header_masked_substrs,
             sha2_header_substr_ids,
+            regex_bodyhash,
+            chars_shift_bodyhash,
             sha2_body,
             base64,
-            regex_bodies,
+            regex_body,
             sha2_body_masked_substrs,
             sha2_body_substr_ids,
             sign_rand,
             tag,
+            header_expose_substrs,
+            body_enable,
+            body_expose_substrs,
         }
     }
 
-    // pub fn check_constraints(&self) {
-    //     let config_params = default_config_params();
-    //     {
-    //         let prover = MockProver::run(config_params.degree, &self.sha2_header, instances).unwrap();
-    //         assert_eq!(prover.verify(), Ok(()));
-    //     }
-    // }
+    pub fn instances(&self) -> EmailVerifyInstances<F> {
+        let sha2_header_ins = &self.sha2_header.instances()[0];
+        let header_bytes = sha2_header_ins[0];
+        let header_hash = sha2_header_ins[1];
+        let sign_verify_ins = &self.sign_verify.instances()[0];
+        let public_key_n_hash = sign_verify_ins[0];
+        debug_assert_eq!(header_hash, sign_verify_ins[1]);
+        let tag = sign_verify_ins[2];
+        let regex_header_ins = &self.regex_header.instances()[0];
+        debug_assert_eq!(header_bytes, regex_header_ins[0]);
+        let header_masked_substr = regex_header_ins[1];
+        let header_substr_ids = regex_header_ins[2];
+        let (header_masked_substr_hash, header_substr_ids_hash) = if self.header_expose_substrs {
+            let sha2_header_masked_substrs_ins = &self.sha2_header_masked_substrs.as_ref().unwrap().instances()[0];
+            debug_assert_eq!(header_masked_substr, sha2_header_masked_substrs_ins[0]);
+            let header_masked_substr_hash = sha2_header_masked_substrs_ins[1..].to_vec();
+            let sha2_header_substr_ids_ins = &self.sha2_header_substr_ids.as_ref().unwrap().instances()[0];
+            debug_assert_eq!(header_substr_ids, sha2_header_substr_ids_ins[0]);
+            let header_substr_ids_hash = sha2_header_substr_ids_ins[1..].to_vec();
+            (Some(header_masked_substr_hash), Some(header_substr_ids_hash))
+        } else {
+            (None, None)
+        };
+        let (
+            bodyhash_masked_substr,
+            bodyhash_substr_ids,
+            bodyhash_base64,
+            body_bytes,
+            bodyhash,
+            body_masked_substr,
+            body_substr_ids,
+            body_masked_substr_hash,
+            body_substr_ids_hash,
+        ) = if self.body_enable {
+            let regex_bodyhash_ins = &self.regex_bodyhash.as_ref().unwrap().instances()[0];
+            debug_assert_eq!(header_bytes, regex_bodyhash_ins[0]);
+            let bodyhash_masked_substr = regex_bodyhash_ins[1];
+            let bodyhash_substr_ids = regex_bodyhash_ins[2];
+            let chars_shift_ins = &self.chars_shift_bodyhash.as_ref().unwrap().instances()[0];
+            debug_assert_eq!(bodyhash_masked_substr, chars_shift_ins[0]);
+            debug_assert_eq!(bodyhash_substr_ids, chars_shift_ins[1]);
+            let bodyhash_base64 = chars_shift_ins[2];
+            let sha2_body_ins = &self.sha2_body.as_ref().unwrap().instances()[0];
+            let body_bytes = sha2_body_ins[0];
+            let bodyhash = sha2_body_ins[1];
+            let base64_ins = &self.base64.as_ref().unwrap().instances()[0];
+            debug_assert_eq!(bodyhash, base64_ins[0]);
+            debug_assert_eq!(bodyhash_base64, base64_ins[1]);
+            let regex_body_ins = &self.regex_body.as_ref().unwrap().instances()[0];
+            debug_assert_eq!(body_bytes, regex_body_ins[0]);
+            let body_masked_substr = regex_body_ins[1];
+            let body_substr_ids = regex_body_ins[2];
+            let (body_masked_substr_hash, body_substr_ids_hash) = if self.body_expose_substrs {
+                let sha2_body_masked_substrs_ins = &self.sha2_body_masked_substrs.as_ref().unwrap().instances()[0];
+                debug_assert_eq!(body_masked_substr, sha2_body_masked_substrs_ins[0]);
+                let body_masked_substr_hash = sha2_body_masked_substrs_ins[1..].to_vec();
+                let sha2_body_substr_ids_ins = &self.sha2_body_substr_ids.as_ref().unwrap().instances()[0];
+                debug_assert_eq!(body_substr_ids, sha2_body_substr_ids_ins[0]);
+                let body_substr_ids_hash = sha2_body_substr_ids_ins[1..].to_vec();
+                (Some(body_masked_substr_hash), Some(body_substr_ids_hash))
+            } else {
+                (None, None)
+            };
+            (
+                Some(bodyhash_masked_substr),
+                Some(bodyhash_substr_ids),
+                Some(bodyhash_base64),
+                Some(body_bytes),
+                Some(bodyhash),
+                Some(body_masked_substr),
+                Some(body_substr_ids),
+                body_masked_substr_hash,
+                body_substr_ids_hash,
+            )
+        } else {
+            (None, None, None, None, None, None, None, None, None)
+        };
+        EmailVerifyInstances {
+            header_bytes,
+            header_hash,
+            public_key_n_hash,
+            tag,
+            header_masked_substr,
+            header_substr_ids,
+            header_masked_substr_hash,
+            header_substr_ids_hash,
+            bodyhash_masked_substr,
+            bodyhash_substr_ids,
+            bodyhash_base64,
+            body_bytes,
+            bodyhash,
+            body_masked_substr,
+            body_substr_ids,
+            body_masked_substr_hash,
+            body_substr_ids_hash,
+        }
+    }
+
+    pub fn check_constraints(&self) {
+        let config_params = default_config_params();
+        let k = config_params.degree;
+        let instances = self.instances();
+        MockProver::run(k, &self.sha2_header, vec![vec![instances.header_bytes, instances.header_hash]])
+            .unwrap()
+            .verify()
+            .unwrap();
+        MockProver::run(k, &self.sign_verify, vec![vec![instances.public_key_n_hash, instances.header_hash, instances.tag]])
+            .unwrap()
+            .verify()
+            .unwrap();
+        MockProver::run(
+            k,
+            &self.regex_header,
+            vec![vec![instances.header_bytes, instances.header_masked_substr, instances.header_substr_ids]],
+        )
+        .unwrap()
+        .verify()
+        .unwrap();
+        if self.header_expose_substrs {
+            MockProver::run(
+                k,
+                self.sha2_header_masked_substrs.as_ref().unwrap(),
+                vec![vec![vec![instances.header_masked_substr], instances.header_masked_substr_hash.as_ref().unwrap().clone()].concat()],
+            )
+            .unwrap()
+            .verify()
+            .unwrap();
+            MockProver::run(
+                k,
+                self.sha2_header_substr_ids.as_ref().unwrap(),
+                vec![vec![vec![instances.header_substr_ids], instances.header_substr_ids_hash.as_ref().unwrap().clone()].concat()],
+            )
+            .unwrap()
+            .verify()
+            .unwrap();
+        }
+        if self.body_enable {
+            MockProver::run(
+                k,
+                self.regex_bodyhash.as_ref().unwrap(),
+                vec![vec![
+                    instances.header_bytes,
+                    instances.bodyhash_masked_substr.unwrap().clone(),
+                    instances.bodyhash_substr_ids.unwrap().clone(),
+                ]],
+            )
+            .unwrap()
+            .verify()
+            .unwrap();
+            MockProver::run(
+                k,
+                self.chars_shift_bodyhash.as_ref().unwrap(),
+                vec![vec![
+                    instances.bodyhash_masked_substr.unwrap().clone(),
+                    instances.bodyhash_substr_ids.unwrap().clone(),
+                    instances.bodyhash_base64.unwrap().clone(),
+                ]],
+            )
+            .unwrap()
+            .verify()
+            .unwrap();
+            MockProver::run(
+                k,
+                self.sha2_body.as_ref().unwrap(),
+                vec![vec![instances.body_bytes.unwrap().clone(), instances.bodyhash.unwrap().clone()]],
+            )
+            .unwrap()
+            .verify()
+            .unwrap();
+            MockProver::run(
+                k,
+                self.base64.as_ref().unwrap(),
+                vec![vec![instances.bodyhash.unwrap().clone(), instances.bodyhash_base64.unwrap().clone()]],
+            )
+            .unwrap()
+            .verify()
+            .unwrap();
+            MockProver::run(
+                k,
+                self.regex_body.as_ref().unwrap(),
+                vec![vec![
+                    instances.body_bytes.unwrap().clone(),
+                    instances.body_masked_substr.unwrap().clone(),
+                    instances.body_substr_ids.unwrap().clone(),
+                ]],
+            )
+            .unwrap()
+            .verify()
+            .unwrap();
+            if self.body_expose_substrs {
+                MockProver::run(
+                    k,
+                    self.sha2_body_masked_substrs.as_ref().unwrap(),
+                    vec![vec![
+                        vec![instances.body_masked_substr.unwrap().clone()],
+                        instances.body_masked_substr_hash.as_ref().unwrap().clone(),
+                    ]
+                    .concat()],
+                )
+                .unwrap()
+                .verify()
+                .unwrap();
+                MockProver::run(
+                    k,
+                    self.sha2_body_substr_ids.as_ref().unwrap(),
+                    vec![vec![vec![instances.body_substr_ids.unwrap().clone()], instances.body_substr_ids_hash.as_ref().unwrap().clone()].concat()],
+                )
+                .unwrap()
+                .verify()
+                .unwrap();
+            }
+        }
+    }
 }
 
 // /// Public input definition of [`DefaultEmailVerifyCircuit`].
@@ -1208,3 +1462,468 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
 //         });
 //     }
 // }
+
+#[cfg(test)]
+mod test {
+    use crate::config_params::EMAIL_VERIFY_CONFIG_ENV;
+
+    use super::*;
+    use cfdkim::{canonicalize_signed_email, resolve_public_key, SignerBuilder};
+    use halo2_base::halo2_proofs::{
+        circuit::Value,
+        dev::{CircuitCost, FailureLocation, MockProver, VerifyFailure},
+        halo2curves::bn256::{Fr, G1},
+    };
+    use halo2_regex::vrm::DecomposedRegexConfig;
+    use halo2_rsa::RSAPubE;
+    use mailparse::parse_mail;
+    use num_bigint::BigUint;
+    use rand::thread_rng;
+    use rsa::{PublicKeyParts, RsaPrivateKey};
+    use snark_verifier_sdk::CircuitExt;
+    use std::{fs::File, io::Read, path::Path};
+    use temp_env;
+
+    #[test]
+    fn test_generated_email1() {
+        temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test1_email_verify.config"), || {
+            let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+            regex_bodyhash_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+                    &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+                )
+                .unwrap();
+            let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+            regex_from_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                    &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+                )
+                .unwrap();
+            let regex_body_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/test1_email_body_defs.json").unwrap()).unwrap();
+            regex_body_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/test1_email_body_allstr.txt").to_path_buf(),
+                    &[Path::new("./test_data/test1_email_body_substr_0.txt").to_path_buf()],
+                )
+                .unwrap();
+            let config_params = default_config_params();
+            let sign_verify_config = config_params.sign_verify_config.as_ref().expect("sign_verify_config is required");
+            let mut rng = thread_rng();
+            let _private_key = RsaPrivateKey::new(&mut rng, sign_verify_config.public_key_bits).expect("failed to generate a key");
+            let public_key = rsa::RsaPublicKey::from(&_private_key);
+            let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
+            let message = concat!("From: alice@zkemail.com\r\n", "\r\n", "email was meant for @zkemailverify.",).as_bytes();
+            let email = parse_mail(message).unwrap();
+            let logger = slog::Logger::root(slog::Discard, slog::o!());
+            let signer = SignerBuilder::new()
+                .with_signed_headers(&["From"])
+                .unwrap()
+                .with_private_key(private_key)
+                .with_selector("default")
+                .with_signing_domain("zkemail.com")
+                .with_logger(&logger)
+                .with_header_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+                .with_body_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+                .build()
+                .unwrap();
+            let signature = signer.sign(&email).unwrap();
+            let email_bytes = vec![signature.as_bytes(), b"\r\n", message].concat();
+            println!("email: {}", String::from_utf8(email_bytes.clone()).unwrap());
+            // let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
+
+            // println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
+            // println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
+
+            // let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
+            let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
+            let tag = Fr::zero();
+            let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.check_constraints();
+        });
+    }
+
+    #[test]
+    fn test_generated_email2() {
+        temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test2_email_verify.config"), || {
+            let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+            regex_bodyhash_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+                    &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+                )
+                .unwrap();
+            let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+            regex_from_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                    &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+                )
+                .unwrap();
+            let regex_to_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/to_defs.json").unwrap()).unwrap();
+            regex_to_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/to_allstr.txt").to_path_buf(),
+                    &[Path::new("./test_data/to_substr_0.txt").to_path_buf()],
+                )
+                .unwrap();
+            let regex_body_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/test2_email_body_defs.json").unwrap()).unwrap();
+            regex_body_decomposed
+                .gen_regex_files(
+                    &Path::new("./test_data/test2_email_body_allstr.txt").to_path_buf(),
+                    &[
+                        Path::new("./test_data/test2_email_body_substr_0.txt").to_path_buf(),
+                        Path::new("./test_data/test2_email_body_substr_1.txt").to_path_buf(),
+                    ],
+                )
+                .unwrap();
+            let config_params = default_config_params();
+            let sign_verify_config = config_params.sign_verify_config.as_ref().expect("sign_verify_config is required");
+            let mut rng = thread_rng();
+            let _private_key = RsaPrivateKey::new(&mut rng, sign_verify_config.public_key_bits).expect("failed to generate a key");
+            let public_key = rsa::RsaPublicKey::from(&_private_key);
+            let private_key = cfdkim::DkimPrivateKey::Rsa(_private_key);
+            let message = concat!(
+                "From: alice@zkemail.com\r\n",
+                "To: bob@example.com\r\n",
+                "\r\n",
+                "email was meant for @zkemailverify and halo.",
+            )
+            .as_bytes();
+            let email = parse_mail(message).unwrap();
+            let logger = slog::Logger::root(slog::Discard, slog::o!());
+            let signer = SignerBuilder::new()
+                .with_signed_headers(&["To", "From"])
+                .unwrap()
+                .with_private_key(private_key)
+                .with_selector("default")
+                .with_signing_domain("zkemail.com")
+                .with_logger(&logger)
+                .with_header_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+                .with_body_canonicalization(cfdkim::canonicalization::Type::Relaxed)
+                .build()
+                .unwrap();
+            let signature = signer.sign(&email).unwrap();
+            println!("signature {}", signature);
+            let email_bytes = vec![signature.as_bytes(), b"\r\n", message].concat();
+            let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
+            let tag = Fr::zero();
+            let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.check_constraints();
+        });
+    }
+
+    #[tokio::test]
+    async fn test_existing_email1() {
+        let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+        regex_bodyhash_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+        regex_from_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_to_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/to_defs.json").unwrap()).unwrap();
+        regex_to_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/to_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/to_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_subject_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/subject_defs.json").unwrap()).unwrap();
+        regex_subject_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/subject_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/subject_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let regex_body_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/test_ex1_email_body_defs.json").unwrap()).unwrap();
+        regex_body_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/test_ex1_email_body_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/test_ex1_email_body_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex1_email_body_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex1_email_body_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let email_bytes = {
+            let mut f = File::open("./test_data/test_email1.eml").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            buf
+        };
+
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let public_key = resolve_public_key(&logger, &email_bytes).await.unwrap();
+        let public_key = match public_key {
+            cfdkim::DkimPublicKey::Rsa(pk) => pk,
+            _ => panic!("not supportted public key type."),
+        };
+        temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex1_email_verify.config"), move || {
+            let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
+            let tag = Fr::zero();
+            let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.check_constraints();
+        });
+    }
+
+    #[tokio::test]
+    async fn test_existing_email2() {
+        let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+        regex_bodyhash_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+        regex_from_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_to_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/to_defs.json").unwrap()).unwrap();
+        regex_to_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/to_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/to_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_subject_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/subject_defs.json").unwrap()).unwrap();
+        regex_subject_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/subject_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/subject_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let regex_body_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/test_ex2_email_body_defs.json").unwrap()).unwrap();
+        regex_body_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/test_ex2_email_body_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/test_ex2_email_body_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex2_email_body_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex2_email_body_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let email_bytes = {
+            let mut f = File::open("./test_data/test_email2.eml").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            buf
+        };
+
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let public_key = resolve_public_key(&logger, &email_bytes).await.unwrap();
+        let public_key = match public_key {
+            cfdkim::DkimPublicKey::Rsa(pk) => pk,
+            _ => panic!("not supportted public key type."),
+        };
+        temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex2_email_verify.config"), move || {
+            let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
+            let tag = Fr::zero();
+            let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.check_constraints();
+        });
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_existing_email3() {
+        let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+        regex_bodyhash_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_timestamp_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/timestamp_defs.json").unwrap()).unwrap();
+        regex_timestamp_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/timestamp_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/timestamp_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_body_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/test_ex3_email_body_defs.json").unwrap()).unwrap();
+        regex_body_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/test_ex3_email_body_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/test_ex3_email_body_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let email_bytes = {
+            let mut f = File::open("./test_data/test_email3.eml").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            buf
+        };
+
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let public_key = resolve_public_key(&logger, &email_bytes).await.unwrap();
+        let public_key = match public_key {
+            cfdkim::DkimPublicKey::Rsa(pk) => pk,
+            _ => panic!("not supportted public key type."),
+        };
+        temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex3_email_verify.config"), move || {
+            let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
+            let tag = Fr::zero();
+            let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.check_constraints();
+        });
+    }
+
+    #[tokio::test]
+    async fn test_existing_email_invalid1() {
+        let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+        regex_bodyhash_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+        regex_from_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_to_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/to_defs.json").unwrap()).unwrap();
+        regex_to_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/to_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/to_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_subject_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/subject_defs.json").unwrap()).unwrap();
+        regex_subject_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/subject_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/subject_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let regex_body_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/test_ex1_email_body_defs.json").unwrap()).unwrap();
+        regex_body_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/test_ex1_email_body_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/test_ex1_email_body_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex1_email_body_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex1_email_body_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let email_bytes = {
+            let mut f = File::open("./test_data/test_email1.eml").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            buf
+        };
+
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let public_key = resolve_public_key(&logger, &email_bytes).await.unwrap();
+        let public_key = match public_key {
+            cfdkim::DkimPublicKey::Rsa(pk) => pk,
+            _ => panic!("not supportted public key type."),
+        };
+        temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex1_email_verify.config"), move || {
+            let mut public_key_n_bytes = public_key.n().to_bytes_be();
+            for idx in 0..256 {
+                public_key_n_bytes[idx] = 255;
+            }
+            let public_key_n = BigUint::from_bytes_be(&public_key_n_bytes);
+            let tag = Fr::zero();
+            let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.check_constraints();
+        });
+    }
+
+    #[tokio::test]
+    async fn test_existing_email_invalid2() {
+        let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+        regex_bodyhash_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+        regex_from_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_to_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/to_defs.json").unwrap()).unwrap();
+        regex_to_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/to_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/to_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_subject_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/subject_defs.json").unwrap()).unwrap();
+        regex_subject_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/subject_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/subject_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let regex_body_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/test_ex1_email_body_defs.json").unwrap()).unwrap();
+        regex_body_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/test_ex1_email_body_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/test_ex1_email_body_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex1_email_body_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex1_email_body_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let email_bytes = {
+            let mut f = File::open("./test_data/invalid_test_email1.eml").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            buf
+        };
+
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let public_key = resolve_public_key(&logger, &email_bytes).await.unwrap();
+        let public_key = match public_key {
+            cfdkim::DkimPublicKey::Rsa(pk) => pk,
+            _ => panic!("not supportted public key type."),
+        };
+        temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex1_email_verify.config"), move || {
+            let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
+            let tag = Fr::zero();
+            let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.check_constraints();
+        });
+    }
+}

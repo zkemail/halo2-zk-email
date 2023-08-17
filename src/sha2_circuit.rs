@@ -26,7 +26,7 @@ pub struct Sha256InstanceConfig<F: PrimeField> {
 
 #[macro_export]
 macro_rules! impl_sha2_circuit {
-    ($circuit_name:ident, $max_bytes_size:expr, $num_flex_advice:expr, $num_flex_fixed:expr, $num_range_lookup_advice:expr, $range_lookup_bits:expr, $degree:expr, $sha2_num_bits_lookup:expr, $sha2_num_advice_columns:expr, $skip_prefix_bytes_size:expr) => {
+    ($circuit_name:ident, $max_bytes_size:expr, $num_flex_advice:expr, $num_flex_fixed:expr, $num_range_lookup_advice:expr, $range_lookup_bits:expr, $degree:expr, $sha2_num_bits_lookup:expr, $sha2_num_advice_columns:expr, $skip_prefix_bytes_size:expr, $hide_output:expr) => {
         #[derive(Debug, Clone)]
         pub struct $circuit_name<F: PrimeField> {
             input: Vec<u8>,
@@ -88,7 +88,6 @@ macro_rules! impl_sha2_circuit {
                         let gate = range.gate();
                         let poseidon = PoseidonChipBn254_8_58::new(ctx, gate);
                         let sign_rand = gate.load_witness(ctx, Value::known(self.sign_rand));
-                        let hash_commit = assigned_commit_wtns_bytes(ctx, gate, &poseidon, &sign_rand, &assigned_hash_result.output_bytes);
                         let mut is_input_revealed = gate.load_constant(ctx, F::one());
                         let mut actual_input = vec![];
                         let expected_len = gate.sub(
@@ -109,7 +108,16 @@ macro_rules! impl_sha2_circuit {
                         }
                         let input_commit = assigned_commit_wtns_bytes(ctx, gate, &poseidon, &sign_rand, &actual_input);
                         public_input_cells.push(input_commit.cell());
-                        public_input_cells.push(hash_commit.cell());
+                        if $hide_output {
+                            let hash_commit = assigned_commit_wtns_bytes(ctx, gate, &poseidon, &sign_rand, &assigned_hash_result.output_bytes);
+                            public_input_cells.push(hash_commit.cell());
+                        } else {
+                            let hash_fields = assigned_bytes2fields(ctx, gate, &assigned_hash_result.output_bytes);
+                            for field in hash_fields.into_iter() {
+                                public_input_cells.push(field.cell());
+                            }
+                        }
+
                         config.inner.range().finalize(ctx);
                         Ok(())
                     },
@@ -123,15 +131,25 @@ macro_rules! impl_sha2_circuit {
 
         impl<F: PrimeField> CircuitExt<F> for $circuit_name<F> {
             fn num_instance(&self) -> Vec<usize> {
-                vec![2]
+                self.instances().into_iter().map(|vec| vec.len()).collect_vec()
             }
 
             fn instances(&self) -> Vec<Vec<F>> {
                 let padding_size = $max_bytes_size - self.input.len();
                 let input_bytes = vec![&self.input[..], &vec![0; padding_size]].concat();
                 let input_commit = value_commit_wtns_bytes(&self.sign_rand, &input_bytes);
-                let hash_commit = value_commit_wtns_bytes(&self.sign_rand, &Sha256::digest(&self.input).to_vec());
-                vec![vec![input_commit, hash_commit]]
+                let mut instances = vec![input_commit];
+                if $hide_output {
+                    let hash_commit = value_commit_wtns_bytes(&self.sign_rand, &Sha256::digest(&self.input).to_vec());
+                    instances.push(hash_commit);
+                } else {
+                    let hash_fields = value_bytes2fields(&Sha256::digest(&self.input).to_vec());
+                    for field in hash_fields.into_iter() {
+                        instances.push(field);
+                    }
+                }
+
+                vec![instances]
             }
         }
 
@@ -154,7 +172,8 @@ impl_sha2_circuit!(
     default_config_params().degree as usize,
     default_config_params().sha256_config.as_ref().unwrap().num_bits_lookup,
     default_config_params().sha256_config.as_ref().unwrap().num_advice_columns,
-    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0)
+    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0),
+    true
 );
 impl_sha2_circuit!(
     Sha256BodyCircuit,
@@ -166,7 +185,8 @@ impl_sha2_circuit!(
     default_config_params().degree as usize,
     default_config_params().sha256_config.as_ref().unwrap().num_bits_lookup,
     default_config_params().sha256_config.as_ref().unwrap().num_advice_columns,
-    default_config_params().body_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0)
+    default_config_params().body_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0),
+    true
 );
 impl_sha2_circuit!(
     Sha256HeaderMaskedSubstrsCircuit,
@@ -178,7 +198,8 @@ impl_sha2_circuit!(
     default_config_params().degree as usize,
     default_config_params().sha256_config.as_ref().unwrap().num_bits_lookup,
     default_config_params().sha256_config.as_ref().unwrap().num_advice_columns,
-    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0)
+    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0),
+    false
 );
 impl_sha2_circuit!(
     Sha256HeaderSubstrIdsCircuit,
@@ -190,7 +211,8 @@ impl_sha2_circuit!(
     default_config_params().degree as usize,
     default_config_params().sha256_config.as_ref().unwrap().num_bits_lookup,
     default_config_params().sha256_config.as_ref().unwrap().num_advice_columns,
-    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0)
+    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0),
+    false
 );
 impl_sha2_circuit!(
     Sha256BodyMaskedSubstrsCircuit,
@@ -202,7 +224,8 @@ impl_sha2_circuit!(
     default_config_params().degree as usize,
     default_config_params().sha256_config.as_ref().unwrap().num_bits_lookup,
     default_config_params().sha256_config.as_ref().unwrap().num_advice_columns,
-    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0)
+    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0),
+    false
 );
 impl_sha2_circuit!(
     Sha256BodySubstrIdsCircuit,
@@ -214,5 +237,6 @@ impl_sha2_circuit!(
     default_config_params().degree as usize,
     default_config_params().sha256_config.as_ref().unwrap().num_bits_lookup,
     default_config_params().sha256_config.as_ref().unwrap().num_advice_columns,
-    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0)
+    default_config_params().header_config.as_ref().unwrap().skip_prefix_bytes_size.unwrap_or(0),
+    false
 );

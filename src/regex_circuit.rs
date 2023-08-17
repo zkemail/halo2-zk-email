@@ -30,11 +30,11 @@ pub struct RegexInstanceConfig<F: PrimeField> {
 
 #[macro_export]
 macro_rules! impl_regex_circuit {
-    ($circuit_name:ident, $max_chars_size:expr, $num_flex_advice:expr, $num_flex_fixed:expr, $degree:expr) => {
+    ($circuit_name:ident, $max_chars_size:expr, $num_flex_advice:expr, $num_flex_fixed:expr, $degree:expr, $num_regex_def:expr) => {
         #[derive(Debug, Clone)]
         pub struct $circuit_name<F: PrimeField> {
             input: Vec<u8>,
-            regex_def: RegexDefs,
+            regex_defs: Vec<RegexDefs>,
             substr_regexes: Vec<Vec<String>>,
             sign_rand: F,
         }
@@ -46,7 +46,7 @@ macro_rules! impl_regex_circuit {
             fn without_witnesses(&self) -> Self {
                 Self {
                     input: vec![0; self.input.len()],
-                    regex_def: self.regex_def.clone(),
+                    regex_defs: self.regex_defs.clone(),
                     substr_regexes: self.substr_regexes.clone(),
                     sign_rand: F::zero(),
                 }
@@ -54,14 +54,14 @@ macro_rules! impl_regex_circuit {
 
             fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
                 let gate = FlexGateConfig::configure(meta, GateStrategy::Vertical, &[$num_flex_advice], $num_flex_fixed, 0, $degree);
-                let inner = RegexVerifyConfig::configure(meta, $max_chars_size, gate, 1, 0, u64::MAX);
+                let inner = RegexVerifyConfig::configure(meta, $max_chars_size, gate, $num_regex_def, 0, u64::MAX);
                 let instance = meta.instance_column();
                 meta.enable_equality(instance);
                 Self::Config { inner, instance }
             }
 
             fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
-                config.inner.load(&mut layouter, &[self.regex_def.clone()])?;
+                config.inner.load(&mut layouter, &self.regex_defs)?;
                 let mut first_pass = SKIP_FIRST_PASS;
                 let mut public_input_cells = vec![];
                 layouter.assign_region(
@@ -79,7 +79,7 @@ macro_rules! impl_regex_circuit {
                                 fixed_columns: config.inner.gate().constants.clone(),
                             },
                         );
-                        let result = config.inner.match_substrs(ctx, &self.input, &[self.regex_def.clone()])?;
+                        let result = config.inner.match_substrs(ctx, &self.input, &self.regex_defs)?;
 
                         let gate = config.inner.gate();
                         let poseidon = PoseidonChipBn254_8_58::new(ctx, gate);
@@ -94,11 +94,11 @@ macro_rules! impl_regex_circuit {
                             })
                             .collect_vec();
                         let input_commit = assigned_commit_wtns_bytes(ctx, gate, &poseidon, &sign_rand, &actual_input);
-                        let substr_ids_commit = assigned_commit_wtns_bytes(ctx, gate, &poseidon, &sign_rand, &result.all_substr_ids);
                         let masked_chars_commit = assigned_commit_wtns_bytes(ctx, gate, &poseidon, &sign_rand, &result.masked_characters);
+                        let substr_ids_commit = assigned_commit_wtns_bytes(ctx, gate, &poseidon, &sign_rand, &result.all_substr_ids);
                         public_input_cells.push(input_commit.cell());
-                        public_input_cells.push(substr_ids_commit.cell());
                         public_input_cells.push(masked_chars_commit.cell());
+                        public_input_cells.push(substr_ids_commit.cell());
                         Ok(())
                     },
                 )?;
@@ -115,21 +115,21 @@ macro_rules! impl_regex_circuit {
             }
 
             fn instances(&self) -> Vec<Vec<F>> {
-                let (expected_masked_chars, expected_substr_ids) = get_expected_substr_chars_and_ids(&self.input, &self.substr_regexes);
+                let (expected_masked_chars, expected_substr_ids) = get_expected_substr_chars_and_ids(&self.input, &self.substr_regexes, $max_chars_size);
                 let padding_size = $max_chars_size - self.input.len();
                 let input_bytes = vec![&self.input[..], &vec![0; padding_size]].concat();
                 let input_commit = value_commit_wtns_bytes(&self.sign_rand, &input_bytes);
-                let substr_ids_commit = value_commit_wtns_bytes(&self.sign_rand, &expected_substr_ids);
                 let masked_chars_commit = value_commit_wtns_bytes(&self.sign_rand, &expected_masked_chars);
-                vec![vec![input_commit, substr_ids_commit, masked_chars_commit]]
+                let substr_ids_commit = value_commit_wtns_bytes(&self.sign_rand, &expected_substr_ids);
+                vec![vec![input_commit, masked_chars_commit, substr_ids_commit]]
             }
         }
 
         impl<F: PrimeField> $circuit_name<F> {
-            pub fn new(input: Vec<u8>, regex_def: RegexDefs, substr_regexes: Vec<Vec<String>>, sign_rand: F) -> Self {
+            pub fn new(input: Vec<u8>, regex_defs: Vec<RegexDefs>, substr_regexes: Vec<Vec<String>>, sign_rand: F) -> Self {
                 Self {
                     input,
-                    regex_def,
+                    regex_defs,
                     substr_regexes,
                     sign_rand,
                 }
@@ -138,11 +138,11 @@ macro_rules! impl_regex_circuit {
     };
 }
 
-pub fn get_expected_substr_chars_and_ids(input: &[u8], substr_regexes: &[Vec<String>]) -> (Vec<u8>, Vec<u8>) {
+pub fn get_expected_substr_chars_and_ids(input: &[u8], substr_regexes: &[Vec<String>], max_chars_size: usize) -> (Vec<u8>, Vec<u8>) {
     let input_str = String::from_utf8(input.to_vec()).unwrap();
     let substrs = substr_regexes.iter().map(|regexes| get_substr(&input_str, regexes)).collect_vec();
-    let mut expected_masked_chars = vec![0u8; input.len()];
-    let mut expected_substr_ids = vec![0u8; input.len()]; // We only support up to 256 substring patterns.
+    let mut expected_masked_chars = vec![0u8; max_chars_size];
+    let mut expected_substr_ids = vec![0u8; max_chars_size]; // We only support up to 256 substring patterns.
     for (substr_idx, m) in substrs.iter().enumerate() {
         if let Some((start, chars)) = m {
             for (idx, char) in chars.as_bytes().iter().enumerate() {
@@ -182,12 +182,22 @@ impl_regex_circuit!(
     default_config_params().header_config.as_ref().unwrap().max_variable_byte_size,
     default_config_params().num_flex_advice,
     default_config_params().num_flex_fixed,
-    default_config_params().degree as usize
+    default_config_params().degree as usize,
+    default_config_params().header_config.as_ref().unwrap().allstr_filepathes.len()
+);
+impl_regex_circuit!(
+    RegexBodyHashCircuit,
+    default_config_params().header_config.as_ref().unwrap().max_variable_byte_size,
+    default_config_params().num_flex_advice,
+    default_config_params().num_flex_fixed,
+    default_config_params().degree as usize,
+    1
 );
 impl_regex_circuit!(
     RegexBodyCircuit,
     default_config_params().body_config.as_ref().unwrap().max_variable_byte_size,
     default_config_params().num_flex_advice,
     default_config_params().num_flex_fixed,
-    default_config_params().degree as usize
+    default_config_params().degree as usize,
+    default_config_params().body_config.as_ref().unwrap().allstr_filepathes.len()
 );

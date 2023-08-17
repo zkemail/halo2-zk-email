@@ -8,6 +8,7 @@ use crate::{
         value_commit_wtns_bytes,
     },
 };
+use halo2_base::halo2_proofs::circuit::SimpleFloorPlanner;
 use halo2_base::halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
 use halo2_base::halo2_proofs::{
     circuit::{Layouter, Value},
@@ -18,8 +19,8 @@ use halo2_base::{
     utils::PrimeField,
     Context,
 };
-use halo2_base::{halo2_proofs::circuit::SimpleFloorPlanner, utils::decompose_biguint};
 use halo2_base::{AssignedValue, QuantumCell, SKIP_FIRST_PASS};
+use halo2_rsa::big_uint::decompose_biguint;
 use halo2_rsa::{AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstructions, RSAPubE, RSAPublicKey, RSASignature};
 use itertools::Itertools;
 use num_bigint::BigUint;
@@ -199,11 +200,11 @@ macro_rules! impl_sign_verify_circuit {
                         let mut public_key_n_hash_input = vec![];
                         let hide_public_key: bool = $hide_public_key;
                         if hide_public_key {
-                            public_key_n_hash_input.push(sign_rand);
+                            public_key_n_hash_input.push(sign_rand.clone());
                         }
                         public_key_n_hash_input.append(&mut assigned_public_key.n.limbs().to_vec());
                         let public_key_n_hash = poseidon.hash_elements(ctx, gate, &public_key_n_hash_input).unwrap().0[0].clone();
-                        let hash_commit = assigned_commit_wtns_bytes(ctx, gate, &poseidon, &public_key_n_hash_input[0], &assigned_hash_bytes);
+                        let hash_commit = assigned_commit_wtns_bytes(ctx, gate, &poseidon, &sign_rand, &assigned_hash_bytes);
                         range.finalize(ctx);
                         public_hash_cell.push(public_key_n_hash.cell());
                         public_hash_cell.push(hash_commit.cell());
@@ -234,7 +235,7 @@ macro_rules! impl_sign_verify_circuit {
                     public_key_n_hash_input.push(sign_rand);
                 }
                 let num_limbs = $public_key_bits / LIMB_BITS;
-                let public_key_n_limbs = decompose_biguint(&self.public_key_n, num_limbs, $public_key_bits);
+                let public_key_n_limbs = decompose_biguint(&self.public_key_n, num_limbs, LIMB_BITS);
                 public_key_n_hash_input.append(&mut public_key_n_limbs.to_vec());
                 let public_key_n_hash = poseidon_hash_fields(&public_key_n_hash_input);
                 let hash_commit = value_commit_wtns_bytes(&sign_rand, &self.hash_bytes);
@@ -257,7 +258,7 @@ macro_rules! impl_sign_verify_circuit {
 
 pub fn derive_sign_rand<F: PrimeField>(signature: &BigUint, public_key_bits: usize) -> F {
     let num_limbs = public_key_bits / LIMB_BITS;
-    let limbs = decompose_biguint(signature, num_limbs, public_key_bits);
+    let limbs = decompose_biguint(signature, num_limbs, LIMB_BITS);
     poseidon_hash_fields(&limbs)
 }
 

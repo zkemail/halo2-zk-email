@@ -74,13 +74,7 @@ macro_rules! impl_base64_circuit {
                                 fixed_columns: config.gate.constants.clone(),
                             },
                         );
-                        debug_assert_eq!(self.input.len(), 32);
-                        let mut hash_base64 = Vec::new();
-                        hash_base64.resize(44, 0);
-                        let bytes_written = general_purpose::STANDARD
-                            .encode_slice(&self.input, &mut hash_base64)
-                            .expect("fail to convert the hash bytes into the base64 strings");
-                        debug_assert_eq!(bytes_written, 44);
+                        let hash_base64 = self.compute_base64();
                         let base64_result = config.inner.assign_values(&mut ctx.region, &hash_base64)?;
                         debug_assert_eq!(base64_result.decoded.len(), 32);
 
@@ -122,7 +116,8 @@ macro_rules! impl_base64_circuit {
 
             fn instances(&self) -> Vec<Vec<F>> {
                 let input_commit = value_commit_wtns_bytes(&self.sign_rand, &self.input);
-                let hash_commit = value_commit_wtns_bytes(&self.sign_rand, &Sha256::digest(&self.input).to_vec());
+                let hash_base64 = self.compute_base64();
+                let hash_commit = value_commit_wtns_bytes(&self.sign_rand, &hash_base64);
                 vec![vec![input_commit, hash_commit]]
             }
         }
@@ -130,6 +125,17 @@ macro_rules! impl_base64_circuit {
         impl<F: PrimeField> $circuit_name<F> {
             pub fn new(input: Vec<u8>, sign_rand: F) -> Self {
                 Self { input, sign_rand }
+            }
+
+            fn compute_base64(&self) -> Vec<u8> {
+                debug_assert_eq!(self.input.len(), 32);
+                let mut hash_base64 = Vec::new();
+                hash_base64.resize(BODYHASH_BYTES, 0);
+                let bytes_written = general_purpose::STANDARD
+                    .encode_slice(&self.input, &mut hash_base64)
+                    .expect("fail to convert the hash bytes into the base64 strings");
+                debug_assert_eq!(bytes_written, BODYHASH_BYTES);
+                hash_base64
             }
         }
     };

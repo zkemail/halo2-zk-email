@@ -193,15 +193,8 @@ macro_rules! impl_chars_shift_circuit {
 
 // impl_chars_shift_circuit!(DummyCharsShiftCircuit, 128, 1, 0, 8);
 impl_chars_shift_circuit!(
-    CharsShiftHeaderCircuit,
+    CharsShiftBodyHashCircuit,
     default_config_params().header_config.as_ref().unwrap().max_variable_byte_size,
-    default_config_params().num_flex_advice,
-    default_config_params().num_flex_fixed,
-    default_config_params().degree as usize
-);
-impl_chars_shift_circuit!(
-    CharsShiftBodyCircuit,
-    default_config_params().body_config.as_ref().unwrap().max_variable_byte_size,
     default_config_params().num_flex_advice,
     default_config_params().num_flex_fixed,
     default_config_params().degree as usize
