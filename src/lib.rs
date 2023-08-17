@@ -336,46 +336,42 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
         }
     }
 
-    pub fn check_constraints(&self) {
+    pub fn check_constraints(&self) -> Result<bool, Error> {
         let config_params = default_config_params();
         let k = config_params.degree;
         let instances = self.instances();
-        MockProver::run(k, &self.sha2_header, vec![vec![instances.header_bytes, instances.header_hash]])
-            .unwrap()
+        let mut result = true;
+        result &= MockProver::run(k, &self.sha2_header, vec![vec![instances.header_bytes, instances.header_hash]])?
             .verify()
-            .unwrap();
-        MockProver::run(k, &self.sign_verify, vec![vec![instances.public_key_n_hash, instances.header_hash, instances.tag]])
-            .unwrap()
+            .is_ok();
+        result &= MockProver::run(k, &self.sign_verify, vec![vec![instances.public_key_n_hash, instances.header_hash, instances.tag]])?
             .verify()
-            .unwrap();
-        MockProver::run(
+            .is_ok();
+        result &= MockProver::run(
             k,
             &self.regex_header,
             vec![vec![instances.header_bytes, instances.header_masked_substr, instances.header_substr_ids]],
-        )
-        .unwrap()
+        )?
         .verify()
-        .unwrap();
+        .is_ok();
         if self.header_expose_substrs {
-            MockProver::run(
+            result &= MockProver::run(
                 k,
                 self.sha2_header_masked_substrs.as_ref().unwrap(),
                 vec![vec![vec![instances.header_masked_substr], instances.header_masked_substr_hash.as_ref().unwrap().clone()].concat()],
-            )
-            .unwrap()
+            )?
             .verify()
-            .unwrap();
-            MockProver::run(
+            .is_ok();
+            result &= MockProver::run(
                 k,
                 self.sha2_header_substr_ids.as_ref().unwrap(),
                 vec![vec![vec![instances.header_substr_ids], instances.header_substr_ids_hash.as_ref().unwrap().clone()].concat()],
-            )
-            .unwrap()
+            )?
             .verify()
-            .unwrap();
+            .is_ok();
         }
         if self.body_enable {
-            MockProver::run(
+            result &= MockProver::run(
                 k,
                 self.regex_bodyhash.as_ref().unwrap(),
                 vec![vec![
@@ -383,11 +379,10 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
                     instances.bodyhash_masked_substr.unwrap().clone(),
                     instances.bodyhash_substr_ids.unwrap().clone(),
                 ]],
-            )
-            .unwrap()
+            )?
             .verify()
-            .unwrap();
-            MockProver::run(
+            .is_ok();
+            result &= MockProver::run(
                 k,
                 self.chars_shift_bodyhash.as_ref().unwrap(),
                 vec![vec![
@@ -395,27 +390,24 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
                     instances.bodyhash_substr_ids.unwrap().clone(),
                     instances.bodyhash_base64.unwrap().clone(),
                 ]],
-            )
-            .unwrap()
+            )?
             .verify()
-            .unwrap();
-            MockProver::run(
+            .is_ok();
+            result &= MockProver::run(
                 k,
                 self.sha2_body.as_ref().unwrap(),
                 vec![vec![instances.body_bytes.unwrap().clone(), instances.bodyhash.unwrap().clone()]],
-            )
-            .unwrap()
+            )?
             .verify()
-            .unwrap();
-            MockProver::run(
+            .is_ok();
+            result &= MockProver::run(
                 k,
                 self.base64.as_ref().unwrap(),
                 vec![vec![instances.bodyhash.unwrap().clone(), instances.bodyhash_base64.unwrap().clone()]],
-            )
-            .unwrap()
+            )?
             .verify()
-            .unwrap();
-            MockProver::run(
+            .is_ok();
+            result &= MockProver::run(
                 k,
                 self.regex_body.as_ref().unwrap(),
                 vec![vec![
@@ -423,12 +415,11 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
                     instances.body_masked_substr.unwrap().clone(),
                     instances.body_substr_ids.unwrap().clone(),
                 ]],
-            )
-            .unwrap()
+            )?
             .verify()
-            .unwrap();
+            .is_ok();
             if self.body_expose_substrs {
-                MockProver::run(
+                result &= MockProver::run(
                     k,
                     self.sha2_body_masked_substrs.as_ref().unwrap(),
                     vec![vec![
@@ -436,20 +427,19 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
                         instances.body_masked_substr_hash.as_ref().unwrap().clone(),
                     ]
                     .concat()],
-                )
-                .unwrap()
+                )?
                 .verify()
-                .unwrap();
-                MockProver::run(
+                .is_ok();
+                result &= MockProver::run(
                     k,
                     self.sha2_body_substr_ids.as_ref().unwrap(),
                     vec![vec![vec![instances.body_substr_ids.unwrap().clone()], instances.body_substr_ids_hash.as_ref().unwrap().clone()].concat()],
-                )
-                .unwrap()
+                )?
                 .verify()
-                .unwrap();
+                .is_ok();
             }
         }
+        Ok(result)
     }
 }
 
@@ -1540,7 +1530,7 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
-            circuits.check_constraints();
+            assert!(circuits.check_constraints().unwrap());
         });
     }
 
@@ -1610,7 +1600,7 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
-            circuits.check_constraints();
+            assert!(circuits.check_constraints().unwrap());
         });
     }
 
@@ -1676,7 +1666,7 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
-            circuits.check_constraints();
+            assert!(circuits.check_constraints().unwrap());
         });
     }
 
@@ -1742,7 +1732,7 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
-            circuits.check_constraints();
+            assert!(circuits.check_constraints().unwrap());
         });
     }
 
@@ -1787,7 +1777,7 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
-            circuits.check_constraints();
+            assert!(circuits.check_constraints().unwrap());
         });
     }
 
@@ -1857,7 +1847,7 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key_n_bytes);
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
-            circuits.check_constraints();
+            assert_eq!(circuits.check_constraints().unwrap(), false);
         });
     }
 
@@ -1923,7 +1913,7 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
-            circuits.check_constraints();
+            assert_eq!(circuits.check_constraints().unwrap(), false);
         });
     }
 }
