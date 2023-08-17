@@ -51,7 +51,14 @@ use config_params::default_config_params;
 use config_params::EmailVerifyConfigParams;
 use halo2_base::halo2_proofs::circuit::{SimpleFloorPlanner, Value};
 use halo2_base::halo2_proofs::dev::MockProver;
+use halo2_base::halo2_proofs::halo2curves::bn256::Bn256;
+use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
+use halo2_base::halo2_proofs::halo2curves::bn256::G1Affine;
+use halo2_base::halo2_proofs::halo2curves::bn256::G1;
+use halo2_base::halo2_proofs::plonk::ProvingKey;
+use halo2_base::halo2_proofs::plonk::VerifyingKey;
 use halo2_base::halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
+use halo2_base::halo2_proofs::poly::kzg::commitment::ParamsKZG;
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
 use halo2_base::utils::{decompose_fe_to_u64_limbs, value_to_option};
 use halo2_base::QuantumCell;
@@ -75,6 +82,9 @@ pub use halo2_rsa;
 use halo2_rsa::*;
 use itertools::Itertools;
 use num_bigint::BigUint;
+use snark_verifier_sdk::evm::gen_evm_proof_shplonk;
+use snark_verifier_sdk::gen_pk;
+use snark_verifier_sdk::halo2::gen_proof_shplonk;
 use std::marker::PhantomData;
 // use regex_sha2_base64::RegexSha2Base64Config;
 use base64_circuit::*;
@@ -440,6 +450,292 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
             }
         }
         Ok(result)
+    }
+}
+
+impl EmailVerifyCircuits<Fr> {
+    pub fn setup<R: rand::RngCore>(&self, rng: R) -> ParamsKZG<Bn256> {
+        let config_params = default_config_params();
+        ParamsKZG::<Bn256>::setup(config_params.degree, rng)
+    }
+
+    pub fn gen_pks(&self, params: &ParamsKZG<Bn256>) -> Vec<ProvingKey<G1Affine>> {
+        let mut pks = vec![];
+        pks.push(gen_pk(params, &self.sha2_header, None));
+        pks.push(gen_pk(params, &self.sign_verify, None));
+        pks.push(gen_pk(params, &self.regex_header, None));
+        if self.header_expose_substrs {
+            pks.push(gen_pk(params, self.sha2_header_masked_substrs.as_ref().unwrap(), None));
+            pks.push(gen_pk(params, self.sha2_header_substr_ids.as_ref().unwrap(), None));
+        }
+        if self.body_enable {
+            pks.push(gen_pk(params, self.regex_bodyhash.as_ref().unwrap(), None));
+            pks.push(gen_pk(params, self.chars_shift_bodyhash.as_ref().unwrap(), None));
+            pks.push(gen_pk(params, self.sha2_body.as_ref().unwrap(), None));
+            pks.push(gen_pk(params, self.base64.as_ref().unwrap(), None));
+            pks.push(gen_pk(params, self.regex_body.as_ref().unwrap(), None));
+            if self.body_expose_substrs {
+                pks.push(gen_pk(params, self.sha2_body_masked_substrs.as_ref().unwrap(), None));
+                pks.push(gen_pk(params, self.sha2_body_substr_ids.as_ref().unwrap(), None));
+            }
+        }
+        pks
+    }
+
+    pub fn gen_vks(&self, pks: &[ProvingKey<G1Affine>]) -> Vec<VerifyingKey<G1Affine>> {
+        pks.iter().map(|pk| pk.get_vk().clone()).collect_vec()
+    }
+
+    pub fn prove<R: rand::Rng + Send>(&self, params: &ParamsKZG<Bn256>, pks: &[ProvingKey<G1Affine>], rng: &mut R) -> Vec<Vec<u8>> {
+        let mut proofs = vec![];
+        let mut pk_index = 0;
+        let instances = self.instances();
+        proofs.push(gen_proof_shplonk(
+            params,
+            &pks[pk_index],
+            self.sha2_header.clone(),
+            vec![vec![instances.header_bytes, instances.header_hash]],
+            rng,
+            None,
+        ));
+        pk_index += 1;
+        proofs.push(gen_proof_shplonk(
+            params,
+            &pks[pk_index],
+            self.sign_verify.clone(),
+            vec![vec![instances.public_key_n_hash, instances.header_hash, instances.tag]],
+            rng,
+            None,
+        ));
+        pk_index += 1;
+        proofs.push(gen_proof_shplonk(
+            params,
+            &pks[pk_index],
+            self.regex_header.clone(),
+            vec![vec![instances.header_bytes, instances.header_masked_substr, instances.header_substr_ids]],
+            rng,
+            None,
+        ));
+        pk_index += 1;
+        if self.header_expose_substrs {
+            proofs.push(gen_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.sha2_header_masked_substrs.as_ref().unwrap().clone(),
+                vec![vec![vec![instances.header_masked_substr], instances.header_masked_substr_hash.unwrap()].concat()],
+                rng,
+                None,
+            ));
+            pk_index += 1;
+            proofs.push(gen_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.sha2_header_substr_ids.as_ref().unwrap().clone(),
+                vec![vec![vec![instances.header_substr_ids], instances.header_substr_ids_hash.unwrap()].concat()],
+                rng,
+                None,
+            ));
+            pk_index += 1;
+        }
+        if self.body_enable {
+            proofs.push(gen_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.regex_bodyhash.as_ref().unwrap().clone(),
+                vec![vec![
+                    instances.header_bytes,
+                    instances.bodyhash_masked_substr.unwrap().clone(),
+                    instances.bodyhash_substr_ids.unwrap().clone(),
+                ]],
+                rng,
+                None,
+            ));
+            pk_index += 1;
+            proofs.push(gen_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.chars_shift_bodyhash.as_ref().unwrap().clone(),
+                vec![vec![
+                    instances.bodyhash_masked_substr.unwrap().clone(),
+                    instances.bodyhash_substr_ids.unwrap().clone(),
+                    instances.bodyhash_base64.unwrap().clone(),
+                ]],
+                rng,
+                None,
+            ));
+            pk_index += 1;
+            proofs.push(gen_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.sha2_body.as_ref().unwrap().clone(),
+                vec![vec![instances.body_bytes.unwrap().clone(), instances.bodyhash.unwrap().clone()]],
+                rng,
+                None,
+            ));
+            pk_index += 1;
+            proofs.push(gen_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.base64.as_ref().unwrap().clone(),
+                vec![vec![instances.bodyhash.unwrap().clone(), instances.bodyhash_base64.unwrap().clone()]],
+                rng,
+                None,
+            ));
+            pk_index += 1;
+            proofs.push(gen_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.regex_body.as_ref().unwrap().clone(),
+                vec![vec![
+                    instances.body_bytes.unwrap().clone(),
+                    instances.body_masked_substr.unwrap().clone(),
+                    instances.body_substr_ids.unwrap().clone(),
+                ]],
+                rng,
+                None,
+            ));
+            pk_index += 1;
+            if self.body_expose_substrs {
+                proofs.push(gen_proof_shplonk(
+                    params,
+                    &pks[pk_index],
+                    self.sha2_body_masked_substrs.as_ref().unwrap().clone(),
+                    vec![vec![vec![instances.body_masked_substr.unwrap().clone()], instances.body_masked_substr_hash.unwrap().clone()].concat()],
+                    rng,
+                    None,
+                ));
+                pk_index += 1;
+                proofs.push(gen_proof_shplonk(
+                    params,
+                    &pks[pk_index],
+                    self.sha2_body_substr_ids.as_ref().unwrap().clone(),
+                    vec![vec![vec![instances.body_substr_ids.unwrap().clone()], instances.body_substr_ids_hash.unwrap().clone()].concat()],
+                    rng,
+                    None,
+                ));
+            }
+        }
+        proofs
+    }
+
+    pub fn evm_prove<R: rand::Rng + Send>(&self, params: &ParamsKZG<Bn256>, pks: &[ProvingKey<G1Affine>], rng: &mut R) -> Vec<Vec<u8>> {
+        let mut proofs = vec![];
+        let mut pk_index = 0;
+        let instances = self.instances();
+        proofs.push(gen_evm_proof_shplonk(
+            params,
+            &pks[pk_index],
+            self.sha2_header.clone(),
+            vec![vec![instances.header_bytes, instances.header_hash]],
+            rng,
+        ));
+        pk_index += 1;
+        proofs.push(gen_evm_proof_shplonk(
+            params,
+            &pks[pk_index],
+            self.sign_verify.clone(),
+            vec![vec![instances.public_key_n_hash, instances.header_hash, instances.tag]],
+            rng,
+        ));
+        pk_index += 1;
+        proofs.push(gen_evm_proof_shplonk(
+            params,
+            &pks[pk_index],
+            self.regex_header.clone(),
+            vec![vec![instances.header_bytes, instances.header_masked_substr, instances.header_substr_ids]],
+            rng,
+        ));
+        pk_index += 1;
+        if self.header_expose_substrs {
+            proofs.push(gen_evm_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.sha2_header_masked_substrs.as_ref().unwrap().clone(),
+                vec![vec![vec![instances.header_masked_substr], instances.header_masked_substr_hash.unwrap()].concat()],
+                rng,
+            ));
+            pk_index += 1;
+            proofs.push(gen_evm_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.sha2_header_substr_ids.as_ref().unwrap().clone(),
+                vec![vec![vec![instances.header_substr_ids], instances.header_substr_ids_hash.unwrap()].concat()],
+                rng,
+            ));
+            pk_index += 1;
+        }
+        if self.body_enable {
+            proofs.push(gen_evm_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.regex_bodyhash.as_ref().unwrap().clone(),
+                vec![vec![
+                    instances.header_bytes,
+                    instances.bodyhash_masked_substr.unwrap().clone(),
+                    instances.bodyhash_substr_ids.unwrap().clone(),
+                ]],
+                rng,
+            ));
+            pk_index += 1;
+            proofs.push(gen_evm_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.chars_shift_bodyhash.as_ref().unwrap().clone(),
+                vec![vec![
+                    instances.bodyhash_masked_substr.unwrap().clone(),
+                    instances.bodyhash_substr_ids.unwrap().clone(),
+                    instances.bodyhash_base64.unwrap().clone(),
+                ]],
+                rng,
+            ));
+            pk_index += 1;
+            proofs.push(gen_evm_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.sha2_body.as_ref().unwrap().clone(),
+                vec![vec![instances.body_bytes.unwrap().clone(), instances.bodyhash.unwrap().clone()]],
+                rng,
+            ));
+            pk_index += 1;
+            proofs.push(gen_evm_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.base64.as_ref().unwrap().clone(),
+                vec![vec![instances.bodyhash.unwrap().clone(), instances.bodyhash_base64.unwrap().clone()]],
+                rng,
+            ));
+            pk_index += 1;
+            proofs.push(gen_evm_proof_shplonk(
+                params,
+                &pks[pk_index],
+                self.regex_body.as_ref().unwrap().clone(),
+                vec![vec![
+                    instances.body_bytes.unwrap().clone(),
+                    instances.body_masked_substr.unwrap().clone(),
+                    instances.body_substr_ids.unwrap().clone(),
+                ]],
+                rng,
+            ));
+            pk_index += 1;
+            if self.body_expose_substrs {
+                proofs.push(gen_evm_proof_shplonk(
+                    params,
+                    &pks[pk_index],
+                    self.sha2_body_masked_substrs.as_ref().unwrap().clone(),
+                    vec![vec![vec![instances.body_masked_substr.unwrap().clone()], instances.body_masked_substr_hash.unwrap().clone()].concat()],
+                    rng,
+                ));
+                pk_index += 1;
+                proofs.push(gen_evm_proof_shplonk(
+                    params,
+                    &pks[pk_index],
+                    self.sha2_body_substr_ids.as_ref().unwrap().clone(),
+                    vec![vec![vec![instances.body_substr_ids.unwrap().clone()], instances.body_substr_ids_hash.unwrap().clone()].concat()],
+                    rng,
+                ));
+            }
+        }
+        proofs
     }
 }
 
