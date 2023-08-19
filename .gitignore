@@ -18,7 +18,8 @@ Cargo.lock
 /test_data/*.txt
 *.bin
 *.hex
-*.sol
+/*.sol
+/examples/*.sol
 /benches/*.pk
 /benches/*.vk
 /benches/*.hex

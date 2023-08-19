@@ -24,6 +24,7 @@ pub mod base64_circuit;
 // mod helpers;
 pub mod chars_shift;
 pub mod config_params;
+pub mod eth;
 pub mod regex_circuit;
 pub mod sha2_circuit;
 /// Regex verification + SHA256 computation.
@@ -36,6 +37,7 @@ pub mod sign_verify;
 // pub mod utils;
 pub mod wtns_commit;
 use std::fs::File;
+use std::marker::PhantomData;
 
 // pub use crate::helpers::*;
 // use crate::regex_sha2::RegexSha2Config;
@@ -50,15 +52,22 @@ use chars_shift::CharsShiftBodyHashCircuit;
 use config_params::default_config_params;
 use config_params::EmailVerifyConfigParams;
 use halo2_base::halo2_proofs::circuit::{SimpleFloorPlanner, Value};
+use halo2_base::halo2_proofs::dev::CircuitCost;
+use halo2_base::halo2_proofs::dev::CircuitGates;
 use halo2_base::halo2_proofs::dev::MockProver;
 use halo2_base::halo2_proofs::halo2curves::bn256::Bn256;
 use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
 use halo2_base::halo2_proofs::halo2curves::bn256::G1Affine;
 use halo2_base::halo2_proofs::halo2curves::bn256::G1;
+use halo2_base::halo2_proofs::plonk::verify_proof;
 use halo2_base::halo2_proofs::plonk::ProvingKey;
 use halo2_base::halo2_proofs::plonk::VerifyingKey;
 use halo2_base::halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
+use halo2_base::halo2_proofs::poly::commitment::ParamsProver;
 use halo2_base::halo2_proofs::poly::kzg::commitment::ParamsKZG;
+use halo2_base::halo2_proofs::poly::kzg::multiopen::VerifierSHPLONK;
+use halo2_base::halo2_proofs::poly::kzg::strategy::AccumulatorStrategy;
+use halo2_base::halo2_proofs::poly::VerificationStrategy;
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
 use halo2_base::utils::{decompose_fe_to_u64_limbs, value_to_option};
 use halo2_base::QuantumCell;
@@ -85,7 +94,8 @@ use num_bigint::BigUint;
 use snark_verifier_sdk::evm::gen_evm_proof_shplonk;
 use snark_verifier_sdk::gen_pk;
 use snark_verifier_sdk::halo2::gen_proof_shplonk;
-use std::marker::PhantomData;
+use snark_verifier_sdk::halo2::PoseidonTranscript;
+use snark_verifier_sdk::NativeLoader;
 // use regex_sha2_base64::RegexSha2Base64Config;
 use base64_circuit::*;
 use halo2_base64::Base64Config;
@@ -98,27 +108,6 @@ use snark_verifier_sdk::CircuitExt;
 use std::io::{Read, Write};
 
 pub const BODYHASH_BYTES: usize = 44;
-
-#[derive(Debug, Clone)]
-pub struct EmailVerifyInstances<F: PrimeField> {
-    header_bytes: F,
-    header_hash: F,
-    public_key_n_hash: F,
-    tag: F,
-    header_masked_substr: F,
-    header_substr_ids: F,
-    header_masked_substr_hash: Option<Vec<F>>,
-    header_substr_ids_hash: Option<Vec<F>>,
-    bodyhash_masked_substr: Option<F>,
-    bodyhash_substr_ids: Option<F>,
-    bodyhash_base64: Option<F>,
-    body_bytes: Option<F>,
-    bodyhash: Option<F>,
-    body_masked_substr: Option<F>,
-    body_substr_ids: Option<F>,
-    body_masked_substr_hash: Option<Vec<F>>,
-    body_substr_ids_hash: Option<Vec<F>>,
-}
 
 #[derive(Debug, Clone)]
 pub struct EmailVerifyCircuits<F: PrimeField> {
@@ -736,6 +725,195 @@ impl EmailVerifyCircuits<Fr> {
             }
         }
         proofs
+    }
+
+    pub fn print_costs(&self) {
+        let config_params = default_config_params();
+        let k = config_params.degree as usize;
+        let measured = CircuitCost::<G1, _>::measure(k, &self.sha2_header);
+        println!("sha2_header: {:?}", measured);
+        let gates = CircuitGates::collect::<Fr, Sha256HeaderCircuit<Fr>>();
+        println!("sha2_header gates: {}", gates);
+        let measured = CircuitCost::<G1, _>::measure(k, &self.sign_verify);
+        println!("sign_verify: {:?}", measured);
+        let gates = CircuitGates::collect::<Fr, SignVerifyCircuit<Fr>>();
+        println!("sign_verify gates: {}", gates);
+        let measured = CircuitCost::<G1, _>::measure(k, &self.regex_header);
+        println!("regex_header: {:?}", measured);
+        let gates = CircuitGates::collect::<Fr, RegexHeaderCircuit<Fr>>();
+        println!("regex_header gates: {}", gates);
+        if self.header_expose_substrs {
+            let measured = CircuitCost::<G1, _>::measure(k, self.sha2_header_masked_substrs.as_ref().unwrap());
+            println!("sha2_header_masked_substrs: {:?}", measured);
+            let gates = CircuitGates::collect::<Fr, Sha256HeaderMaskedSubstrsCircuit<Fr>>();
+            println!("sha2_header_masked_substrs gates: {}", gates);
+            let measured = CircuitCost::<G1, _>::measure(k, self.sha2_header_substr_ids.as_ref().unwrap());
+            println!("sha2_header_substr_ids: {:?}", measured);
+            let gates = CircuitGates::collect::<Fr, Sha256HeaderSubstrIdsCircuit<Fr>>();
+            println!("sha2_header_substr_ids gates: {}", gates);
+        }
+        if self.body_enable {
+            let measured = CircuitCost::<G1, _>::measure(k, self.regex_bodyhash.as_ref().unwrap());
+            println!("regex_bodyhash: {:?}", measured);
+            let gates = CircuitGates::collect::<Fr, RegexBodyHashCircuit<Fr>>();
+            println!("regex_bodyhash gates: {}", gates);
+            let measured = CircuitCost::<G1, _>::measure(k, self.chars_shift_bodyhash.as_ref().unwrap());
+            println!("chars_shift_bodyhash: {:?}", measured);
+            let gates = CircuitGates::collect::<Fr, CharsShiftBodyHashCircuit<Fr>>();
+            println!("chars_shift_bodyhash gates: {}", gates);
+            let measured = CircuitCost::<G1, _>::measure(k, self.sha2_body.as_ref().unwrap());
+            println!("sha2_body: {:?}", measured);
+            let gates = CircuitGates::collect::<Fr, Sha256BodyCircuit<Fr>>();
+            println!("sha2_body gates: {}", gates);
+            let measured = CircuitCost::<G1, _>::measure(k, self.base64.as_ref().unwrap());
+            println!("base64: {:?}", measured);
+            let gates = CircuitGates::collect::<Fr, Base64Circuit<Fr>>();
+            println!("base64 gates: {}", gates);
+            let measured = CircuitCost::<G1, _>::measure(k, self.regex_body.as_ref().unwrap());
+            println!("regex_body: {:?}", measured);
+            let gates = CircuitGates::collect::<Fr, RegexBodyCircuit<Fr>>();
+            println!("regex_body gates: {}", gates);
+            if self.body_expose_substrs {
+                let measured = CircuitCost::<G1, _>::measure(k, self.sha2_body_masked_substrs.as_ref().unwrap());
+                println!("sha2_body_masked_substrs: {:?}", measured);
+                let gates = CircuitGates::collect::<Fr, Sha256BodyMaskedSubstrsCircuit<Fr>>();
+                println!("sha256_body_masked_substrs gates: {}", gates);
+                let measured = CircuitCost::<G1, _>::measure(k, self.sha2_body_substr_ids.as_ref().unwrap());
+                println!("sha2_body_substr_ids: {:?}", measured);
+                let gates = CircuitGates::collect::<Fr, Sha256BodySubstrIdsCircuit<Fr>>();
+                println!("sha2_body_substr_ids gates: {}", gates);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EmailVerifyInstances<F: PrimeField> {
+    header_bytes: F,
+    header_hash: F,
+    public_key_n_hash: F,
+    tag: F,
+    header_masked_substr: F,
+    header_substr_ids: F,
+    header_masked_substr_hash: Option<Vec<F>>,
+    header_substr_ids_hash: Option<Vec<F>>,
+    bodyhash_masked_substr: Option<F>,
+    bodyhash_substr_ids: Option<F>,
+    bodyhash_base64: Option<F>,
+    body_bytes: Option<F>,
+    bodyhash: Option<F>,
+    body_masked_substr: Option<F>,
+    body_substr_ids: Option<F>,
+    body_masked_substr_hash: Option<Vec<F>>,
+    body_substr_ids_hash: Option<Vec<F>>,
+}
+
+impl EmailVerifyInstances<Fr> {
+    pub fn verify_proof(&self, params: &ParamsKZG<Bn256>, vks: &[VerifyingKey<G1Affine>], proofs: &[&[u8]]) -> bool {
+        let config_params = default_config_params();
+        let mut result = true;
+        let mut vk_index = 0;
+        let verify_proof = |params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, proof: &[u8], instances: &[Fr]| {
+            let mut transcript_read = PoseidonTranscript::<NativeLoader, &[u8]>::new(proof);
+            VerificationStrategy::<_, VerifierSHPLONK<Bn256>>::finalize(
+                verify_proof::<_, VerifierSHPLONK<Bn256>, _, _, _>(
+                    params.verifier_params(),
+                    vk,
+                    AccumulatorStrategy::new(params.verifier_params()),
+                    &[&[instances]],
+                    &mut transcript_read,
+                )
+                .unwrap(),
+            )
+        };
+        result &= verify_proof(params, &vks[vk_index], proofs[vk_index], &vec![self.header_bytes, self.header_hash]);
+        vk_index += 1;
+        result &= verify_proof(params, &vks[vk_index], proofs[vk_index], &vec![self.public_key_n_hash, self.header_hash, self.tag]);
+        vk_index += 1;
+        result &= verify_proof(
+            params,
+            &vks[vk_index],
+            proofs[vk_index],
+            &vec![self.header_bytes, self.header_masked_substr, self.header_substr_ids],
+        );
+        vk_index += 1;
+        if config_params.header_config.as_ref().unwrap().expose_substrs.unwrap_or(false) {
+            result &= verify_proof(
+                params,
+                &vks[vk_index],
+                proofs[vk_index],
+                &vec![vec![self.header_masked_substr], self.header_masked_substr_hash.as_ref().unwrap().clone()].concat(),
+            );
+            vk_index += 1;
+            result &= verify_proof(
+                params,
+                &vks[vk_index],
+                proofs[vk_index],
+                &vec![vec![self.header_substr_ids], self.header_substr_ids_hash.as_ref().unwrap().clone()].concat(),
+            );
+            vk_index += 1;
+        }
+        if let Some(body_config) = config_params.body_config.as_ref() {
+            result &= verify_proof(
+                params,
+                &vks[vk_index],
+                proofs[vk_index],
+                &vec![self.header_bytes, self.bodyhash_masked_substr.unwrap().clone(), self.bodyhash_substr_ids.unwrap().clone()],
+            );
+            vk_index += 1;
+            result &= verify_proof(
+                params,
+                &vks[vk_index],
+                proofs[vk_index],
+                &vec![
+                    self.bodyhash_masked_substr.unwrap().clone(),
+                    self.bodyhash_substr_ids.unwrap().clone(),
+                    self.bodyhash_base64.unwrap().clone(),
+                ],
+            );
+            vk_index += 1;
+            result &= verify_proof(
+                params,
+                &vks[vk_index],
+                proofs[vk_index],
+                &vec![self.body_bytes.unwrap().clone(), self.bodyhash.unwrap().clone()],
+            );
+            vk_index += 1;
+            result &= verify_proof(
+                params,
+                &vks[vk_index],
+                proofs[vk_index],
+                &vec![self.bodyhash.unwrap().clone(), self.bodyhash_base64.unwrap().clone()],
+            );
+            vk_index += 1;
+            result &= verify_proof(
+                params,
+                &vks[vk_index],
+                proofs[vk_index],
+                &vec![
+                    self.body_bytes.unwrap().clone(),
+                    self.body_masked_substr.unwrap().clone(),
+                    self.body_substr_ids.unwrap().clone(),
+                ],
+            );
+            vk_index += 1;
+            if body_config.expose_substrs.unwrap_or(false) {
+                result &= verify_proof(
+                    params,
+                    &vks[vk_index],
+                    proofs[vk_index],
+                    &vec![vec![self.body_masked_substr.unwrap().clone()], self.body_masked_substr_hash.as_ref().unwrap().clone()].concat(),
+                );
+                vk_index += 1;
+                result &= verify_proof(
+                    params,
+                    &vks[vk_index],
+                    proofs[vk_index],
+                    &vec![vec![self.body_substr_ids.unwrap().clone()], self.body_substr_ids_hash.as_ref().unwrap().clone()].concat(),
+                );
+            }
+        }
+        result
     }
 }
 
@@ -1764,7 +1942,7 @@ mod test {
     use halo2_rsa::RSAPubE;
     use mailparse::parse_mail;
     use num_bigint::BigUint;
-    use rand::thread_rng;
+    use rand::{rngs::OsRng, thread_rng};
     use rsa::{PublicKeyParts, RsaPrivateKey};
     use snark_verifier_sdk::CircuitExt;
     use std::{fs::File, io::Read, path::Path};
@@ -1826,6 +2004,7 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.print_costs();
             assert!(circuits.check_constraints().unwrap());
         });
     }
@@ -1896,6 +2075,7 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.print_costs();
             assert!(circuits.check_constraints().unwrap());
         });
     }
@@ -1962,6 +2142,7 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.print_costs();
             assert!(circuits.check_constraints().unwrap());
         });
     }
@@ -2028,6 +2209,7 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.print_costs();
             assert!(circuits.check_constraints().unwrap());
         });
     }
@@ -2073,6 +2255,7 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.print_costs();
             assert!(circuits.check_constraints().unwrap());
         });
     }
@@ -2143,6 +2326,7 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key_n_bytes);
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.print_costs();
             assert_eq!(circuits.check_constraints().unwrap(), false);
         });
     }
@@ -2209,7 +2393,81 @@ mod test {
             let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
             let tag = Fr::zero();
             let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            circuits.print_costs();
             assert_eq!(circuits.check_constraints().unwrap(), false);
+        });
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_proof_gen() {
+        let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();
+        regex_bodyhash_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/bodyhash_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/bodyhash_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_from_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/from_defs.json").unwrap()).unwrap();
+        regex_from_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/from_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/from_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_to_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/to_defs.json").unwrap()).unwrap();
+        regex_to_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/to_allstr.txt").to_path_buf(),
+                &[Path::new("./test_data/to_substr_0.txt").to_path_buf()],
+            )
+            .unwrap();
+        let regex_subject_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/subject_defs.json").unwrap()).unwrap();
+        regex_subject_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/subject_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/subject_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/subject_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let regex_body_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/test_ex2_email_body_defs.json").unwrap()).unwrap();
+        regex_body_decomposed
+            .gen_regex_files(
+                &Path::new("./test_data/test_ex2_email_body_allstr.txt").to_path_buf(),
+                &[
+                    Path::new("./test_data/test_ex2_email_body_substr_0.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex2_email_body_substr_1.txt").to_path_buf(),
+                    Path::new("./test_data/test_ex2_email_body_substr_2.txt").to_path_buf(),
+                ],
+            )
+            .unwrap();
+        let email_bytes = {
+            let mut f = File::open("./test_data/test_email2.eml").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            buf
+        };
+
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let public_key = resolve_public_key(&logger, &email_bytes).await.unwrap();
+        let public_key = match public_key {
+            cfdkim::DkimPublicKey::Rsa(pk) => pk,
+            _ => panic!("not supportted public key type."),
+        };
+        temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex2_email_verify.config"), move || {
+            let public_key_n = BigUint::from_bytes_be(&public_key.n().to_bytes_be());
+            let tag = Fr::zero();
+            let circuits = EmailVerifyCircuits::new(&email_bytes, public_key_n, tag);
+            let config_params = default_config_params();
+            let params = ParamsKZG::<Bn256>::new(config_params.degree);
+            let pks = circuits.gen_pks(&params);
+            let vks = circuits.gen_vks(&pks);
+            let proofs = circuits.prove(&params, &pks, &mut OsRng);
+            let instances = circuits.instances();
+            assert!(instances.verify_proof(&params, &vks, &proofs.iter().map(|vec| vec.as_slice()).collect_vec().as_slice()));
         });
     }
 }

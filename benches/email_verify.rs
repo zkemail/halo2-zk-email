@@ -139,21 +139,13 @@ fn bench_email_verify1(c: &mut Criterion) {
         cfdkim::DkimPublicKey::Rsa(pk) => pk,
         _ => panic!("not supportted public key type."),
     };
-    let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-    println!("header len\n {}", canonicalized_header.len());
-    println!("body len\n {}", canonicalized_body.len());
-    println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
-    println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
-    let e = RSAPubE::Fix(BigUint::from(DefaultEmailVerifyCircuit::<Fr>::DEFAULT_E));
-    let n_big = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
-    let public_key = RSAPublicKey::<Fr>::new(Value::known(BigUint::from(n_big)), e);
-    let signature = RSASignature::<Fr>::new(Value::known(BigUint::from_bytes_be(&signature_bytes)));
-    let circuit = DefaultEmailVerifyCircuit {
-        header_bytes: canonicalized_header,
-        body_bytes: canonicalized_body,
-        public_key,
-        signature,
-    };
+    // let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
+    // println!("header len\n {}", canonicalized_header.len());
+    // println!("body len\n {}", canonicalized_body.len());
+    // println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
+    // println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
+    let public_key_n = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
+    let circuit = DefaultEmailVerifyCircuit::new(email_bytes, public_key_n);
 
     // let hash = Sha256::digest(&canonicalized_body);
     // let mut expected_output = Vec::new();
