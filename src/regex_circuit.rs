@@ -35,7 +35,8 @@ macro_rules! impl_regex_circuit {
         pub struct $circuit_name<F: PrimeField> {
             input: Vec<u8>,
             regex_defs: Vec<RegexDefs>,
-            substr_regexes: Vec<Vec<String>>,
+            pub substrs: Vec<Option<(String, usize)>>,
+            // substr_regexes: Vec<Vec<String>>,
             sign_rand: F,
         }
 
@@ -47,7 +48,8 @@ macro_rules! impl_regex_circuit {
                 Self {
                     input: vec![0; self.input.len()],
                     regex_defs: self.regex_defs.clone(),
-                    substr_regexes: self.substr_regexes.clone(),
+                    substrs: vec![None; self.substrs.len()],
+                    // substr_regexes: self.substr_regexes.clone(),
                     sign_rand: F::zero(),
                 }
             }
@@ -115,7 +117,7 @@ macro_rules! impl_regex_circuit {
             }
 
             fn instances(&self) -> Vec<Vec<F>> {
-                let (expected_masked_chars, expected_substr_ids) = get_expected_substr_chars_and_ids(&self.input, &self.substr_regexes, $max_chars_size);
+                let (expected_masked_chars, expected_substr_ids) = substrs2expected_chars_and_ids($max_chars_size, &self.substrs);
                 let padding_size = $max_chars_size - self.input.len();
                 let input_bytes = vec![&self.input[..], &vec![0; padding_size]].concat();
                 let input_commit = value_commit_wtns_bytes(&self.sign_rand, &input_bytes);
@@ -126,11 +128,11 @@ macro_rules! impl_regex_circuit {
         }
 
         impl<F: PrimeField> $circuit_name<F> {
-            pub fn new(input: Vec<u8>, regex_defs: Vec<RegexDefs>, substr_regexes: Vec<Vec<String>>, sign_rand: F) -> Self {
+            pub fn new(input: Vec<u8>, regex_defs: Vec<RegexDefs>, substrs: Vec<Option<(String, usize)>>, sign_rand: F) -> Self {
                 Self {
                     input,
                     regex_defs,
-                    substr_regexes,
+                    substrs,
                     sign_rand,
                 }
             }
@@ -138,43 +140,37 @@ macro_rules! impl_regex_circuit {
     };
 }
 
-pub fn get_expected_substr_chars_and_ids(input: &[u8], substr_regexes: &[Vec<String>], max_chars_size: usize) -> (Vec<u8>, Vec<u8>) {
-    let input_str = String::from_utf8(input.to_vec()).unwrap();
-    let substrs = substr_regexes.iter().map(|regexes| get_substr(&input_str, regexes)).collect_vec();
+pub fn substrs2expected_chars_and_ids(max_chars_size: usize, substrs: &[Option<(String, usize)>]) -> (Vec<u8>, Vec<u8>) {
     let mut expected_masked_chars = vec![0u8; max_chars_size];
     let mut expected_substr_ids = vec![0u8; max_chars_size]; // We only support up to 256 substring patterns.
-    for (substr_idx, m) in substrs.iter().enumerate() {
-        if let Some((start, chars)) = m {
+    for (substr_idx, substr) in substrs.iter().enumerate() {
+        if let Some((chars, start)) = substr {
             for (idx, char) in chars.as_bytes().iter().enumerate() {
                 expected_masked_chars[start + idx] = *char;
                 expected_substr_ids[start + idx] = substr_idx as u8 + 1;
             }
         }
     }
+    // let expected_masked_chars_hash = value_bytes2fields(&Sha256::digest(&expected_masked_chars).to_vec());
+    // let expected_substr_ids_hash = value_bytes2fields(&Sha256::digest(&expected_masked_chars).to_vec());
     (expected_masked_chars, expected_substr_ids)
 }
 
-pub fn get_substr(input_str: &str, regexes: &[String]) -> Option<(usize, String)> {
-    let regexes = regexes.into_iter().map(|raw| Regex::new(&raw).unwrap()).collect_vec();
-    let mut start = 0;
-    let mut substr = input_str;
-    // println!("first regex {}", regexes[0]);
-    for regex in regexes.into_iter() {
-        // println!(r"regex {}", regex);
-        match regex.find(substr).unwrap() {
-            Some(m) => {
-                start += m.start();
-                substr = m.as_str();
-            }
-            None => {
-                return None;
-            }
-        };
-    }
-    // println!("substr {}", substr);
-    // println!("start {}", start);
-    Some((start, substr.to_string()))
-}
+// pub fn get_expected_substr_chars_and_ids(input: &[u8], substr_regexes: &[Vec<String>], max_chars_size: usize) -> (Vec<u8>, Vec<u8>) {
+//     let input_str = String::from_utf8(input.to_vec()).unwrap();
+//     let substrs = substr_regexes.iter().map(|regexes| get_substr(&input_str, regexes)).collect_vec();
+//     let mut expected_masked_chars = vec![0u8; max_chars_size];
+//     let mut expected_substr_ids = vec![0u8; max_chars_size]; // We only support up to 256 substring patterns.
+//     for (substr_idx, m) in substrs.iter().enumerate() {
+//         if let Some((start, chars)) = m {
+//             for (idx, char) in chars.as_bytes().iter().enumerate() {
+//                 expected_masked_chars[start + idx] = *char;
+//                 expected_substr_ids[start + idx] = substr_idx as u8 + 1;
+//             }
+//         }
+//     }
+//     (expected_masked_chars, expected_substr_ids)
+// }
 
 // impl_regex_circuit!(DummyRegexCircuit, 1, 1, 1, 1);
 impl_regex_circuit!(

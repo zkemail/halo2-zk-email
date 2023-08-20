@@ -51,6 +51,7 @@ use cfdkim::resolve_public_key;
 use chars_shift::CharsShiftBodyHashCircuit;
 use config_params::default_config_params;
 use config_params::EmailVerifyConfigParams;
+use fancy_regex::Regex;
 use halo2_base::halo2_proofs::circuit::{SimpleFloorPlanner, Value};
 use halo2_base::halo2_proofs::dev::CircuitCost;
 use halo2_base::halo2_proofs::dev::CircuitGates;
@@ -69,6 +70,7 @@ use halo2_base::halo2_proofs::poly::kzg::multiopen::VerifierSHPLONK;
 use halo2_base::halo2_proofs::poly::kzg::strategy::AccumulatorStrategy;
 use halo2_base::halo2_proofs::poly::VerificationStrategy;
 use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
+use halo2_base::utils::fe_to_biguint;
 use halo2_base::utils::{decompose_fe_to_u64_limbs, value_to_option};
 use halo2_base::QuantumCell;
 use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
@@ -97,6 +99,7 @@ use snark_verifier_sdk::halo2::gen_proof_shplonk;
 use snark_verifier_sdk::halo2::PoseidonTranscript;
 use snark_verifier_sdk::NativeLoader;
 // use regex_sha2_base64::RegexSha2Base64Config;
+use ark_std::{end_timer, start_timer};
 use base64_circuit::*;
 use halo2_base64::Base64Config;
 use regex_circuit::*;
@@ -114,14 +117,14 @@ pub struct EmailVerifyCircuits<F: PrimeField> {
     pub sha2_header: Sha256HeaderCircuit<F>,
     pub sign_verify: SignVerifyCircuit<F>,
     pub regex_header: RegexHeaderCircuit<F>,
-    pub sha2_header_masked_substrs: Option<Sha256HeaderMaskedSubstrsCircuit<F>>,
+    pub sha2_header_masked_chars: Option<Sha256HeaderMaskedCharsCircuit<F>>,
     pub sha2_header_substr_ids: Option<Sha256HeaderSubstrIdsCircuit<F>>,
     pub regex_bodyhash: Option<RegexBodyHashCircuit<F>>,
     pub chars_shift_bodyhash: Option<CharsShiftBodyHashCircuit<F>>,
     pub sha2_body: Option<Sha256BodyCircuit<F>>,
     pub base64: Option<Base64Circuit<F>>,
     pub regex_body: Option<RegexBodyCircuit<F>>,
-    pub sha2_body_masked_substrs: Option<Sha256BodyMaskedSubstrsCircuit<F>>,
+    pub sha2_body_masked_chars: Option<Sha256BodyMaskedCharsCircuit<F>>,
     pub sha2_body_substr_ids: Option<Sha256BodySubstrIdsCircuit<F>>,
     pub sign_rand: F,
     pub tag: F,
@@ -152,30 +155,30 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
                 RegexDefs { allstr, substrs }
             })
             .collect_vec();
-        let regex_header = RegexHeaderCircuit::new(canonicalized_header.clone(), header_regex_defs, header_config.substr_regexes.clone(), sign_rand);
-        let (sha2_header_masked_substrs, sha2_header_substr_ids) = if header_config.expose_substrs.unwrap_or(false) {
-            let (expected_masked_chars, expected_substr_ids) =
-                get_expected_substr_chars_and_ids(&canonicalized_header, &header_config.substr_regexes, header_config.max_variable_byte_size);
-            let sha2_header_masked_substrs = Sha256HeaderMaskedSubstrsCircuit::new(expected_masked_chars, sign_rand);
+        let header_str = String::from_utf8(canonicalized_header.clone()).expect("invalid utf8 of header");
+        let header_substrs = header_config.substr_regexes.iter().map(|regex| Self::get_substr(&header_str, regex)).collect_vec();
+        let regex_header = RegexHeaderCircuit::new(canonicalized_header.clone(), header_regex_defs, header_substrs, sign_rand);
+        let (sha2_header_masked_chars, sha2_header_substr_ids) = if header_config.expose_substrs.unwrap_or(false) {
+            let (expected_masked_chars, expected_substr_ids) = substrs2expected_chars_and_ids(header_config.max_variable_byte_size, &regex_header.substrs);
+            let sha2_header_masked_chars = Sha256HeaderMaskedCharsCircuit::new(expected_masked_chars, sign_rand);
             let sha2_header_substr_ids = Sha256HeaderSubstrIdsCircuit::new(expected_substr_ids, sign_rand);
-            (Some(sha2_header_masked_substrs), Some(sha2_header_substr_ids))
+            (Some(sha2_header_masked_chars), Some(sha2_header_substr_ids))
         } else {
             (None, None)
         };
-        let (regex_bodyhash, chars_shift_bodyhash, sha2_body, base64, regex_body, sha2_body_masked_substrs, sha2_body_substr_ids) =
+        let (regex_bodyhash, chars_shift_bodyhash, sha2_body, base64, regex_body, sha2_body_masked_chars, sha2_body_substr_ids) =
             if let Some(body_config) = config_params.body_config.as_ref() {
                 let bodyhash_regex_def = {
                     let allstr = AllstrRegexDef::read_from_text(&header_config.bodyhash_allstr_filepath);
                     let substr = SubstrRegexDef::read_from_text(&header_config.bodyhash_substr_filepath);
                     RegexDefs { allstr, substrs: vec![substr] }
                 };
-                let bodyhash_substr_regexes = vec![vec![Self::BODYHASH_REGEX.to_string()]];
-                let (bodyhash_masked_chars, bodyhash_substr_ids) =
-                    get_expected_substr_chars_and_ids(&canonicalized_header, &bodyhash_substr_regexes, header_config.max_variable_byte_size);
-                let regex_bodyhash = RegexBodyHashCircuit::new(canonicalized_header.clone(), vec![bodyhash_regex_def], bodyhash_substr_regexes, sign_rand);
-                let chars_shift_bodyhash = CharsShiftBodyHashCircuit::new(1, bodyhash_masked_chars, bodyhash_substr_ids, BODYHASH_BYTES, sign_rand);
-                let (expected_masked_chars, expected_substr_ids) =
-                    get_expected_substr_chars_and_ids(&canonicalized_body, &body_config.substr_regexes, body_config.max_variable_byte_size);
+                let bodyhash_substr = Self::get_substr(&header_str, &[Self::BODYHASH_REGEX.to_string()]);
+                let regex_bodyhash = RegexBodyHashCircuit::new(canonicalized_header.clone(), vec![bodyhash_regex_def], vec![bodyhash_substr], sign_rand);
+                let (expected_bodyhash_substrs, expected_bodyhash_substr_ids) = substrs2expected_chars_and_ids(header_config.max_variable_byte_size, &regex_bodyhash.substrs);
+                let chars_shift_bodyhash = CharsShiftBodyHashCircuit::new(1, expected_bodyhash_substrs, expected_bodyhash_substr_ids, BODYHASH_BYTES, sign_rand);
+                // let (expected_masked_chars, expected_substr_ids) =
+                //     get_expected_substr_chars_and_ids(&canonicalized_body, &body_config.substr_regexes, body_config.max_variable_byte_size);
                 let sha2_body = Sha256BodyCircuit::new(canonicalized_body.clone(), sign_rand);
                 let bodyhash = Sha256::digest(&canonicalized_body).to_vec();
                 let base64 = Base64Circuit::new(bodyhash, sign_rand);
@@ -189,11 +192,14 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
                         RegexDefs { allstr, substrs }
                     })
                     .collect_vec();
-                let regex_body = RegexBodyCircuit::new(canonicalized_body.clone(), body_regex_defs, body_config.substr_regexes.clone(), sign_rand);
-                let (sha2_body_masked_substrs, sha2_body_substr_ids) = if body_config.expose_substrs.unwrap_or(false) {
-                    let sha2_body_masked_substrs = Sha256BodyMaskedSubstrsCircuit::new(expected_masked_chars, sign_rand);
-                    let sha2_body_substr_ids = Sha256BodySubstrIdsCircuit::new(expected_substr_ids, sign_rand);
-                    (Some(sha2_body_masked_substrs), Some(sha2_body_substr_ids))
+                let body_str = String::from_utf8(canonicalized_body.clone()).expect("invalid utf8 of body");
+                let body_substrs = body_config.substr_regexes.iter().map(|regex| Self::get_substr(&body_str, regex)).collect_vec();
+                let regex_body = RegexBodyCircuit::new(canonicalized_body.clone(), body_regex_defs, body_substrs, sign_rand);
+                let (sha2_body_masked_chars, sha2_body_substr_ids) = if body_config.expose_substrs.unwrap_or(false) {
+                    let (expected_body_substrs, expected_body_substr_ids) = substrs2expected_chars_and_ids(body_config.max_variable_byte_size, &regex_body.substrs);
+                    let sha2_body_masked_chars = Sha256BodyMaskedCharsCircuit::new(expected_body_substrs, sign_rand);
+                    let sha2_body_substr_ids = Sha256BodySubstrIdsCircuit::new(expected_body_substr_ids, sign_rand);
+                    (Some(sha2_body_masked_chars), Some(sha2_body_substr_ids))
                 } else {
                     (None, None)
                 };
@@ -203,7 +209,7 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
                     Some(sha2_body),
                     Some(base64),
                     Some(regex_body),
-                    sha2_body_masked_substrs,
+                    sha2_body_masked_chars,
                     sha2_body_substr_ids,
                 )
             } else {
@@ -220,14 +226,14 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
             sha2_header,
             sign_verify,
             regex_header,
-            sha2_header_masked_substrs,
+            sha2_header_masked_chars,
             sha2_header_substr_ids,
             regex_bodyhash,
             chars_shift_bodyhash,
             sha2_body,
             base64,
             regex_body,
-            sha2_body_masked_substrs,
+            sha2_body_masked_chars,
             sha2_body_substr_ids,
             sign_rand,
             tag,
@@ -239,98 +245,129 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
 
     pub fn instances(&self) -> EmailVerifyInstances<F> {
         let sha2_header_ins = &self.sha2_header.instances()[0];
-        let header_bytes = sha2_header_ins[0];
-        let header_hash = sha2_header_ins[1];
+        let header_bytes_commit = sha2_header_ins[0];
+        let header_hash_commit = sha2_header_ins[1];
         let sign_verify_ins = &self.sign_verify.instances()[0];
         let public_key_n_hash = sign_verify_ins[0];
-        debug_assert_eq!(header_hash, sign_verify_ins[1]);
+        debug_assert_eq!(header_hash_commit, sign_verify_ins[1]);
         let tag = sign_verify_ins[2];
         let regex_header_ins = &self.regex_header.instances()[0];
-        debug_assert_eq!(header_bytes, regex_header_ins[0]);
-        let header_masked_substr = regex_header_ins[1];
-        let header_substr_ids = regex_header_ins[2];
-        let (header_masked_substr_hash, header_substr_ids_hash) = if self.header_expose_substrs {
-            let sha2_header_masked_substrs_ins = &self.sha2_header_masked_substrs.as_ref().unwrap().instances()[0];
-            debug_assert_eq!(header_masked_substr, sha2_header_masked_substrs_ins[0]);
-            let header_masked_substr_hash = sha2_header_masked_substrs_ins[1..].to_vec();
+        debug_assert_eq!(header_bytes_commit, regex_header_ins[0]);
+        let header_masked_chars_commit = regex_header_ins[1];
+        let header_substr_ids_commit = regex_header_ins[2];
+        let mut header_substrs = vec![];
+        let mut header_substr_idxes = vec![];
+        for substr in &self.regex_header.substrs {
+            if let Some((substr, idx)) = substr {
+                header_substrs.push(substr.clone());
+                header_substr_idxes.push(*idx as usize);
+            } else {
+                header_substrs.push("".to_string());
+                header_substr_idxes.push(0);
+            }
+        }
+        let (header_masked_chars_hash, header_substr_ids_hash) = if self.header_expose_substrs {
+            let sha2_header_masked_chars_ins = &self.sha2_header_masked_chars.as_ref().unwrap().instances()[0];
+            debug_assert_eq!(header_masked_chars_commit, sha2_header_masked_chars_ins[0]);
+            let header_masked_chars_hash = sha2_header_masked_chars_ins[1..].to_vec();
             let sha2_header_substr_ids_ins = &self.sha2_header_substr_ids.as_ref().unwrap().instances()[0];
-            debug_assert_eq!(header_substr_ids, sha2_header_substr_ids_ins[0]);
+            debug_assert_eq!(header_substr_ids_commit, sha2_header_substr_ids_ins[0]);
             let header_substr_ids_hash = sha2_header_substr_ids_ins[1..].to_vec();
-            (Some(header_masked_substr_hash), Some(header_substr_ids_hash))
+            (Some(header_masked_chars_hash), Some(header_substr_ids_hash))
         } else {
             (None, None)
         };
         let (
-            bodyhash_masked_substr,
-            bodyhash_substr_ids,
-            bodyhash_base64,
-            body_bytes,
-            bodyhash,
-            body_masked_substr,
-            body_substr_ids,
-            body_masked_substr_hash,
+            bodyhash_masked_chars_commit,
+            bodyhash_substr_ids_commit,
+            bodyhash_base64_commit,
+            body_bytes_commit,
+            bodyhash_commit,
+            body_masked_chars_commit,
+            body_substr_ids_commit,
+            body_masked_chars_hash,
             body_substr_ids_hash,
         ) = if self.body_enable {
             let regex_bodyhash_ins = &self.regex_bodyhash.as_ref().unwrap().instances()[0];
-            debug_assert_eq!(header_bytes, regex_bodyhash_ins[0]);
-            let bodyhash_masked_substr = regex_bodyhash_ins[1];
-            let bodyhash_substr_ids = regex_bodyhash_ins[2];
+            debug_assert_eq!(header_bytes_commit, regex_bodyhash_ins[0]);
+            let bodyhash_masked_chars_commit = regex_bodyhash_ins[1];
+            let bodyhash_substr_ids_commit = regex_bodyhash_ins[2];
             let chars_shift_ins = &self.chars_shift_bodyhash.as_ref().unwrap().instances()[0];
-            debug_assert_eq!(bodyhash_masked_substr, chars_shift_ins[0]);
-            debug_assert_eq!(bodyhash_substr_ids, chars_shift_ins[1]);
-            let bodyhash_base64 = chars_shift_ins[2];
+            debug_assert_eq!(bodyhash_masked_chars_commit, chars_shift_ins[0]);
+            debug_assert_eq!(bodyhash_substr_ids_commit, chars_shift_ins[1]);
+            let bodyhash_base64_commit = chars_shift_ins[2];
             let sha2_body_ins = &self.sha2_body.as_ref().unwrap().instances()[0];
-            let body_bytes = sha2_body_ins[0];
-            let bodyhash = sha2_body_ins[1];
+            let body_bytes_commit = sha2_body_ins[0];
+            let bodyhash_commit = sha2_body_ins[1];
             let base64_ins = &self.base64.as_ref().unwrap().instances()[0];
-            debug_assert_eq!(bodyhash, base64_ins[0]);
-            debug_assert_eq!(bodyhash_base64, base64_ins[1]);
+            debug_assert_eq!(bodyhash_commit, base64_ins[0]);
+            debug_assert_eq!(bodyhash_base64_commit, base64_ins[1]);
             let regex_body_ins = &self.regex_body.as_ref().unwrap().instances()[0];
-            debug_assert_eq!(body_bytes, regex_body_ins[0]);
-            let body_masked_substr = regex_body_ins[1];
-            let body_substr_ids = regex_body_ins[2];
-            let (body_masked_substr_hash, body_substr_ids_hash) = if self.body_expose_substrs {
-                let sha2_body_masked_substrs_ins = &self.sha2_body_masked_substrs.as_ref().unwrap().instances()[0];
-                debug_assert_eq!(body_masked_substr, sha2_body_masked_substrs_ins[0]);
-                let body_masked_substr_hash = sha2_body_masked_substrs_ins[1..].to_vec();
+            debug_assert_eq!(body_bytes_commit, regex_body_ins[0]);
+            let body_masked_chars_commit = regex_body_ins[1];
+            let body_substr_ids_commit = regex_body_ins[2];
+            let (body_masked_chars_hash, body_substr_ids_hash) = if self.body_expose_substrs {
+                let sha2_body_masked_chars_ins = &self.sha2_body_masked_chars.as_ref().unwrap().instances()[0];
+                debug_assert_eq!(body_masked_chars_commit, sha2_body_masked_chars_ins[0]);
+                let body_masked_chars_hash = sha2_body_masked_chars_ins[1..].to_vec();
                 let sha2_body_substr_ids_ins = &self.sha2_body_substr_ids.as_ref().unwrap().instances()[0];
-                debug_assert_eq!(body_substr_ids, sha2_body_substr_ids_ins[0]);
+                debug_assert_eq!(body_substr_ids_commit, sha2_body_substr_ids_ins[0]);
                 let body_substr_ids_hash = sha2_body_substr_ids_ins[1..].to_vec();
-                (Some(body_masked_substr_hash), Some(body_substr_ids_hash))
+                (Some(body_masked_chars_hash), Some(body_substr_ids_hash))
             } else {
                 (None, None)
             };
             (
-                Some(bodyhash_masked_substr),
-                Some(bodyhash_substr_ids),
-                Some(bodyhash_base64),
-                Some(body_bytes),
-                Some(bodyhash),
-                Some(body_masked_substr),
-                Some(body_substr_ids),
-                body_masked_substr_hash,
+                Some(bodyhash_masked_chars_commit),
+                Some(bodyhash_substr_ids_commit),
+                Some(bodyhash_base64_commit),
+                Some(body_bytes_commit),
+                Some(bodyhash_commit),
+                Some(body_masked_chars_commit),
+                Some(body_substr_ids_commit),
+                body_masked_chars_hash,
                 body_substr_ids_hash,
             )
         } else {
             (None, None, None, None, None, None, None, None, None)
         };
+        let (body_substrs, body_substr_idxes) = if let Some(regex_body) = self.regex_body.as_ref() {
+            let mut body_substrs = vec![];
+            let mut body_substr_idxes = vec![];
+            for substr in &regex_body.substrs {
+                if let Some((substr, idx)) = substr {
+                    body_substrs.push(substr.clone());
+                    body_substr_idxes.push(*idx as usize);
+                } else {
+                    body_substrs.push("".to_string());
+                    body_substr_idxes.push(0);
+                }
+            }
+            (Some(body_substrs), Some(body_substr_idxes))
+        } else {
+            (None, None)
+        };
         EmailVerifyInstances {
-            header_bytes,
-            header_hash,
+            header_bytes_commit,
+            header_hash_commit,
             public_key_n_hash,
             tag,
-            header_masked_substr,
-            header_substr_ids,
-            header_masked_substr_hash,
+            header_masked_chars_commit,
+            header_substr_ids_commit,
+            header_substrs,
+            header_substr_idxes,
+            header_masked_chars_hash,
             header_substr_ids_hash,
-            bodyhash_masked_substr,
-            bodyhash_substr_ids,
-            bodyhash_base64,
-            body_bytes,
-            bodyhash,
-            body_masked_substr,
-            body_substr_ids,
-            body_masked_substr_hash,
+            bodyhash_masked_chars_commit,
+            bodyhash_substr_ids_commit,
+            bodyhash_base64_commit,
+            body_bytes_commit,
+            bodyhash_commit,
+            body_substrs,
+            body_substr_idxes,
+            body_masked_chars_commit,
+            body_substr_ids_commit,
+            body_masked_chars_hash,
             body_substr_ids_hash,
         }
     }
@@ -340,105 +377,159 @@ impl<F: PrimeField> EmailVerifyCircuits<F> {
         let k = config_params.degree;
         let instances = self.instances();
         let mut result = true;
-        result &= MockProver::run(k, &self.sha2_header, vec![vec![instances.header_bytes, instances.header_hash]])?
+        let timer = start_timer!(|| "check_constraints: sha2_header");
+        result &= MockProver::run(k, &self.sha2_header, vec![vec![instances.header_bytes_commit, instances.header_hash_commit]])?
             .verify()
             .is_ok();
-        result &= MockProver::run(k, &self.sign_verify, vec![vec![instances.public_key_n_hash, instances.header_hash, instances.tag]])?
+        end_timer!(timer);
+        let timer = start_timer!(|| "check_constraints: sign_verify");
+        result &= MockProver::run(k, &self.sign_verify, vec![vec![instances.public_key_n_hash, instances.header_hash_commit, instances.tag]])?
             .verify()
             .is_ok();
+        end_timer!(timer);
+        let timer = start_timer!(|| "check_constraints: regex_header");
         result &= MockProver::run(
             k,
             &self.regex_header,
-            vec![vec![instances.header_bytes, instances.header_masked_substr, instances.header_substr_ids]],
+            vec![vec![
+                instances.header_bytes_commit,
+                instances.header_masked_chars_commit,
+                instances.header_substr_ids_commit,
+            ]],
         )?
         .verify()
         .is_ok();
+        end_timer!(timer);
         if self.header_expose_substrs {
+            let timer = start_timer!(|| "check_constraints: sha2_header_masked_chars");
             result &= MockProver::run(
                 k,
-                self.sha2_header_masked_substrs.as_ref().unwrap(),
-                vec![vec![vec![instances.header_masked_substr], instances.header_masked_substr_hash.as_ref().unwrap().clone()].concat()],
+                self.sha2_header_masked_chars.as_ref().unwrap(),
+                vec![vec![vec![instances.header_masked_chars_commit], instances.header_masked_chars_hash.as_ref().unwrap().clone()].concat()],
             )?
             .verify()
             .is_ok();
+            end_timer!(timer);
+            let timer = start_timer!(|| "check_constraints: sha2_header_substr_ids");
             result &= MockProver::run(
                 k,
                 self.sha2_header_substr_ids.as_ref().unwrap(),
-                vec![vec![vec![instances.header_substr_ids], instances.header_substr_ids_hash.as_ref().unwrap().clone()].concat()],
+                vec![vec![vec![instances.header_substr_ids_commit], instances.header_substr_ids_hash.as_ref().unwrap().clone()].concat()],
             )?
             .verify()
             .is_ok();
+            end_timer!(timer);
         }
         if self.body_enable {
+            let timer = start_timer!(|| "check_constraints: regex_bodyhash");
             result &= MockProver::run(
                 k,
                 self.regex_bodyhash.as_ref().unwrap(),
                 vec![vec![
-                    instances.header_bytes,
-                    instances.bodyhash_masked_substr.unwrap().clone(),
-                    instances.bodyhash_substr_ids.unwrap().clone(),
+                    instances.header_bytes_commit,
+                    instances.bodyhash_masked_chars_commit.unwrap().clone(),
+                    instances.bodyhash_substr_ids_commit.unwrap().clone(),
                 ]],
             )?
             .verify()
             .is_ok();
+            end_timer!(timer);
+            let timer = start_timer!(|| "check_constraints: chars_shift_bodyhash");
             result &= MockProver::run(
                 k,
                 self.chars_shift_bodyhash.as_ref().unwrap(),
                 vec![vec![
-                    instances.bodyhash_masked_substr.unwrap().clone(),
-                    instances.bodyhash_substr_ids.unwrap().clone(),
-                    instances.bodyhash_base64.unwrap().clone(),
+                    instances.bodyhash_masked_chars_commit.unwrap().clone(),
+                    instances.bodyhash_substr_ids_commit.unwrap().clone(),
+                    instances.bodyhash_base64_commit.unwrap().clone(),
                 ]],
             )?
             .verify()
             .is_ok();
+            end_timer!(timer);
+            let timer = start_timer!(|| "check_constraints: sha2_body");
             result &= MockProver::run(
                 k,
                 self.sha2_body.as_ref().unwrap(),
-                vec![vec![instances.body_bytes.unwrap().clone(), instances.bodyhash.unwrap().clone()]],
+                vec![vec![instances.body_bytes_commit.unwrap().clone(), instances.bodyhash_commit.unwrap().clone()]],
             )?
             .verify()
             .is_ok();
+            end_timer!(timer);
+            let timer = start_timer!(|| "check_constraints: base64");
             result &= MockProver::run(
                 k,
                 self.base64.as_ref().unwrap(),
-                vec![vec![instances.bodyhash.unwrap().clone(), instances.bodyhash_base64.unwrap().clone()]],
+                vec![vec![instances.bodyhash_commit.unwrap().clone(), instances.bodyhash_base64_commit.unwrap().clone()]],
             )?
             .verify()
             .is_ok();
+            end_timer!(timer);
+            let timer = start_timer!(|| "check_constraints: regex_body");
             result &= MockProver::run(
                 k,
                 self.regex_body.as_ref().unwrap(),
                 vec![vec![
-                    instances.body_bytes.unwrap().clone(),
-                    instances.body_masked_substr.unwrap().clone(),
-                    instances.body_substr_ids.unwrap().clone(),
+                    instances.body_bytes_commit.unwrap().clone(),
+                    instances.body_masked_chars_commit.unwrap().clone(),
+                    instances.body_substr_ids_commit.unwrap().clone(),
                 ]],
             )?
             .verify()
             .is_ok();
+            end_timer!(timer);
             if self.body_expose_substrs {
+                let timer = start_timer!(|| "check_constraints: sha2_body_masked_chars");
                 result &= MockProver::run(
                     k,
-                    self.sha2_body_masked_substrs.as_ref().unwrap(),
+                    self.sha2_body_masked_chars.as_ref().unwrap(),
                     vec![vec![
-                        vec![instances.body_masked_substr.unwrap().clone()],
-                        instances.body_masked_substr_hash.as_ref().unwrap().clone(),
+                        vec![instances.body_masked_chars_commit.unwrap().clone()],
+                        instances.body_masked_chars_hash.as_ref().unwrap().clone(),
                     ]
                     .concat()],
                 )?
                 .verify()
                 .is_ok();
+                end_timer!(timer);
+                let timer = start_timer!(|| "check_constraints: sha2_body_substr_ids");
                 result &= MockProver::run(
                     k,
                     self.sha2_body_substr_ids.as_ref().unwrap(),
-                    vec![vec![vec![instances.body_substr_ids.unwrap().clone()], instances.body_substr_ids_hash.as_ref().unwrap().clone()].concat()],
+                    vec![vec![
+                        vec![instances.body_substr_ids_commit.unwrap().clone()],
+                        instances.body_substr_ids_hash.as_ref().unwrap().clone(),
+                    ]
+                    .concat()],
                 )?
                 .verify()
                 .is_ok();
+                end_timer!(timer);
             }
         }
         Ok(result)
+    }
+
+    pub fn get_substr(input_str: &str, regexes: &[String]) -> Option<(String, usize)> {
+        let regexes = regexes.into_iter().map(|raw| Regex::new(&raw).unwrap()).collect_vec();
+        let mut start = 0;
+        let mut substr = input_str;
+        // println!("first regex {}", regexes[0]);
+        for regex in regexes.into_iter() {
+            // println!(r"regex {}", regex);
+            match regex.find(substr).unwrap() {
+                Some(m) => {
+                    start += m.start();
+                    substr = m.as_str();
+                }
+                None => {
+                    return None;
+                }
+            };
+        }
+        // println!("substr {}", substr);
+        // println!("start {}", start);
+        Some((substr.to_string(), start))
     }
 }
 
@@ -454,7 +545,7 @@ impl EmailVerifyCircuits<Fr> {
         pks.push(gen_pk(params, &self.sign_verify, None));
         pks.push(gen_pk(params, &self.regex_header, None));
         if self.header_expose_substrs {
-            pks.push(gen_pk(params, self.sha2_header_masked_substrs.as_ref().unwrap(), None));
+            pks.push(gen_pk(params, self.sha2_header_masked_chars.as_ref().unwrap(), None));
             pks.push(gen_pk(params, self.sha2_header_substr_ids.as_ref().unwrap(), None));
         }
         if self.body_enable {
@@ -464,7 +555,7 @@ impl EmailVerifyCircuits<Fr> {
             pks.push(gen_pk(params, self.base64.as_ref().unwrap(), None));
             pks.push(gen_pk(params, self.regex_body.as_ref().unwrap(), None));
             if self.body_expose_substrs {
-                pks.push(gen_pk(params, self.sha2_body_masked_substrs.as_ref().unwrap(), None));
+                pks.push(gen_pk(params, self.sha2_body_masked_chars.as_ref().unwrap(), None));
                 pks.push(gen_pk(params, self.sha2_body_substr_ids.as_ref().unwrap(), None));
             }
         }
@@ -479,129 +570,157 @@ impl EmailVerifyCircuits<Fr> {
         let mut proofs = vec![];
         let mut pk_index = 0;
         let instances = self.instances();
+        let timer = start_timer!(|| "prove: sha2_header");
         proofs.push(gen_proof_shplonk(
             params,
             &pks[pk_index],
             self.sha2_header.clone(),
-            vec![vec![instances.header_bytes, instances.header_hash]],
+            vec![vec![instances.header_bytes_commit, instances.header_hash_commit]],
             rng,
             None,
         ));
+        end_timer!(timer);
         pk_index += 1;
+        let timer = start_timer!(|| "prove: sign_verify");
         proofs.push(gen_proof_shplonk(
             params,
             &pks[pk_index],
             self.sign_verify.clone(),
-            vec![vec![instances.public_key_n_hash, instances.header_hash, instances.tag]],
+            vec![vec![instances.public_key_n_hash, instances.header_hash_commit, instances.tag]],
             rng,
             None,
         ));
+        end_timer!(timer);
         pk_index += 1;
+        let timer = start_timer!(|| "prove: regex_header");
         proofs.push(gen_proof_shplonk(
             params,
             &pks[pk_index],
             self.regex_header.clone(),
-            vec![vec![instances.header_bytes, instances.header_masked_substr, instances.header_substr_ids]],
+            vec![vec![
+                instances.header_bytes_commit,
+                instances.header_masked_chars_commit,
+                instances.header_substr_ids_commit,
+            ]],
             rng,
             None,
         ));
+        end_timer!(timer);
         pk_index += 1;
         if self.header_expose_substrs {
+            let timer = start_timer!(|| "prove: sha2_header_masked_chars");
             proofs.push(gen_proof_shplonk(
                 params,
                 &pks[pk_index],
-                self.sha2_header_masked_substrs.as_ref().unwrap().clone(),
-                vec![vec![vec![instances.header_masked_substr], instances.header_masked_substr_hash.unwrap()].concat()],
+                self.sha2_header_masked_chars.as_ref().unwrap().clone(),
+                vec![vec![vec![instances.header_masked_chars_commit], instances.header_masked_chars_hash.unwrap()].concat()],
                 rng,
                 None,
             ));
+            end_timer!(timer);
             pk_index += 1;
+            let timer = start_timer!(|| "prove: sha2_header_substr_ids");
             proofs.push(gen_proof_shplonk(
                 params,
                 &pks[pk_index],
                 self.sha2_header_substr_ids.as_ref().unwrap().clone(),
-                vec![vec![vec![instances.header_substr_ids], instances.header_substr_ids_hash.unwrap()].concat()],
+                vec![vec![vec![instances.header_substr_ids_commit], instances.header_substr_ids_hash.unwrap()].concat()],
                 rng,
                 None,
             ));
+            end_timer!(timer);
             pk_index += 1;
         }
         if self.body_enable {
+            let timer = start_timer!(|| "prove: regex_bodyhash");
             proofs.push(gen_proof_shplonk(
                 params,
                 &pks[pk_index],
                 self.regex_bodyhash.as_ref().unwrap().clone(),
                 vec![vec![
-                    instances.header_bytes,
-                    instances.bodyhash_masked_substr.unwrap().clone(),
-                    instances.bodyhash_substr_ids.unwrap().clone(),
+                    instances.header_bytes_commit,
+                    instances.bodyhash_masked_chars_commit.unwrap().clone(),
+                    instances.bodyhash_substr_ids_commit.unwrap().clone(),
                 ]],
                 rng,
                 None,
             ));
+            end_timer!(timer);
             pk_index += 1;
+            let timer = start_timer!(|| "prove: chars_shift_bodyhash");
             proofs.push(gen_proof_shplonk(
                 params,
                 &pks[pk_index],
                 self.chars_shift_bodyhash.as_ref().unwrap().clone(),
                 vec![vec![
-                    instances.bodyhash_masked_substr.unwrap().clone(),
-                    instances.bodyhash_substr_ids.unwrap().clone(),
-                    instances.bodyhash_base64.unwrap().clone(),
+                    instances.bodyhash_masked_chars_commit.unwrap().clone(),
+                    instances.bodyhash_substr_ids_commit.unwrap().clone(),
+                    instances.bodyhash_base64_commit.unwrap().clone(),
                 ]],
                 rng,
                 None,
             ));
+            end_timer!(timer);
             pk_index += 1;
+            let timer = start_timer!(|| "prove: sha2_body");
             proofs.push(gen_proof_shplonk(
                 params,
                 &pks[pk_index],
                 self.sha2_body.as_ref().unwrap().clone(),
-                vec![vec![instances.body_bytes.unwrap().clone(), instances.bodyhash.unwrap().clone()]],
+                vec![vec![instances.body_bytes_commit.unwrap().clone(), instances.bodyhash_commit.unwrap().clone()]],
                 rng,
                 None,
             ));
+            end_timer!(timer);
             pk_index += 1;
+            let timer = start_timer!(|| "prove: base64");
             proofs.push(gen_proof_shplonk(
                 params,
                 &pks[pk_index],
                 self.base64.as_ref().unwrap().clone(),
-                vec![vec![instances.bodyhash.unwrap().clone(), instances.bodyhash_base64.unwrap().clone()]],
+                vec![vec![instances.bodyhash_commit.unwrap().clone(), instances.bodyhash_base64_commit.unwrap().clone()]],
                 rng,
                 None,
             ));
+            end_timer!(timer);
             pk_index += 1;
+            let timer = start_timer!(|| "prove: regex_body");
             proofs.push(gen_proof_shplonk(
                 params,
                 &pks[pk_index],
                 self.regex_body.as_ref().unwrap().clone(),
                 vec![vec![
-                    instances.body_bytes.unwrap().clone(),
-                    instances.body_masked_substr.unwrap().clone(),
-                    instances.body_substr_ids.unwrap().clone(),
+                    instances.body_bytes_commit.unwrap().clone(),
+                    instances.body_masked_chars_commit.unwrap().clone(),
+                    instances.body_substr_ids_commit.unwrap().clone(),
                 ]],
                 rng,
                 None,
             ));
+            end_timer!(timer);
             pk_index += 1;
             if self.body_expose_substrs {
+                let timer = start_timer!(|| "prove: sha2_body_masked_chars");
                 proofs.push(gen_proof_shplonk(
                     params,
                     &pks[pk_index],
-                    self.sha2_body_masked_substrs.as_ref().unwrap().clone(),
-                    vec![vec![vec![instances.body_masked_substr.unwrap().clone()], instances.body_masked_substr_hash.unwrap().clone()].concat()],
+                    self.sha2_body_masked_chars.as_ref().unwrap().clone(),
+                    vec![vec![vec![instances.body_masked_chars_commit.unwrap().clone()], instances.body_masked_chars_hash.unwrap().clone()].concat()],
                     rng,
                     None,
                 ));
+                end_timer!(timer);
                 pk_index += 1;
+                let timer = start_timer!(|| "prove: sha2_body_substr_ids");
                 proofs.push(gen_proof_shplonk(
                     params,
                     &pks[pk_index],
                     self.sha2_body_substr_ids.as_ref().unwrap().clone(),
-                    vec![vec![vec![instances.body_substr_ids.unwrap().clone()], instances.body_substr_ids_hash.unwrap().clone()].concat()],
+                    vec![vec![vec![instances.body_substr_ids_commit.unwrap().clone()], instances.body_substr_ids_hash.unwrap().clone()].concat()],
                     rng,
                     None,
                 ));
+                end_timer!(timer);
             }
         }
         proofs
@@ -615,7 +734,7 @@ impl EmailVerifyCircuits<Fr> {
             params,
             &pks[pk_index],
             self.sha2_header.clone(),
-            vec![vec![instances.header_bytes, instances.header_hash]],
+            vec![vec![instances.header_bytes_commit, instances.header_hash_commit]],
             rng,
         ));
         pk_index += 1;
@@ -623,7 +742,7 @@ impl EmailVerifyCircuits<Fr> {
             params,
             &pks[pk_index],
             self.sign_verify.clone(),
-            vec![vec![instances.public_key_n_hash, instances.header_hash, instances.tag]],
+            vec![vec![instances.public_key_n_hash, instances.header_hash_commit, instances.tag]],
             rng,
         ));
         pk_index += 1;
@@ -631,7 +750,11 @@ impl EmailVerifyCircuits<Fr> {
             params,
             &pks[pk_index],
             self.regex_header.clone(),
-            vec![vec![instances.header_bytes, instances.header_masked_substr, instances.header_substr_ids]],
+            vec![vec![
+                instances.header_bytes_commit,
+                instances.header_masked_chars_commit,
+                instances.header_substr_ids_commit,
+            ]],
             rng,
         ));
         pk_index += 1;
@@ -639,8 +762,8 @@ impl EmailVerifyCircuits<Fr> {
             proofs.push(gen_evm_proof_shplonk(
                 params,
                 &pks[pk_index],
-                self.sha2_header_masked_substrs.as_ref().unwrap().clone(),
-                vec![vec![vec![instances.header_masked_substr], instances.header_masked_substr_hash.unwrap()].concat()],
+                self.sha2_header_masked_chars.as_ref().unwrap().clone(),
+                vec![vec![vec![instances.header_masked_chars_commit], instances.header_masked_chars_hash.unwrap()].concat()],
                 rng,
             ));
             pk_index += 1;
@@ -648,7 +771,7 @@ impl EmailVerifyCircuits<Fr> {
                 params,
                 &pks[pk_index],
                 self.sha2_header_substr_ids.as_ref().unwrap().clone(),
-                vec![vec![vec![instances.header_substr_ids], instances.header_substr_ids_hash.unwrap()].concat()],
+                vec![vec![vec![instances.header_substr_ids_commit], instances.header_substr_ids_hash.unwrap()].concat()],
                 rng,
             ));
             pk_index += 1;
@@ -659,9 +782,9 @@ impl EmailVerifyCircuits<Fr> {
                 &pks[pk_index],
                 self.regex_bodyhash.as_ref().unwrap().clone(),
                 vec![vec![
-                    instances.header_bytes,
-                    instances.bodyhash_masked_substr.unwrap().clone(),
-                    instances.bodyhash_substr_ids.unwrap().clone(),
+                    instances.header_bytes_commit,
+                    instances.bodyhash_masked_chars_commit.unwrap().clone(),
+                    instances.bodyhash_substr_ids_commit.unwrap().clone(),
                 ]],
                 rng,
             ));
@@ -671,9 +794,9 @@ impl EmailVerifyCircuits<Fr> {
                 &pks[pk_index],
                 self.chars_shift_bodyhash.as_ref().unwrap().clone(),
                 vec![vec![
-                    instances.bodyhash_masked_substr.unwrap().clone(),
-                    instances.bodyhash_substr_ids.unwrap().clone(),
-                    instances.bodyhash_base64.unwrap().clone(),
+                    instances.bodyhash_masked_chars_commit.unwrap().clone(),
+                    instances.bodyhash_substr_ids_commit.unwrap().clone(),
+                    instances.bodyhash_base64_commit.unwrap().clone(),
                 ]],
                 rng,
             ));
@@ -682,7 +805,7 @@ impl EmailVerifyCircuits<Fr> {
                 params,
                 &pks[pk_index],
                 self.sha2_body.as_ref().unwrap().clone(),
-                vec![vec![instances.body_bytes.unwrap().clone(), instances.bodyhash.unwrap().clone()]],
+                vec![vec![instances.body_bytes_commit.unwrap().clone(), instances.bodyhash_commit.unwrap().clone()]],
                 rng,
             ));
             pk_index += 1;
@@ -690,7 +813,7 @@ impl EmailVerifyCircuits<Fr> {
                 params,
                 &pks[pk_index],
                 self.base64.as_ref().unwrap().clone(),
-                vec![vec![instances.bodyhash.unwrap().clone(), instances.bodyhash_base64.unwrap().clone()]],
+                vec![vec![instances.bodyhash_commit.unwrap().clone(), instances.bodyhash_base64_commit.unwrap().clone()]],
                 rng,
             ));
             pk_index += 1;
@@ -699,9 +822,9 @@ impl EmailVerifyCircuits<Fr> {
                 &pks[pk_index],
                 self.regex_body.as_ref().unwrap().clone(),
                 vec![vec![
-                    instances.body_bytes.unwrap().clone(),
-                    instances.body_masked_substr.unwrap().clone(),
-                    instances.body_substr_ids.unwrap().clone(),
+                    instances.body_bytes_commit.unwrap().clone(),
+                    instances.body_masked_chars_commit.unwrap().clone(),
+                    instances.body_substr_ids_commit.unwrap().clone(),
                 ]],
                 rng,
             ));
@@ -710,8 +833,8 @@ impl EmailVerifyCircuits<Fr> {
                 proofs.push(gen_evm_proof_shplonk(
                     params,
                     &pks[pk_index],
-                    self.sha2_body_masked_substrs.as_ref().unwrap().clone(),
-                    vec![vec![vec![instances.body_masked_substr.unwrap().clone()], instances.body_masked_substr_hash.unwrap().clone()].concat()],
+                    self.sha2_body_masked_chars.as_ref().unwrap().clone(),
+                    vec![vec![vec![instances.body_masked_chars_commit.unwrap().clone()], instances.body_masked_chars_hash.unwrap().clone()].concat()],
                     rng,
                 ));
                 pk_index += 1;
@@ -719,7 +842,7 @@ impl EmailVerifyCircuits<Fr> {
                     params,
                     &pks[pk_index],
                     self.sha2_body_substr_ids.as_ref().unwrap().clone(),
-                    vec![vec![vec![instances.body_substr_ids.unwrap().clone()], instances.body_substr_ids_hash.unwrap().clone()].concat()],
+                    vec![vec![vec![instances.body_substr_ids_commit.unwrap().clone()], instances.body_substr_ids_hash.unwrap().clone()].concat()],
                     rng,
                 ));
             }
@@ -743,10 +866,10 @@ impl EmailVerifyCircuits<Fr> {
         let gates = CircuitGates::collect::<Fr, RegexHeaderCircuit<Fr>>();
         println!("regex_header gates: {}", gates);
         if self.header_expose_substrs {
-            let measured = CircuitCost::<G1, _>::measure(k, self.sha2_header_masked_substrs.as_ref().unwrap());
-            println!("sha2_header_masked_substrs: {:?}", measured);
-            let gates = CircuitGates::collect::<Fr, Sha256HeaderMaskedSubstrsCircuit<Fr>>();
-            println!("sha2_header_masked_substrs gates: {}", gates);
+            let measured = CircuitCost::<G1, _>::measure(k, self.sha2_header_masked_chars.as_ref().unwrap());
+            println!("sha2_header_masked_chars: {:?}", measured);
+            let gates = CircuitGates::collect::<Fr, Sha256HeaderMaskedCharsCircuit<Fr>>();
+            println!("sha2_header_masked_chars gates: {}", gates);
             let measured = CircuitCost::<G1, _>::measure(k, self.sha2_header_substr_ids.as_ref().unwrap());
             println!("sha2_header_substr_ids: {:?}", measured);
             let gates = CircuitGates::collect::<Fr, Sha256HeaderSubstrIdsCircuit<Fr>>();
@@ -774,10 +897,10 @@ impl EmailVerifyCircuits<Fr> {
             let gates = CircuitGates::collect::<Fr, RegexBodyCircuit<Fr>>();
             println!("regex_body gates: {}", gates);
             if self.body_expose_substrs {
-                let measured = CircuitCost::<G1, _>::measure(k, self.sha2_body_masked_substrs.as_ref().unwrap());
-                println!("sha2_body_masked_substrs: {:?}", measured);
-                let gates = CircuitGates::collect::<Fr, Sha256BodyMaskedSubstrsCircuit<Fr>>();
-                println!("sha256_body_masked_substrs gates: {}", gates);
+                let measured = CircuitCost::<G1, _>::measure(k, self.sha2_body_masked_chars.as_ref().unwrap());
+                println!("sha2_body_masked_chars: {:?}", measured);
+                let gates = CircuitGates::collect::<Fr, Sha256BodyMaskedCharsCircuit<Fr>>();
+                println!("sha256_body_masked_chars gates: {}", gates);
                 let measured = CircuitCost::<G1, _>::measure(k, self.sha2_body_substr_ids.as_ref().unwrap());
                 println!("sha2_body_substr_ids: {:?}", measured);
                 let gates = CircuitGates::collect::<Fr, Sha256BodySubstrIdsCircuit<Fr>>();
@@ -789,23 +912,119 @@ impl EmailVerifyCircuits<Fr> {
 
 #[derive(Debug, Clone)]
 pub struct EmailVerifyInstances<F: PrimeField> {
-    header_bytes: F,
-    header_hash: F,
+    header_bytes_commit: F,
+    header_hash_commit: F,
     public_key_n_hash: F,
     tag: F,
-    header_masked_substr: F,
-    header_substr_ids: F,
-    header_masked_substr_hash: Option<Vec<F>>,
+    header_masked_chars_commit: F,
+    header_substr_ids_commit: F,
+    header_substrs: Vec<String>,
+    header_substr_idxes: Vec<usize>,
+    header_masked_chars_hash: Option<Vec<F>>,
     header_substr_ids_hash: Option<Vec<F>>,
-    bodyhash_masked_substr: Option<F>,
-    bodyhash_substr_ids: Option<F>,
-    bodyhash_base64: Option<F>,
-    body_bytes: Option<F>,
-    bodyhash: Option<F>,
-    body_masked_substr: Option<F>,
-    body_substr_ids: Option<F>,
-    body_masked_substr_hash: Option<Vec<F>>,
+    bodyhash_masked_chars_commit: Option<F>,
+    bodyhash_substr_ids_commit: Option<F>,
+    bodyhash_base64_commit: Option<F>,
+    body_bytes_commit: Option<F>,
+    bodyhash_commit: Option<F>,
+    body_masked_chars_commit: Option<F>,
+    body_substr_ids_commit: Option<F>,
+    body_substrs: Option<Vec<String>>,
+    body_substr_idxes: Option<Vec<usize>>,
+    body_masked_chars_hash: Option<Vec<F>>,
     body_substr_ids_hash: Option<Vec<F>>,
+}
+
+impl<F: PrimeField> EmailVerifyInstances<F> {
+    pub fn to_json(&self) -> EmailVerifyInstancesJson {
+        let field2string = |val: &F| {
+            let big = fe_to_biguint(val);
+            big.to_str_radix(10)
+        };
+        let field_vec2string = |vals: &[F]| {
+            let mut sum = BigUint::from(0u32);
+            let mut coeff = BigUint::from(1u32);
+            let two_pow = BigUint::from(2u32).pow(8 * 31);
+            for val in vals.iter() {
+                sum += coeff.clone() * fe_to_biguint(val);
+                coeff *= &two_pow;
+            }
+            sum.to_str_radix(10)
+        };
+        let config_params = default_config_params();
+        let header_bytes_commit = field2string(&self.header_bytes_commit);
+        let header_hash_commit = field2string(&self.header_hash_commit);
+        let public_key_n_hash = field2string(&self.public_key_n_hash);
+        let tag = field2string(&self.tag);
+        let header_masked_chars_commit = field2string(&self.header_masked_chars_commit);
+        let header_substr_ids_commit = field2string(&self.header_substr_ids_commit);
+        let (header_masked_chars_hash, header_substr_ids_hash) = if config_params.header_config.as_ref().unwrap().expose_substrs.unwrap_or(false) {
+            let header_masked_chars_hash = field_vec2string(self.header_masked_chars_hash.as_ref().unwrap());
+            let header_substr_ids_hash = field_vec2string(self.header_substr_ids_hash.as_ref().unwrap());
+            (Some(header_masked_chars_hash), Some(header_substr_ids_hash))
+        } else {
+            (None, None)
+        };
+        let (
+            bodyhash_masked_chars_commit,
+            bodyhash_substr_ids_commit,
+            bodyhash_base64_commit,
+            body_bytes_commit,
+            bodyhash_commit,
+            body_masked_chars_commit,
+            body_substr_ids_commit,
+            body_masked_chars_hash,
+            body_substr_ids_hash,
+        ) = if let Some(body_config) = config_params.body_config.as_ref() {
+            let bodyhash_masked_chars_commit = field2string(&self.bodyhash_masked_chars_commit.unwrap());
+            let bodyhash_substr_ids_commit = field2string(&self.bodyhash_substr_ids_commit.unwrap());
+            let bodyhash_base64_commit = field2string(&self.bodyhash_base64_commit.unwrap());
+            let body_bytes_commit = field2string(&self.body_bytes_commit.unwrap());
+            let bodyhash_commit = field2string(&self.bodyhash_commit.unwrap());
+            let body_masked_chars_commit = field2string(&self.body_masked_chars_commit.unwrap());
+            let body_substr_ids_commit = field2string(&self.body_substr_ids_commit.unwrap());
+            let (body_masked_chars_hash, body_substr_ids_hash) = if body_config.expose_substrs.unwrap_or(false) {
+                let body_masked_chars_hash = field_vec2string(self.body_masked_chars_hash.as_ref().unwrap());
+                let body_substr_ids_hash = field_vec2string(self.body_substr_ids_hash.as_ref().unwrap());
+                (Some(body_masked_chars_hash), Some(body_substr_ids_hash))
+            } else {
+                (None, None)
+            };
+            (
+                Some(bodyhash_masked_chars_commit),
+                Some(bodyhash_substr_ids_commit),
+                Some(bodyhash_base64_commit),
+                Some(body_bytes_commit),
+                Some(bodyhash_commit),
+                Some(body_masked_chars_commit),
+                Some(body_substr_ids_commit),
+                Some(body_masked_chars_hash),
+                Some(body_substr_ids_hash),
+            )
+        } else {
+            (None, None, None, None, None, None, None, None, None)
+        };
+
+        EmailVerifyInstancesJson {
+            header_bytes_commit,
+            header_hash_commit,
+            public_key_n_hash,
+            tag,
+            header_masked_chars_commit,
+            header_substr_ids_commit,
+            header_substrs: self.header_substrs.clone(),
+            header_substr_idxes: self.header_substr_idxes.clone(),
+            bodyhash_masked_chars_commit,
+            bodyhash_substr_ids_commit,
+            bodyhash_base64_commit,
+            body_bytes_commit,
+            bodyhash_commit,
+            body_masked_chars_commit,
+            body_substr_ids_commit,
+            body_substrs: self.body_substrs.clone(),
+            body_substr_idxes: self.body_substr_idxes.clone(),
+        }
+    }
 }
 
 impl EmailVerifyInstances<Fr> {
@@ -826,15 +1045,15 @@ impl EmailVerifyInstances<Fr> {
                 .unwrap(),
             )
         };
-        result &= verify_proof(params, &vks[vk_index], proofs[vk_index], &vec![self.header_bytes, self.header_hash]);
+        result &= verify_proof(params, &vks[vk_index], proofs[vk_index], &vec![self.header_bytes_commit, self.header_hash_commit]);
         vk_index += 1;
-        result &= verify_proof(params, &vks[vk_index], proofs[vk_index], &vec![self.public_key_n_hash, self.header_hash, self.tag]);
+        result &= verify_proof(params, &vks[vk_index], proofs[vk_index], &vec![self.public_key_n_hash, self.header_hash_commit, self.tag]);
         vk_index += 1;
         result &= verify_proof(
             params,
             &vks[vk_index],
             proofs[vk_index],
-            &vec![self.header_bytes, self.header_masked_substr, self.header_substr_ids],
+            &vec![self.header_bytes_commit, self.header_masked_chars_commit, self.header_substr_ids_commit],
         );
         vk_index += 1;
         if config_params.header_config.as_ref().unwrap().expose_substrs.unwrap_or(false) {
@@ -842,14 +1061,14 @@ impl EmailVerifyInstances<Fr> {
                 params,
                 &vks[vk_index],
                 proofs[vk_index],
-                &vec![vec![self.header_masked_substr], self.header_masked_substr_hash.as_ref().unwrap().clone()].concat(),
+                &vec![vec![self.header_masked_chars_commit], self.header_masked_chars_hash.as_ref().unwrap().clone()].concat(),
             );
             vk_index += 1;
             result &= verify_proof(
                 params,
                 &vks[vk_index],
                 proofs[vk_index],
-                &vec![vec![self.header_substr_ids], self.header_substr_ids_hash.as_ref().unwrap().clone()].concat(),
+                &vec![vec![self.header_substr_ids_commit], self.header_substr_ids_hash.as_ref().unwrap().clone()].concat(),
             );
             vk_index += 1;
         }
@@ -858,17 +1077,10 @@ impl EmailVerifyInstances<Fr> {
                 params,
                 &vks[vk_index],
                 proofs[vk_index],
-                &vec![self.header_bytes, self.bodyhash_masked_substr.unwrap().clone(), self.bodyhash_substr_ids.unwrap().clone()],
-            );
-            vk_index += 1;
-            result &= verify_proof(
-                params,
-                &vks[vk_index],
-                proofs[vk_index],
                 &vec![
-                    self.bodyhash_masked_substr.unwrap().clone(),
-                    self.bodyhash_substr_ids.unwrap().clone(),
-                    self.bodyhash_base64.unwrap().clone(),
+                    self.header_bytes_commit,
+                    self.bodyhash_masked_chars_commit.unwrap().clone(),
+                    self.bodyhash_substr_ids_commit.unwrap().clone(),
                 ],
             );
             vk_index += 1;
@@ -876,14 +1088,25 @@ impl EmailVerifyInstances<Fr> {
                 params,
                 &vks[vk_index],
                 proofs[vk_index],
-                &vec![self.body_bytes.unwrap().clone(), self.bodyhash.unwrap().clone()],
+                &vec![
+                    self.bodyhash_masked_chars_commit.unwrap().clone(),
+                    self.bodyhash_substr_ids_commit.unwrap().clone(),
+                    self.bodyhash_base64_commit.unwrap().clone(),
+                ],
             );
             vk_index += 1;
             result &= verify_proof(
                 params,
                 &vks[vk_index],
                 proofs[vk_index],
-                &vec![self.bodyhash.unwrap().clone(), self.bodyhash_base64.unwrap().clone()],
+                &vec![self.body_bytes_commit.unwrap().clone(), self.bodyhash_commit.unwrap().clone()],
+            );
+            vk_index += 1;
+            result &= verify_proof(
+                params,
+                &vks[vk_index],
+                proofs[vk_index],
+                &vec![self.bodyhash_commit.unwrap().clone(), self.bodyhash_base64_commit.unwrap().clone()],
             );
             vk_index += 1;
             result &= verify_proof(
@@ -891,9 +1114,9 @@ impl EmailVerifyInstances<Fr> {
                 &vks[vk_index],
                 proofs[vk_index],
                 &vec![
-                    self.body_bytes.unwrap().clone(),
-                    self.body_masked_substr.unwrap().clone(),
-                    self.body_substr_ids.unwrap().clone(),
+                    self.body_bytes_commit.unwrap().clone(),
+                    self.body_masked_chars_commit.unwrap().clone(),
+                    self.body_substr_ids_commit.unwrap().clone(),
                 ],
             );
             vk_index += 1;
@@ -902,14 +1125,14 @@ impl EmailVerifyInstances<Fr> {
                     params,
                     &vks[vk_index],
                     proofs[vk_index],
-                    &vec![vec![self.body_masked_substr.unwrap().clone()], self.body_masked_substr_hash.as_ref().unwrap().clone()].concat(),
+                    &vec![vec![self.body_masked_chars_commit.unwrap().clone()], self.body_masked_chars_hash.as_ref().unwrap().clone()].concat(),
                 );
                 vk_index += 1;
                 result &= verify_proof(
                     params,
                     &vks[vk_index],
                     proofs[vk_index],
-                    &vec![vec![self.body_substr_ids.unwrap().clone()], self.body_substr_ids_hash.as_ref().unwrap().clone()].concat(),
+                    &vec![vec![self.body_substr_ids_commit.unwrap().clone()], self.body_substr_ids_hash.as_ref().unwrap().clone()].concat(),
                 );
             }
         }
@@ -917,6 +1140,132 @@ impl EmailVerifyInstances<Fr> {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EmailVerifyInstancesJson {
+    header_bytes_commit: String,
+    header_hash_commit: String,
+    public_key_n_hash: String,
+    tag: String,
+    header_masked_chars_commit: String,
+    header_substr_ids_commit: String,
+    header_substrs: Vec<String>,
+    header_substr_idxes: Vec<usize>,
+    bodyhash_masked_chars_commit: Option<String>,
+    bodyhash_substr_ids_commit: Option<String>,
+    bodyhash_base64_commit: Option<String>,
+    body_bytes_commit: Option<String>,
+    bodyhash_commit: Option<String>,
+    body_masked_chars_commit: Option<String>,
+    body_substr_ids_commit: Option<String>,
+    body_substrs: Option<Vec<String>>,
+    body_substr_idxes: Option<Vec<usize>>,
+}
+
+impl EmailVerifyInstancesJson {
+    pub fn from_json_str(json_str: &str) -> Self {
+        serde_json::from_str(json_str).unwrap()
+    }
+
+    pub fn to_json_str(&self) -> String {
+        serde_json::to_string(self).unwrap()
+    }
+
+    pub fn to_instances<F: PrimeField>(&self) -> EmailVerifyInstances<F> {
+        let config_params = default_config_params();
+        let header_bytes_commit = F::from_str_vartime(&self.header_bytes_commit).unwrap();
+        let header_hash_commit = F::from_str_vartime(&self.header_hash_commit).unwrap();
+        let public_key_n_hash = F::from_str_vartime(&self.public_key_n_hash).unwrap();
+        let tag = F::from_str_vartime(&self.tag).unwrap();
+        let header_masked_chars_commit = F::from_str_vartime(&self.header_masked_chars_commit).unwrap();
+        let header_substr_ids_commit = F::from_str_vartime(&self.header_substr_ids_commit).unwrap();
+        let header_config = config_params.header_config.as_ref().unwrap();
+        let header_substrs = self
+            .header_substrs
+            .iter()
+            .zip(self.header_substr_idxes.iter())
+            .map(|(substr, substr_idx)| Some((substr.clone(), *substr_idx)))
+            .collect_vec();
+        let (header_masked_chars, header_substr_ids) = substrs2expected_chars_and_ids(header_config.max_variable_byte_size, &header_substrs);
+        let (header_masked_chars_hash, header_substr_ids_hash) = if header_config.expose_substrs.unwrap_or(false) {
+            let header_masked_chars_hash = Sha256::digest(&header_masked_chars).to_vec();
+            let header_substr_ids_hash = Sha256::digest(&header_substr_ids).to_vec();
+            (Some(value_bytes2fields(&header_masked_chars_hash)), Some(value_bytes2fields(&header_substr_ids_hash)))
+        } else {
+            (None, None)
+        };
+        let (
+            bodyhash_masked_chars_commit,
+            bodyhash_substr_ids_commit,
+            bodyhash_base64_commit,
+            body_bytes_commit,
+            bodyhash_commit,
+            body_masked_chars_commit,
+            body_substr_ids_commit,
+            body_masked_chars_hash,
+            body_substr_ids_hash,
+        ) = if let Some(body_config) = config_params.body_config.as_ref() {
+            let bodyhash_masked_chars_commit = F::from_str_vartime(&self.bodyhash_masked_chars_commit.as_ref().unwrap()).unwrap();
+            let bodyhash_substr_ids_commit = F::from_str_vartime(&self.bodyhash_substr_ids_commit.as_ref().unwrap()).unwrap();
+            let bodyhash_base64_commit = F::from_str_vartime(&self.bodyhash_base64_commit.as_ref().unwrap()).unwrap();
+            let body_bytes_commit = F::from_str_vartime(&self.body_bytes_commit.as_ref().unwrap()).unwrap();
+            let bodyhash_commit = F::from_str_vartime(&self.bodyhash_commit.as_ref().unwrap()).unwrap();
+            let body_masked_chars_commit = F::from_str_vartime(&self.body_masked_chars_commit.as_ref().unwrap()).unwrap();
+            let body_substr_ids_commit = F::from_str_vartime(&self.body_substr_ids_commit.as_ref().unwrap()).unwrap();
+            let body_substrs = self
+                .body_substrs
+                .as_ref()
+                .unwrap()
+                .iter()
+                .zip(self.body_substr_idxes.as_ref().unwrap().iter())
+                .map(|(substr, substr_idx)| Some((substr.clone(), *substr_idx)))
+                .collect_vec();
+            let (body_masked_chars, body_substr_ids) = substrs2expected_chars_and_ids(body_config.max_variable_byte_size, &body_substrs);
+            let (body_masked_chars_hash, body_substr_ids_hash) = if body_config.expose_substrs.unwrap_or(false) {
+                let body_masked_chars_hash = Sha256::digest(&body_masked_chars).to_vec();
+                let body_substr_ids_hash = Sha256::digest(&body_substr_ids).to_vec();
+                (Some(value_bytes2fields(&body_masked_chars_hash)), Some(value_bytes2fields(&body_substr_ids_hash)))
+            } else {
+                (None, None)
+            };
+            (
+                Some(bodyhash_masked_chars_commit),
+                Some(bodyhash_substr_ids_commit),
+                Some(bodyhash_base64_commit),
+                Some(body_bytes_commit),
+                Some(bodyhash_commit),
+                Some(body_masked_chars_commit),
+                Some(body_substr_ids_commit),
+                body_masked_chars_hash,
+                body_substr_ids_hash,
+            )
+        } else {
+            (None, None, None, None, None, None, None, None, None)
+        };
+        EmailVerifyInstances {
+            header_bytes_commit,
+            header_hash_commit,
+            public_key_n_hash,
+            tag,
+            header_masked_chars_commit,
+            header_substr_ids_commit,
+            header_substrs: self.header_substrs.clone(),
+            header_substr_idxes: self.header_substr_idxes.clone(),
+            header_masked_chars_hash,
+            header_substr_ids_hash,
+            bodyhash_masked_chars_commit,
+            bodyhash_substr_ids_commit,
+            bodyhash_base64_commit,
+            body_bytes_commit,
+            bodyhash_commit,
+            body_masked_chars_commit,
+            body_substr_ids_commit,
+            body_substrs: self.body_substrs.clone(),
+            body_substr_idxes: self.body_substr_idxes.clone(),
+            body_masked_chars_hash,
+            body_substr_ids_hash,
+        }
+    }
+}
 // /// Public input definition of [`DefaultEmailVerifyCircuit`].
 // #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 // pub struct DefaultEmailVerifyPublicInput {
@@ -2398,7 +2747,6 @@ mod test {
         });
     }
 
-    #[ignore]
     #[tokio::test]
     async fn test_proof_gen() {
         let regex_bodyhash_decomposed: DecomposedRegexConfig = serde_json::from_reader(File::open("./test_data/bodyhash_defs.json").unwrap()).unwrap();

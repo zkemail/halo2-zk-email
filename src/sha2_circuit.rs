@@ -189,7 +189,7 @@ impl_sha2_circuit!(
     true
 );
 impl_sha2_circuit!(
-    Sha256HeaderMaskedSubstrsCircuit,
+    Sha256HeaderMaskedCharsCircuit,
     default_config_params().header_config.as_ref().unwrap().max_variable_byte_size,
     default_config_params().num_flex_advice,
     default_config_params().num_flex_fixed,
@@ -215,7 +215,7 @@ impl_sha2_circuit!(
     false
 );
 impl_sha2_circuit!(
-    Sha256BodyMaskedSubstrsCircuit,
+    Sha256BodyMaskedCharsCircuit,
     default_config_params().body_config.as_ref().unwrap().max_variable_byte_size,
     default_config_params().num_flex_advice,
     default_config_params().num_flex_fixed,

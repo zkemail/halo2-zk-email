@@ -33,7 +33,15 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-pub fn gen_evm_verifier_yul<C>(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, num_instance: Vec<usize>) -> String
+use crate::config_params::default_config_params;
+
+// pub fn gen_verifiers(params: &ParamsKZG<Bn256>, vks: &[VerifyingKey<G1Affine>], sols_dir: &PathBuf) {
+//     let config_params = default_config_params();
+//     let mut vk_idx = 0;
+//     let sha2_header_yul = gen_evm_verifier_yul(params, &vks[vk_idx], &[])
+// }
+
+fn gen_evm_verifier_yul<C>(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, num_instance: Vec<usize>) -> String
 where
     C: CircuitExt<Fr>,
 {
@@ -58,9 +66,9 @@ where
 }
 
 // original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L326-L602
-pub fn gen_evm_verifier_sols(input_file: PathBuf, max_line_size_per_file: usize) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let file = File::open(input_file.clone())?;
-    let reader = BufReader::new(file);
+fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    // let file = File::open(input_file.clone())?;
+    let reader = BufReader::new(yul.as_bytes());
 
     let mut transcript_addrs: Vec<u32> = Vec::new();
     let mut modified_lines: Vec<String> = Vec::new();
@@ -102,8 +110,8 @@ pub fn gen_evm_verifier_sols(input_file: PathBuf, max_line_size_per_file: usize)
     }
     // println!("max_pubinputs_addr {}", max_pubinputs_addr);
 
-    let file = File::open(input_file)?;
-    let reader = BufReader::new(file);
+    // let file = File::open(input_file)?;
+    let reader = BufReader::new(yul.as_bytes());
 
     for line in reader.lines() {
         let mut line = line?;
