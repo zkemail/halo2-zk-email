@@ -140,16 +140,23 @@ pub async fn verify_evm_proofs(proofs: &[&[u8]], verifier_addr: Address, client:
 pub async fn deploy_verifiers(sols_dir: &PathBuf, client: &EthersClient, runs: Option<usize>) -> ethers::types::Address {
     let runs = runs.unwrap_or(1);
     let config_params = default_config_params();
-    let sha2_header_addr = deploy_verifier_base_and_funcs(sols_dir, "sha2_header", &client, runs).await;
-    let sign_verify_addr = deploy_verifier_base_and_funcs(sols_dir, "sign_verify", &client, runs).await;
-    let regex_header_addr = deploy_verifier_base_and_funcs(sols_dir, "regex_header", &client, runs).await;
+    let mut gas_sum = U256::zero();
+    let (sha2_header_addr, gas) = deploy_verifier_base_and_funcs(sols_dir, "sha2_header", &client, runs).await;
+    gas_sum += gas;
+    let (sign_verify_addr, gas) = deploy_verifier_base_and_funcs(sols_dir, "sign_verify", &client, runs).await;
+    gas_sum += gas;
+    let (regex_header_addr, gas) = deploy_verifier_base_and_funcs(sols_dir, "regex_header", &client, runs).await;
+    gas_sum += gas;
     let mut sha2_header_masked_chars_addr = Address::zero();
     let mut sha2_header_substr_ids_addr = Address::zero();
     let mut header_expose_substrs = false;
+    let mut gas = U256::zero();
     let max_header_bytes = U256::from(config_params.header_config.as_ref().unwrap().max_variable_byte_size);
     if config_params.header_config.as_ref().unwrap().expose_substrs.unwrap_or(false) {
-        sha2_header_masked_chars_addr = deploy_verifier_base_and_funcs(sols_dir, "sha2_header_masked_chars", &client, runs).await;
-        sha2_header_substr_ids_addr = deploy_verifier_base_and_funcs(sols_dir, "sha2_header_substr_ids", &client, runs).await;
+        (sha2_header_masked_chars_addr, gas) = deploy_verifier_base_and_funcs(sols_dir, "sha2_header_masked_chars", &client, runs).await;
+        gas_sum += gas;
+        (sha2_header_substr_ids_addr, gas) = deploy_verifier_base_and_funcs(sols_dir, "sha2_header_substr_ids", &client, runs).await;
+        gas_sum += gas;
         header_expose_substrs = true;
     }
     let (
@@ -174,15 +181,22 @@ pub async fn deploy_verifiers(sols_dir: &PathBuf, client: &EthersClient, runs: O
     let mut max_body_bytes = U256::zero();
     if let Some(body_config) = config_params.body_config.as_ref() {
         body_enable = true;
-        regex_bodyhash_addr = deploy_verifier_base_and_funcs(sols_dir, "regex_bodyhash", &client, runs).await;
-        chars_shift_bodyhash_addr = deploy_verifier_base_and_funcs(sols_dir, "chars_shift_bodyhash", &client, runs).await;
-        sha2_body_addr = deploy_verifier_base_and_funcs(sols_dir, "sha2_body", &client, runs).await;
-        base64_addr = deploy_verifier_base_and_funcs(sols_dir, "base64", &client, runs).await;
-        regex_body_addr = deploy_verifier_base_and_funcs(sols_dir, "regex_body", &client, runs).await;
+        (regex_bodyhash_addr, gas) = deploy_verifier_base_and_funcs(sols_dir, "regex_bodyhash", &client, runs).await;
+        gas_sum += gas;
+        (chars_shift_bodyhash_addr, gas) = deploy_verifier_base_and_funcs(sols_dir, "chars_shift_bodyhash", &client, runs).await;
+        gas_sum += gas;
+        (sha2_body_addr, gas) = deploy_verifier_base_and_funcs(sols_dir, "sha2_body", &client, runs).await;
+        gas_sum += gas;
+        (base64_addr, gas) = deploy_verifier_base_and_funcs(sols_dir, "base64", &client, runs).await;
+        gas_sum += gas;
+        (regex_body_addr, gas) = deploy_verifier_base_and_funcs(sols_dir, "regex_body", &client, runs).await;
+        gas_sum += gas;
         max_body_bytes = U256::from(body_config.max_variable_byte_size);
         if body_config.expose_substrs.unwrap_or(false) {
-            sha2_body_masked_chars_addr = deploy_verifier_base_and_funcs(sols_dir, "sha2_body_masked_chars", &client, runs).await;
-            sha2_body_substr_ids_addr = deploy_verifier_base_and_funcs(sols_dir, "sha2_body_substr_ids", &client, runs).await;
+            (sha2_body_masked_chars_addr, gas) = deploy_verifier_base_and_funcs(sols_dir, "sha2_body_masked_chars", &client, runs).await;
+            gas_sum += gas;
+            (sha2_body_substr_ids_addr, gas) = deploy_verifier_base_and_funcs(sols_dir, "sha2_body_substr_ids", &client, runs).await;
+            gas_sum += gas;
             body_expose_substrs = true;
         }
     }
@@ -205,17 +219,20 @@ pub async fn deploy_verifiers(sols_dir: &PathBuf, client: &EthersClient, runs: O
         max_header_bytes,
         max_body_bytes,
     );
-    let email_verifier = deploy_verifier_via_solidity(client.clone(), sols_dir.join("EmailVerifier.sol"), "EmailVerifier", email_verify_args, Some(runs)).await;
+    let (email_verifier, gas) = deploy_verifier_via_solidity(client.clone(), sols_dir.join("EmailVerifier.sol"), "EmailVerifier", email_verify_args, Some(runs)).await;
+    gas_sum += gas;
+    println!("total deploy gas {}", gas_sum);
     email_verifier
 }
 
-async fn deploy_verifier_base_and_funcs(sols_dir: &PathBuf, dir_name: &str, client: &EthersClient, runs: usize) -> ethers::types::Address {
+async fn deploy_verifier_base_and_funcs(sols_dir: &PathBuf, dir_name: &str, client: &EthersClient, runs: usize) -> (ethers::types::Address, U256) {
     let dir = sols_dir.join(&dir_name);
     let deploy_params = serde_json::from_reader::<_, DeployParamsJson>(File::open(&dir.join("deploy_params.json")).expect(&format!("deploy_params.json in {:?} cannot open", dir)))
         .expect(&format!("fail to convert deploy_params.json in {:?}", dir));
     let mut func_addrs = vec![];
+    let mut gas_sum = U256::zero();
     for idx in 0..deploy_params.num_func_contracts {
-        let func_addr = deploy_verifier_via_solidity(
+        let (func_addr, gas) = deploy_verifier_via_solidity(
             client.clone(),
             dir.join(format!("VerifierFunc{}.sol", idx)),
             &format!("VerifierFunc{}", idx),
@@ -223,15 +240,23 @@ async fn deploy_verifier_base_and_funcs(sols_dir: &PathBuf, dir_name: &str, clie
             Some(runs),
         )
         .await;
+        gas_sum += gas;
         func_addrs.push(func_addr);
     }
     let base_args = (func_addrs, U256::from(deploy_params.max_transcript_addr));
-    let base_addr = deploy_verifier_via_solidity(client.clone(), sols_dir.join("VerifierBase.sol"), "VerifierBase", base_args, Some(runs)).await;
-    base_addr
+    let (base_addr, gas) = deploy_verifier_via_solidity(client.clone(), sols_dir.join("VerifierBase.sol"), "VerifierBase", base_args, Some(runs)).await;
+    gas_sum += gas;
+    (base_addr, gas_sum)
 }
 
 // original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L89-L103
-async fn deploy_verifier_via_solidity<T: Tokenize>(client: EthersClient, sol_code_path: PathBuf, contract_name: &str, args: T, runs: Option<usize>) -> ethers::types::Address {
+async fn deploy_verifier_via_solidity<T: Tokenize>(
+    client: EthersClient,
+    sol_code_path: PathBuf,
+    contract_name: &str,
+    args: T,
+    runs: Option<usize>,
+) -> (ethers::types::Address, U256) {
     let (abi, bytecode, runtime_bytecode) = get_contract_artifacts(&sol_code_path, contract_name, runs);
     let factory = get_sol_contract_factory(abi, bytecode, runtime_bytecode, client);
     let (contract, receipt) = factory
@@ -242,7 +267,7 @@ async fn deploy_verifier_via_solidity<T: Tokenize>(client: EthersClient, sol_cod
         .expect("failed to deploy the factory");
     println!("solidity code path: {:?}", &sol_code_path);
     println!("gas used: {:?}", receipt.gas_used);
-    contract.address()
+    (contract.address(), receipt.gas_used.unwrap())
 }
 
 // original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L558-L578

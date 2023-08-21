@@ -736,6 +736,7 @@ impl EmailVerifyCircuits<Fr> {
         let mut proofs = vec![];
         let mut pk_index = 0;
         let instances = self.instances();
+        let timer = start_timer!(|| "prove: sha2_header");
         proofs.push(gen_evm_proof_shplonk(
             params,
             &pks[pk_index],
@@ -743,7 +744,9 @@ impl EmailVerifyCircuits<Fr> {
             vec![vec![instances.header_bytes_commit, instances.header_hash_commit]],
             rng,
         ));
+        end_timer!(timer);
         pk_index += 1;
+        let timer = start_timer!(|| "prove: sign_verify");
         proofs.push(gen_evm_proof_shplonk(
             params,
             &pks[pk_index],
@@ -751,7 +754,9 @@ impl EmailVerifyCircuits<Fr> {
             vec![vec![instances.public_key_n_hash, instances.header_hash_commit, instances.tag]],
             rng,
         ));
+        end_timer!(timer);
         pk_index += 1;
+        let timer = start_timer!(|| "prove: regex_header");
         proofs.push(gen_evm_proof_shplonk(
             params,
             &pks[pk_index],
@@ -763,8 +768,10 @@ impl EmailVerifyCircuits<Fr> {
             ]],
             rng,
         ));
+        end_timer!(timer);
         pk_index += 1;
         if self.header_expose_substrs {
+            let timer = start_timer!(|| "prove: sha2_header_masked_chars");
             proofs.push(gen_evm_proof_shplonk(
                 params,
                 &pks[pk_index],
@@ -772,7 +779,9 @@ impl EmailVerifyCircuits<Fr> {
                 vec![vec![vec![instances.header_masked_chars_commit], instances.header_masked_chars_hash.unwrap()].concat()],
                 rng,
             ));
+            end_timer!(timer);
             pk_index += 1;
+            let timer = start_timer!(|| "prove: sha2_header_substr_ids");
             proofs.push(gen_evm_proof_shplonk(
                 params,
                 &pks[pk_index],
@@ -780,9 +789,11 @@ impl EmailVerifyCircuits<Fr> {
                 vec![vec![vec![instances.header_substr_ids_commit], instances.header_substr_ids_hash.unwrap()].concat()],
                 rng,
             ));
+            end_timer!(timer);
             pk_index += 1;
         }
         if self.body_enable {
+            let timer = start_timer!(|| "prove: regex_bodyhash");
             proofs.push(gen_evm_proof_shplonk(
                 params,
                 &pks[pk_index],
@@ -794,7 +805,9 @@ impl EmailVerifyCircuits<Fr> {
                 ]],
                 rng,
             ));
+            end_timer!(timer);
             pk_index += 1;
+            let timer = start_timer!(|| "prove: chars_shift_bodyhash");
             proofs.push(gen_evm_proof_shplonk(
                 params,
                 &pks[pk_index],
@@ -806,7 +819,9 @@ impl EmailVerifyCircuits<Fr> {
                 ]],
                 rng,
             ));
+            end_timer!(timer);
             pk_index += 1;
+            let timer = start_timer!(|| "prove: sha2_body");
             proofs.push(gen_evm_proof_shplonk(
                 params,
                 &pks[pk_index],
@@ -814,7 +829,9 @@ impl EmailVerifyCircuits<Fr> {
                 vec![vec![instances.body_bytes_commit.unwrap().clone(), instances.bodyhash_commit.unwrap().clone()]],
                 rng,
             ));
+            end_timer!(timer);
             pk_index += 1;
+            let timer = start_timer!(|| "prove: base64");
             proofs.push(gen_evm_proof_shplonk(
                 params,
                 &pks[pk_index],
@@ -822,7 +839,9 @@ impl EmailVerifyCircuits<Fr> {
                 vec![vec![instances.bodyhash_commit.unwrap().clone(), instances.bodyhash_base64_commit.unwrap().clone()]],
                 rng,
             ));
+            end_timer!(timer);
             pk_index += 1;
+            let timer = start_timer!(|| "prove: regex_body");
             proofs.push(gen_evm_proof_shplonk(
                 params,
                 &pks[pk_index],
@@ -834,8 +853,10 @@ impl EmailVerifyCircuits<Fr> {
                 ]],
                 rng,
             ));
+            end_timer!(timer);
             pk_index += 1;
             if self.body_expose_substrs {
+                let timer = start_timer!(|| "prove: sha2_body_masked_chars");
                 proofs.push(gen_evm_proof_shplonk(
                     params,
                     &pks[pk_index],
@@ -843,7 +864,9 @@ impl EmailVerifyCircuits<Fr> {
                     vec![vec![vec![instances.body_masked_chars_commit.unwrap().clone()], instances.body_masked_chars_hash.unwrap().clone()].concat()],
                     rng,
                 ));
+                end_timer!(timer);
                 pk_index += 1;
+                let timer = start_timer!(|| "prove: sha2_body_substr_ids");
                 proofs.push(gen_evm_proof_shplonk(
                     params,
                     &pks[pk_index],
@@ -851,6 +874,7 @@ impl EmailVerifyCircuits<Fr> {
                     vec![vec![vec![instances.body_substr_ids_commit.unwrap().clone()], instances.body_substr_ids_hash.unwrap().clone()].concat()],
                     rng,
                 ));
+                end_timer!(timer);
             }
         }
         proofs

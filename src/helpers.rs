@@ -106,6 +106,9 @@ pub async fn gen_pks_and_vks(
     let circuits = gen_circuits_from_email_path(email_path, tag).await;
     let pks = circuits.gen_pks(&params);
     let vks = circuits.gen_vks(&pks);
+    if pks_dir.exists() {
+        fs::remove_dir_all(pks_dir).unwrap();
+    }
     fs::create_dir_all(pks_dir).unwrap();
     for (idx, pk) in pks.into_iter().enumerate() {
         let pk_path = pks_dir.join(format!("{}.pk", idx));
@@ -113,6 +116,9 @@ pub async fn gen_pks_and_vks(
         let mut writer = BufWriter::new(f);
         pk.write(&mut writer, SerdeFormat::RawBytesUnchecked).unwrap();
         writer.flush().unwrap();
+    }
+    if vks_dir.exists() {
+        fs::remove_dir_all(vks_dir).unwrap();
     }
     fs::create_dir_all(vks_dir).unwrap();
     for (idx, vk) in vks.into_iter().enumerate() {
@@ -211,6 +217,9 @@ pub async fn prove(
     let circuits = gen_circuits_from_email_path(email_path, tag).await;
     let pks = read_pks(pks_dir);
     let proofs = circuits.prove(&params, &pks, &mut OsRng);
+    if proofs_dir.exists() {
+        fs::remove_dir_all(proofs_dir).unwrap();
+    }
     fs::create_dir_all(proofs_dir).unwrap();
     for (idx, proof) in proofs.into_iter().enumerate() {
         let proof_path = proofs_dir.join(format!("proof{}.bin", idx));
@@ -255,6 +264,9 @@ pub async fn evm_prove(
     let circuits = gen_circuits_from_email_path(email_path, tag).await;
     let pks = read_pks(pks_dir);
     let proofs = circuits.evm_prove(&params, &pks, &mut OsRng);
+    if proofs_dir.exists() {
+        fs::remove_dir_all(proofs_dir).unwrap();
+    }
     fs::create_dir_all(proofs_dir).unwrap();
     for (idx, proof) in proofs.into_iter().enumerate() {
         let proof_path = proofs_dir.join(format!("evm_proof{}.bin", idx));
@@ -296,6 +308,9 @@ pub fn gen_evm_verifiers(params_path: &PathBuf, circuit_config_path: &PathBuf, v
     };
     let vks = read_vks(vks_dir);
     let max_line_size_per_file = 72 * 1000;
+    if sols_dir.exists() {
+        fs::remove_dir_all(sols_dir).unwrap();
+    }
     gen_sol_verifiers(&params, &vks, max_line_size_per_file, sols_dir);
 }
 
