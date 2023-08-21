@@ -24,7 +24,7 @@ contract EmailVerifier {
     struct EmailProofInstance {
         uint headerBytesCommit;
         uint headerHashCommit;
-        uint publicKeyNHashCommit;
+        uint publicKeyNHash;
         uint tag;
         uint headerMaskedCharsCommit;
         uint headerSubstrIdsCommit;
@@ -99,7 +99,7 @@ contract EmailVerifier {
         proofIdx++;
         VerifierBase signVerifyVerifierBase = VerifierBase(signVerifyVerifier);
         uint256[] memory signVerifyVerifierIns = new uint256[](3);
-        signVerifyVerifierIns[0] = instance.publicKeyNHashCommit;
+        signVerifyVerifierIns[0] = instance.publicKeyNHash;
         signVerifyVerifierIns[1] = instance.headerHashCommit;
         signVerifyVerifierIns[2] = instance.tag;
         require(

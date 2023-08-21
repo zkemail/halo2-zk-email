@@ -59,7 +59,11 @@ use snark_verifier_sdk::CircuitExt;
 use std::io::{Read, Write};
 
 #[cfg(not(test))]
+#[cfg(not(target_arch = "wasm32"))]
 pub fn default_config_params() -> &'static EmailVerifyConfigParams {
+    if GLOBAL_CONFIG_PARAMS.get().is_none() {
+        EmailVerifyConfigParams::set_from_env();
+    }
     EmailVerifyConfigParams::global()
 }
 

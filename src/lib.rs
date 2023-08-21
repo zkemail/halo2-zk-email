@@ -20,35 +20,41 @@
 //! If you want to omit some verification in our circuit, you can build your own circuit with these chips.  
 
 pub mod base64_circuit;
-// #[cfg(not(target_arch = "wasm32"))]
-// mod helpers;
 pub mod chars_shift;
 pub mod config_params;
-pub mod eth;
 pub mod regex_circuit;
 pub mod sha2_circuit;
+pub mod sign_verify;
+pub mod wtns_commit;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod eth;
+pub mod helpers;
+
 /// Regex verification + SHA256 computation.
 // pub mod regex_sha2;
 /// Regex verification + SHA256 computation + base64 encoding.
 // pub mod regex_sha2_base64;
 /// RSA signature verification.
-pub mod sign_verify;
 /// Util functions.
 // pub mod utils;
-pub mod wtns_commit;
 use std::fs::File;
 use std::marker::PhantomData;
 
 // pub use crate::helpers::*;
 // use crate::regex_sha2::RegexSha2Config;
-use crate::sign_verify::*;
+pub use crate::sign_verify::*;
 // use crate::utils::*;
+pub use crate::base64_circuit::*;
+pub use crate::chars_shift::*;
+pub use crate::config_params::*;
+pub use crate::regex_circuit::*;
+pub use crate::sha2_circuit::*;
 use crate::wtns_commit::poseidon_circuit::*;
-use crate::wtns_commit::*;
+pub use crate::wtns_commit::*;
 use base64::{engine::general_purpose, Engine as _};
 use cfdkim::canonicalize_signed_email;
 use cfdkim::resolve_public_key;
-use chars_shift::CharsShiftBodyHashCircuit;
 use config_params::default_config_params;
 use config_params::EmailVerifyConfigParams;
 use fancy_regex::Regex;
@@ -958,13 +964,6 @@ impl<F: PrimeField> EmailVerifyInstances<F> {
         let tag = field2string(&self.tag);
         let header_masked_chars_commit = field2string(&self.header_masked_chars_commit);
         let header_substr_ids_commit = field2string(&self.header_substr_ids_commit);
-        let (header_masked_chars_hash, header_substr_ids_hash) = if config_params.header_config.as_ref().unwrap().expose_substrs.unwrap_or(false) {
-            let header_masked_chars_hash = field_vec2string(self.header_masked_chars_hash.as_ref().unwrap());
-            let header_substr_ids_hash = field_vec2string(self.header_substr_ids_hash.as_ref().unwrap());
-            (Some(header_masked_chars_hash), Some(header_substr_ids_hash))
-        } else {
-            (None, None)
-        };
         let (
             bodyhash_masked_chars_commit,
             bodyhash_substr_ids_commit,
@@ -973,8 +972,6 @@ impl<F: PrimeField> EmailVerifyInstances<F> {
             bodyhash_commit,
             body_masked_chars_commit,
             body_substr_ids_commit,
-            body_masked_chars_hash,
-            body_substr_ids_hash,
         ) = if let Some(body_config) = config_params.body_config.as_ref() {
             let bodyhash_masked_chars_commit = field2string(&self.bodyhash_masked_chars_commit.unwrap());
             let bodyhash_substr_ids_commit = field2string(&self.bodyhash_substr_ids_commit.unwrap());
@@ -983,13 +980,6 @@ impl<F: PrimeField> EmailVerifyInstances<F> {
             let bodyhash_commit = field2string(&self.bodyhash_commit.unwrap());
             let body_masked_chars_commit = field2string(&self.body_masked_chars_commit.unwrap());
             let body_substr_ids_commit = field2string(&self.body_substr_ids_commit.unwrap());
-            let (body_masked_chars_hash, body_substr_ids_hash) = if body_config.expose_substrs.unwrap_or(false) {
-                let body_masked_chars_hash = field_vec2string(self.body_masked_chars_hash.as_ref().unwrap());
-                let body_substr_ids_hash = field_vec2string(self.body_substr_ids_hash.as_ref().unwrap());
-                (Some(body_masked_chars_hash), Some(body_substr_ids_hash))
-            } else {
-                (None, None)
-            };
             (
                 Some(bodyhash_masked_chars_commit),
                 Some(bodyhash_substr_ids_commit),
@@ -998,11 +988,9 @@ impl<F: PrimeField> EmailVerifyInstances<F> {
                 Some(bodyhash_commit),
                 Some(body_masked_chars_commit),
                 Some(body_substr_ids_commit),
-                Some(body_masked_chars_hash),
-                Some(body_substr_ids_hash),
             )
         } else {
-            (None, None, None, None, None, None, None, None, None)
+            (None, None, None, None, None, None, None)
         };
 
         EmailVerifyInstancesJson {

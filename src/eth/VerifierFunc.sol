@@ -13,5 +13,6 @@ contract VerifierFunc<%ID%> is VerifierFuncAbst {
             <%ASSEMBLY%>
         }}
         return (success, transcript);
-    }
+        }
+    } 
 }

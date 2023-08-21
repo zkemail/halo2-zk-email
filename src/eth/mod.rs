@@ -1,5 +1,10 @@
 // use crate::snark_verifier_sdk::*;
-use ethereum_types::Address;
+use crate::config_params::default_config_params;
+use crate::*;
+use ethereum_types::{Address, H256, U256};
+use ethers::solc::artifacts::Contract;
+use ethers::solc::{CompilerInput, Solc};
+use ethers::types::Bytes;
 use halo2_base::halo2_proofs::circuit::Value;
 use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, Fq, Fr, G1Affine};
 use halo2_base::halo2_proofs::halo2curves::FieldExt;
@@ -32,306 +37,229 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
+pub mod gen_verifier;
+use crate::eth::gen_verifier::*;
+use ethers::abi::{Abi, Tokenize};
+use ethers::contract::ContractFactory;
+use ethers::core::k256::ecdsa::SigningKey;
+use ethers::middleware::SignerMiddleware;
+use ethers::providers::{Http, Middleware, Provider};
+use ethers::signers::Signer;
+use ethers::{
+    prelude::{abigen, LocalWallet, Wallet},
+    utils::{Anvil, AnvilInstance},
+};
+mod email_verifier_contract;
+use email_verifier_contract::{EmailProofInstance, EmailVerifierContract};
 
-use crate::config_params::default_config_params;
-
-// pub fn gen_verifiers(params: &ParamsKZG<Bn256>, vks: &[VerifyingKey<G1Affine>], sols_dir: &PathBuf) {
-//     let config_params = default_config_params();
-//     let mut vk_idx = 0;
-//     let sha2_header_yul = gen_evm_verifier_yul(params, &vks[vk_idx], &[])
-// }
-
-fn gen_evm_verifier_yul<C>(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, num_instance: Vec<usize>) -> String
-where
-    C: CircuitExt<Fr>,
-{
-    type PCS = Kzg<Bn256, Bdfg21>;
-    let svk = params.get_g()[0].into();
-    let dk = (params.g2(), params.s_g2()).into();
-    let protocol = compile(
-        params,
-        vk,
-        Config::kzg().with_num_instance(num_instance.clone()).with_accumulator_indices(C::accumulator_indices()),
-    );
-
-    let loader = EvmLoader::new::<Fq, Fr>();
-    let protocol = protocol.loaded(&loader);
-    let mut transcript = EvmTranscript::<_, Rc<EvmLoader>, _, _>::new(&loader);
-
-    let instances = transcript.load_instances(num_instance);
-    let proof = Plonk::<PCS>::read_proof(&svk, &protocol, &instances, &mut transcript);
-    Plonk::<PCS>::verify(&svk, &dk, &protocol, &instances, &proof);
-
-    loader.yul_code()
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DeployParamsJson {
+    max_transcript_addr: u32,
+    num_func_contracts: usize,
 }
 
-// original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L326-L602
-fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    // let file = File::open(input_file.clone())?;
-    let reader = BufReader::new(yul.as_bytes());
+// original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L40
+pub type EthersClient = Arc<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>>;
 
-    let mut transcript_addrs: Vec<u32> = Vec::new();
-    let mut modified_lines: Vec<String> = Vec::new();
+// original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L58-L86
+pub async fn setup_eth_backend(rpc_url: Option<&str>) -> (AnvilInstance, EthersClient) {
+    // Launch anvil
+    let anvil = Anvil::new().spawn();
 
-    // convert calldataload 0x0 to 0x40 to read from pubInputs, and the rest
-    // from proof
-    let calldata_pattern = Regex::new(r"^.*(calldataload\((0x[a-f0-9]+)\)).*$")?;
-    let mstore_pattern = Regex::new(r"^\s*(mstore\(0x([0-9a-fA-F]+)+),.+\)")?;
-    let mstore8_pattern = Regex::new(r"^\s*(mstore8\((\d+)+),.+\)")?;
-    let mstoren_pattern = Regex::new(r"^\s*(mstore\((\d+)+),.+\)")?;
-    let mload_pattern = Regex::new(r"(mload\((0x[0-9a-fA-F]+))\)")?;
-    let keccak_pattern = Regex::new(r"(keccak256\((0x[0-9a-fA-F]+))")?;
-    let modexp_pattern = Regex::new(r"(staticcall\(gas\(\), 0x5, (0x[0-9a-fA-F]+), 0xc0, (0x[0-9a-fA-F]+), 0x20)")?;
-    let ecmul_pattern = Regex::new(r"(staticcall\(gas\(\), 0x7, (0x[0-9a-fA-F]+), 0x60, (0x[0-9a-fA-F]+), 0x40)")?;
-    let ecadd_pattern = Regex::new(r"(staticcall\(gas\(\), 0x6, (0x[0-9a-fA-F]+), 0x80, (0x[0-9a-fA-F]+), 0x40)")?;
-    let ecpairing_pattern = Regex::new(r"(staticcall\(gas\(\), 0x8, (0x[0-9a-fA-F]+), 0x180, (0x[0-9a-fA-F]+), 0x20)")?;
-    let bool_pattern = Regex::new(r":bool")?;
+    // Instantiate the wallet
+    let wallet: LocalWallet = anvil.keys()[0].clone().into();
 
-    // Count the number of pub inputs
-    let mut start = None;
-    let mut end = None;
-    for (i, line) in reader.lines().enumerate() {
-        let line = line?;
-        if line.trim().starts_with("mstore(0x20") && start.is_none() {
-            start = Some(i as u32);
-        }
+    let endpoint = if let Some(rpc_url) = rpc_url { rpc_url.to_string() } else { anvil.endpoint() };
 
-        if line.trim().starts_with("mstore(0x0") {
-            end = Some(i as u32);
-            break;
+    // Connect to the network
+    let provider = Provider::<Http>::try_from(endpoint)
+        .expect("fail to construct the provider")
+        .interval(Duration::from_millis(10u64));
+
+    // Instantiate the client with the wallet
+    let client = Arc::new(SignerMiddleware::new(provider, wallet.with_chain_id(anvil.chain_id())));
+
+    (anvil, client)
+}
+
+pub async fn verify_evm_proofs(proofs: &[&[u8]], verifier_addr: Address, client: &EthersClient, instance: &EmailVerifyInstancesJson) {
+    let verifier = EmailVerifierContract::new(verifier_addr, client.clone());
+    let instance = EmailProofInstance {
+        header_bytes_commit: U256::from_str_radix(&instance.header_bytes_commit, 10).unwrap(),
+        header_hash_commit: U256::from_str_radix(&instance.header_hash_commit, 10).unwrap(),
+        public_key_n_hash: U256::from_str_radix(&instance.public_key_n_hash, 10).unwrap(),
+        tag: U256::from_str_radix(&instance.tag, 10).unwrap(),
+        header_masked_chars_commit: U256::from_str_radix(&instance.header_masked_chars_commit, 10).unwrap(),
+        header_substr_ids_commit: U256::from_str_radix(&instance.header_substr_ids_commit, 10).unwrap(),
+        header_substrs: instance.header_substrs.clone(),
+        header_substr_idxes: instance.header_substr_idxes.iter().map(|idx| U256::from(*idx)).collect_vec(),
+        bodyhash_masked_chars_commit: instance
+            .bodyhash_masked_chars_commit
+            .as_ref()
+            .map(|s| U256::from_str_radix(s, 10).unwrap())
+            .unwrap_or(U256::zero()),
+        bodyhash_substr_ids_commit: instance
+            .bodyhash_substr_ids_commit
+            .as_ref()
+            .map(|s| U256::from_str_radix(s, 10).unwrap())
+            .unwrap_or(U256::zero()),
+        bodyhash_base_64_commit: instance
+            .bodyhash_base64_commit
+            .as_ref()
+            .map(|s| U256::from_str_radix(s, 10).unwrap())
+            .unwrap_or(U256::zero()),
+        body_bytes_commit: instance.body_bytes_commit.as_ref().map(|s| U256::from_str_radix(s, 10).unwrap()).unwrap_or(U256::zero()),
+        bodyhash_commit: instance.bodyhash_commit.as_ref().map(|s| U256::from_str_radix(s, 10).unwrap()).unwrap_or(U256::zero()),
+        body_masked_chars_commit: instance
+            .body_masked_chars_commit
+            .as_ref()
+            .map(|s| U256::from_str_radix(s, 10).unwrap())
+            .unwrap_or(U256::zero()),
+        body_substr_ids_commit: instance
+            .body_substr_ids_commit
+            .as_ref()
+            .map(|s| U256::from_str_radix(s, 10).unwrap())
+            .unwrap_or(U256::zero()),
+        body_substrs: instance.body_substrs.clone().unwrap_or(vec![]),
+        body_substr_idxes: instance.body_substr_idxes.clone().unwrap_or(vec![]).iter().map(|idx| U256::from(*idx)).collect_vec(),
+    };
+    let proofs = proofs.into_iter().map(|proof| Bytes::from(proof.to_vec())).collect_vec();
+    verifier.verify(instance, proofs).call().await.unwrap();
+}
+
+pub async fn deploy_verifiers(sols_dir: &PathBuf, client: &EthersClient, runs: Option<usize>) -> ethers::types::Address {
+    let runs = runs.unwrap_or(1);
+    let config_params = default_config_params();
+    let sha2_header_addr = deploy_verifier_base_and_funcs(sols_dir, "sha2_header", &client, runs).await;
+    let sign_verify_addr = deploy_verifier_base_and_funcs(sols_dir, "sign_verify", &client, runs).await;
+    let regex_header_addr = deploy_verifier_base_and_funcs(sols_dir, "regex_header", &client, runs).await;
+    let mut sha2_header_masked_chars_addr = Address::zero();
+    let mut sha2_header_substr_ids_addr = Address::zero();
+    let mut header_expose_substrs = false;
+    let max_header_bytes = U256::from(config_params.header_config.as_ref().unwrap().max_variable_byte_size);
+    if config_params.header_config.as_ref().unwrap().expose_substrs.unwrap_or(false) {
+        sha2_header_masked_chars_addr = deploy_verifier_base_and_funcs(sols_dir, "sha2_header_masked_chars", &client, runs).await;
+        sha2_header_substr_ids_addr = deploy_verifier_base_and_funcs(sols_dir, "sha2_header_substr_ids", &client, runs).await;
+        header_expose_substrs = true;
+    }
+    let (
+        mut regex_bodyhash_addr,
+        mut chars_shift_bodyhash_addr,
+        mut sha2_body_addr,
+        mut base64_addr,
+        mut regex_body_addr,
+        mut sha2_body_masked_chars_addr,
+        mut sha2_body_substr_ids_addr,
+    ) = (
+        Address::zero(),
+        Address::zero(),
+        Address::zero(),
+        Address::zero(),
+        Address::zero(),
+        Address::zero(),
+        Address::zero(),
+    );
+    let mut body_enable = false;
+    let mut body_expose_substrs = false;
+    let mut max_body_bytes = U256::zero();
+    if let Some(body_config) = config_params.body_config.as_ref() {
+        body_enable = true;
+        regex_bodyhash_addr = deploy_verifier_base_and_funcs(sols_dir, "regex_bodyhash", &client, runs).await;
+        chars_shift_bodyhash_addr = deploy_verifier_base_and_funcs(sols_dir, "chars_shift_bodyhash", &client, runs).await;
+        sha2_body_addr = deploy_verifier_base_and_funcs(sols_dir, "sha2_body", &client, runs).await;
+        base64_addr = deploy_verifier_base_and_funcs(sols_dir, "base64", &client, runs).await;
+        regex_body_addr = deploy_verifier_base_and_funcs(sols_dir, "regex_body", &client, runs).await;
+        max_body_bytes = U256::from(body_config.max_variable_byte_size);
+        if body_config.expose_substrs.unwrap_or(false) {
+            sha2_body_masked_chars_addr = deploy_verifier_base_and_funcs(sols_dir, "sha2_body_masked_chars", &client, runs).await;
+            sha2_body_substr_ids_addr = deploy_verifier_base_and_funcs(sols_dir, "sha2_body_substr_ids", &client, runs).await;
+            body_expose_substrs = true;
         }
     }
+    let email_verify_args = (
+        sha2_header_addr,
+        sign_verify_addr,
+        regex_header_addr,
+        sha2_header_masked_chars_addr,
+        sha2_header_substr_ids_addr,
+        regex_bodyhash_addr,
+        chars_shift_bodyhash_addr,
+        sha2_body_addr,
+        base64_addr,
+        regex_body_addr,
+        sha2_body_masked_chars_addr,
+        sha2_body_substr_ids_addr,
+        header_expose_substrs,
+        body_enable,
+        body_expose_substrs,
+        max_header_bytes,
+        max_body_bytes,
+    );
+    let email_verifier = deploy_verifier_via_solidity(client.clone(), sols_dir.join("EmailVerifier.sol"), "EmailVerifier", email_verify_args, Some(runs)).await;
+    email_verifier
+}
 
-    let num_pubinputs = if let Some(s) = start { end.unwrap() - s } else { 0 };
-
-    let mut max_pubinputs_addr = 0;
-    if num_pubinputs > 0 {
-        max_pubinputs_addr = num_pubinputs * 32 - 32;
+async fn deploy_verifier_base_and_funcs(sols_dir: &PathBuf, dir_name: &str, client: &EthersClient, runs: usize) -> ethers::types::Address {
+    let dir = sols_dir.join(&dir_name);
+    let deploy_params = serde_json::from_reader::<_, DeployParamsJson>(File::open(&dir.join("deploy_params.json")).expect(&format!("deploy_params.json in {:?} cannot open", dir)))
+        .expect(&format!("fail to convert deploy_params.json in {:?}", dir));
+    let mut func_addrs = vec![];
+    for idx in 0..deploy_params.num_func_contracts {
+        let func_addr = deploy_verifier_via_solidity(
+            client.clone(),
+            dir.join(format!("VerifierFunc{}.sol", idx)),
+            &format!("VerifierFunc{}", idx),
+            (),
+            Some(runs),
+        )
+        .await;
+        func_addrs.push(func_addr);
     }
-    // println!("max_pubinputs_addr {}", max_pubinputs_addr);
+    let base_args = (func_addrs, U256::from(deploy_params.max_transcript_addr));
+    let base_addr = deploy_verifier_via_solidity(client.clone(), dir.join("VerifierBase.sol"), "VerifierBase", base_args, Some(runs)).await;
+    base_addr
+}
 
-    // let file = File::open(input_file)?;
-    let reader = BufReader::new(yul.as_bytes());
+// original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L89-L103
+async fn deploy_verifier_via_solidity<T: Tokenize>(client: EthersClient, sol_code_path: PathBuf, contract_name: &str, args: T, runs: Option<usize>) -> ethers::types::Address {
+    let (abi, bytecode, runtime_bytecode) = get_contract_artifacts(sol_code_path, contract_name, runs);
+    let factory = get_sol_contract_factory(abi, bytecode, runtime_bytecode, client);
 
-    for line in reader.lines() {
-        let mut line = line?;
-        let m = bool_pattern.captures(&line);
-        if m.is_some() {
-            line = line.replace(":bool", "");
-        }
+    let contract = factory.deploy(args).expect("invalid deploy params").send().await.expect("failed to deploy the factory");
+    contract.address()
+}
 
-        let m = calldata_pattern.captures(&line);
-        if let Some(m) = m {
-            let calldata_and_addr = m.get(1).unwrap().as_str();
-            let addr = m.get(2).unwrap().as_str();
-            let addr_as_num = u32::from_str_radix(addr.strip_prefix("0x").unwrap(), 16)?;
+// original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L558-L578
+pub fn get_contract_artifacts(sol_code_path: PathBuf, contract_name: &str, runs: Option<usize>) -> (Abi, Bytes, Bytes) {
+    assert!(sol_code_path.exists());
+    // Create the compiler input, enabling the optimizer and setting the optimzer runs.
+    let input: CompilerInput = if let Some(r) = runs {
+        let mut i = CompilerInput::new(&sol_code_path).expect("invalid compiler input")[0].clone().optimizer(r);
+        i.settings.optimizer.enable();
+        i
+    } else {
+        CompilerInput::new(&sol_code_path).expect("invalid compiler input")[0].clone()
+    };
+    let compiled = Solc::default().compile(&input).unwrap();
+    let (abi, bytecode, runtime_bytecode) = compiled
+        .find(contract_name)
+        .expect(&format!("could not find contract {} in {:?}", contract_name, &sol_code_path))
+        .into_parts_or_default();
+    (abi, bytecode, runtime_bytecode)
+}
 
-            if addr_as_num <= max_pubinputs_addr {
-                let pub_addr = format!("{:#x}", addr_as_num + 32);
-                // println!("pub_addr {}", pub_addr);
-                line = line.replace(calldata_and_addr, &format!("mload(add(pubInputs, {}))", pub_addr));
-            } else {
-                let proof_addr = format!("{:#x}", addr_as_num - max_pubinputs_addr);
-                // println!("proof_addr {}", proof_addr);
-                line = line.replace(calldata_and_addr, &format!("mload(add(proof, {}))", proof_addr));
-            }
-        }
-
-        let m = mstore8_pattern.captures(&line);
-        if let Some(m) = m {
-            let mstore = m.get(1).unwrap().as_str();
-            let addr = m.get(2).unwrap().as_str();
-            let addr_as_num = u32::from_str_radix(addr, 10)?;
-            let transcript_addr = format!("{:#x}", addr_as_num);
-            transcript_addrs.push(addr_as_num);
-            // [TODO] Check mstore8 -> sstore is OK.
-            line = line.replace(mstore, &format!("mstore8(add(transcript, {})", transcript_addr));
-        }
-
-        let m = mstoren_pattern.captures(&line);
-        if let Some(m) = m {
-            let mstore = m.get(1).unwrap().as_str();
-            let addr = m.get(2).unwrap().as_str();
-            let addr_as_num = u32::from_str_radix(addr, 10)?;
-            let transcript_addr = format!("{:#x}", addr_as_num);
-            transcript_addrs.push(addr_as_num);
-            line = line.replace(mstore, &format!("mstore(add(transcript, {})", transcript_addr));
-        }
-
-        let m = modexp_pattern.captures(&line);
-        if let Some(m) = m {
-            let modexp = m.get(1).unwrap().as_str();
-            let start_addr = m.get(2).unwrap().as_str();
-            let result_addr = m.get(3).unwrap().as_str();
-            let start_addr_as_num = u32::from_str_radix(start_addr.strip_prefix("0x").unwrap(), 16)?;
-            let result_addr_as_num = u32::from_str_radix(result_addr.strip_prefix("0x").unwrap(), 16)?;
-
-            let transcript_addr = format!("{:#x}", start_addr_as_num);
-            transcript_addrs.push(start_addr_as_num);
-            let result_addr = format!("{:#x}", result_addr_as_num);
-            line = line.replace(
-                modexp,
-                &format!("staticcall(gas(), 0x5, add(transcript, {}), 0xc0, add(transcript, {}), 0x20", transcript_addr, result_addr),
-            );
-        }
-
-        let m = ecmul_pattern.captures(&line);
-        if let Some(m) = m {
-            let ecmul = m.get(1).unwrap().as_str();
-            let start_addr = m.get(2).unwrap().as_str();
-            let result_addr = m.get(3).unwrap().as_str();
-            let start_addr_as_num = u32::from_str_radix(start_addr.strip_prefix("0x").unwrap(), 16)?;
-            let result_addr_as_num = u32::from_str_radix(result_addr.strip_prefix("0x").unwrap(), 16)?;
-
-            let transcript_addr = format!("{:#x}", start_addr_as_num);
-            let result_addr = format!("{:#x}", result_addr_as_num);
-            transcript_addrs.push(start_addr_as_num);
-            transcript_addrs.push(result_addr_as_num);
-            line = line.replace(
-                ecmul,
-                &format!("staticcall(gas(), 0x7, add(transcript, {}), 0x60, add(transcript, {}), 0x40", transcript_addr, result_addr),
-            );
-        }
-
-        let m = ecadd_pattern.captures(&line);
-        if let Some(m) = m {
-            let ecadd = m.get(1).unwrap().as_str();
-            let start_addr = m.get(2).unwrap().as_str();
-            let result_addr = m.get(3).unwrap().as_str();
-            let start_addr_as_num = u32::from_str_radix(start_addr.strip_prefix("0x").unwrap(), 16)?;
-            let result_addr_as_num = u32::from_str_radix(result_addr.strip_prefix("0x").unwrap(), 16)?;
-
-            let transcript_addr = format!("{:#x}", start_addr_as_num);
-            let result_addr = format!("{:#x}", result_addr_as_num);
-            transcript_addrs.push(start_addr_as_num);
-            transcript_addrs.push(result_addr_as_num);
-            line = line.replace(
-                ecadd,
-                &format!("staticcall(gas(), 0x6, add(transcript, {}), 0x80, add(transcript, {}), 0x40", transcript_addr, result_addr),
-            );
-        }
-
-        let m = ecpairing_pattern.captures(&line);
-        if let Some(m) = m {
-            let ecpairing = m.get(1).unwrap().as_str();
-            let start_addr = m.get(2).unwrap().as_str();
-            let result_addr = m.get(3).unwrap().as_str();
-            let start_addr_as_num = u32::from_str_radix(start_addr.strip_prefix("0x").unwrap(), 16)?;
-            let result_addr_as_num = u32::from_str_radix(result_addr.strip_prefix("0x").unwrap(), 16)?;
-
-            let transcript_addr = format!("{:#x}", start_addr_as_num);
-            let result_addr = format!("{:#x}", result_addr_as_num);
-            transcript_addrs.push(start_addr_as_num);
-            transcript_addrs.push(result_addr_as_num);
-            line = line.replace(
-                ecpairing,
-                &format!("staticcall(gas(), 0x8, add(transcript, {}), 0x180, add(transcript, {}), 0x20", transcript_addr, result_addr),
-            );
-        }
-
-        let m = mstore_pattern.captures(&line);
-        if let Some(m) = m {
-            let mstore = m.get(1).unwrap().as_str();
-            let addr = m.get(2).unwrap().as_str();
-            let addr_as_num = u32::from_str_radix(addr, 16)?;
-            let transcript_addr = format!("{:#x}", addr_as_num);
-            transcript_addrs.push(addr_as_num);
-            line = line.replace(mstore, &format!("mstore(add(transcript, {})", transcript_addr));
-        }
-
-        let m = keccak_pattern.captures(&line);
-        if let Some(m) = m {
-            let keccak = m.get(1).unwrap().as_str();
-            let addr = m.get(2).unwrap().as_str();
-            let addr_as_num = u32::from_str_radix(addr.strip_prefix("0x").unwrap(), 16)?;
-            let transcript_addr = format!("{:#x}", addr_as_num);
-            transcript_addrs.push(addr_as_num);
-            line = line.replace(keccak, &format!("keccak256(add(transcript, {})", transcript_addr));
-        }
-
-        // mload can show up multiple times per line
-        loop {
-            let m = mload_pattern.captures(&line);
-            if m.is_none() {
-                break;
-            }
-            let mload = m.as_ref().unwrap().get(1).unwrap().as_str();
-            let addr = m.as_ref().unwrap().get(2).unwrap().as_str();
-
-            let addr_as_num = u32::from_str_radix(addr.strip_prefix("0x").unwrap(), 16)?;
-            let transcript_addr = format!("{:#x}", addr_as_num);
-            transcript_addrs.push(addr_as_num);
-            line = line.replace(mload, &format!("mload(add(transcript, {})", transcript_addr));
-        }
-
-        modified_lines.push(line);
+fn get_sol_contract_factory<M: 'static + Middleware>(abi: Abi, bytecode: Bytes, runtime_bytecode: Bytes, client: Arc<M>) -> ContractFactory<M> {
+    const MAX_RUNTIME_BYTECODE_SIZE: usize = 24577;
+    let size = runtime_bytecode.len();
+    if size > MAX_RUNTIME_BYTECODE_SIZE {
+        // `_runtime_bytecode` exceeds the limit
+        panic!(
+            "Solidity runtime bytecode size is: {:#?},
+            which exceeds 24577 bytes limit.",
+            size
+        );
     }
-    let mut outputs = vec![];
-    // get the max transcript addr
-    let max_transcript_addr = transcript_addrs.iter().max().unwrap() / 32;
-    {
-        // let mut storage_file = File::create(output_dir.join("VerifierBase.sol"))?;
-        let mut template = include_str!("./VerifierBase.sol").to_string();
-        // template = template.replace("<%name%>", &format!("{}", max_transcript_addr));
-        template = template.replace("<%max_transcript_addr%>", &format!("{}", max_transcript_addr));
-        outputs.push(template);
-        // storage_file.write_all(template.as_bytes())?;
-    }
-    let mut func_idx = 0;
-    let mut lines = String::new();
-    // let mut write = BufWriter::new(File::create(output_dir.join(format!("VerifierFunc{}.sol", func_idx)))?);
-    for (idx, line) in modified_lines[16..modified_lines.len() - 7].iter().enumerate() {
-        if lines.len() > max_line_size_per_file {
-            let mut template = include_str!("./VerifierFunc.sol").to_string();
-            // template = template.replace("<%max_transcript_addr%>", &format!("{}", max_transcript_addr));
-            template = template.replace("<%ID%>", &format!("{}", func_idx));
-            template = template.replace("<%ASSEMBLY%>", &lines);
-            // let mut func_file = File::create(output_dir.join(format!("VerifierFunc{}.sol", func_idx)))?;
-            // func_file.write_all(template.as_bytes())?;
-            outputs.push(template);
-            lines = String::new();
-            func_idx += 1;
-        }
-        lines += &format!("{}\n", line);
-    }
-    if lines.len() > 0 {
-        let mut template = include_str!("./VerifierFunc.sol").to_string();
-        // template = template.replace("<%max_transcript_addr%>", &format!("{}", max_transcript_addr));
-        template = template.replace("<%ID%>", &format!("{}", func_idx));
-        template = template.replace("<%ASSEMBLY%>", &lines);
-        outputs.push(template);
-        // let mut func_file = File::create(output_dir.join(format!("VerifierFunc{}.sol", func_idx)))?;
-        // func_file.write_all(template.as_bytes())?;
-    }
-    // let template = include_str!("./EmailVerifier.sol").to_string();
-    // let mut func_file = File::create(output_dir.join("EmailVerifier.sol"))?;
-    // func_file.write_all(template.as_bytes())?;
-
-    // let mut contract = format!(
-    //     "// SPDX-License-Identifier: MIT
-    // pragma solidity ^0.8.17;
-
-    // contract Verifier {{
-    //     function verify(
-    //         uint256[] memory pubInputs,
-    //         bytes memory proof
-    //     ) public view returns (bool) {{
-    //         bool success = true;
-    //         bytes32[{}] memory transcript;
-    //         assembly {{
-    //     ",
-    //     max_transcript_addr
-    // )
-    // .trim()
-    // .to_string();
-
-    // using a boxed Write trait object here to show it works for any Struct impl'ing Write
-    // you may also use a std::fs::File here
-    // let mut write: Box<&mut dyn std::fmt::Write> = Box::new(&mut contract);
-
-    // for line in modified_lines[16..modified_lines.len() - 7].iter() {
-    //     write!(write, "{}", line).unwrap();
-    // }
-    // writeln!(write, "}} return success; }} }}")?;
-    Ok(outputs)
+    ContractFactory::new(abi, bytecode, client)
 }
