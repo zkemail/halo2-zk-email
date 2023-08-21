@@ -3,7 +3,7 @@ use crate::config_params::default_config_params;
 use crate::*;
 use ethereum_types::{Address, H256, U256};
 use ethers::solc::artifacts::Contract;
-use ethers::solc::{CompilerInput, Solc};
+use ethers::solc::{CompilerInput, EvmVersion, Solc};
 use ethers::types::Bytes;
 use halo2_base::halo2_proofs::circuit::Value;
 use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, Fq, Fr, G1Affine};
@@ -64,24 +64,30 @@ pub struct DeployParamsJson {
 pub type EthersClient = Arc<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>>;
 
 // original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L58-L86
-pub async fn setup_eth_backend(rpc_url: Option<&str>) -> (AnvilInstance, EthersClient) {
+pub async fn setup_eth_backend() -> AnvilInstance {
     // Launch anvil
     let anvil = Anvil::new().spawn();
+    anvil
+}
 
+// original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L58-L86
+pub async fn setup_eth_client(anvil: &AnvilInstance) -> EthersClient {
+    // Launch anvil
+    // let anvil = Anvil::new().spawn();
     // Instantiate the wallet
     let wallet: LocalWallet = anvil.keys()[0].clone().into();
+    // let rpc_url = Some("http://localhost:8545");
 
-    let endpoint = if let Some(rpc_url) = rpc_url { rpc_url.to_string() } else { anvil.endpoint() };
-
+    let endpoint = anvil.endpoint();
     // Connect to the network
-    let provider = Provider::<Http>::try_from(endpoint)
-        .expect("fail to construct the provider")
-        .interval(Duration::from_millis(10u64));
+    let provider = Provider::<Http>::try_from(endpoint).expect("fail to construct the provider");
+
+    // let chain_id = provider.get_chainid().await.unwrap();
 
     // Instantiate the client with the wallet
     let client = Arc::new(SignerMiddleware::new(provider, wallet.with_chain_id(anvil.chain_id())));
 
-    (anvil, client)
+    client
 }
 
 pub async fn verify_evm_proofs(proofs: &[&[u8]], verifier_addr: Address, client: &EthersClient, instance: &EmailVerifyInstancesJson) {
@@ -126,7 +132,9 @@ pub async fn verify_evm_proofs(proofs: &[&[u8]], verifier_addr: Address, client:
         body_substr_idxes: instance.body_substr_idxes.clone().unwrap_or(vec![]).iter().map(|idx| U256::from(*idx)).collect_vec(),
     };
     let proofs = proofs.into_iter().map(|proof| Bytes::from(proof.to_vec())).collect_vec();
-    verifier.verify(instance, proofs).call().await.unwrap();
+    verifier.verify(instance.clone(), proofs.clone()).call().await.unwrap();
+    let call = verifier.method::<_, ()>("verify", (instance, proofs)).unwrap().legacy();
+    println!("estimated gas {:?}", call.estimate_gas().await.unwrap());
 }
 
 pub async fn deploy_verifiers(sols_dir: &PathBuf, client: &EthersClient, runs: Option<usize>) -> ethers::types::Address {
@@ -218,22 +226,28 @@ async fn deploy_verifier_base_and_funcs(sols_dir: &PathBuf, dir_name: &str, clie
         func_addrs.push(func_addr);
     }
     let base_args = (func_addrs, U256::from(deploy_params.max_transcript_addr));
-    let base_addr = deploy_verifier_via_solidity(client.clone(), dir.join("VerifierBase.sol"), "VerifierBase", base_args, Some(runs)).await;
+    let base_addr = deploy_verifier_via_solidity(client.clone(), sols_dir.join("VerifierBase.sol"), "VerifierBase", base_args, Some(runs)).await;
     base_addr
 }
 
 // original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L89-L103
 async fn deploy_verifier_via_solidity<T: Tokenize>(client: EthersClient, sol_code_path: PathBuf, contract_name: &str, args: T, runs: Option<usize>) -> ethers::types::Address {
-    let (abi, bytecode, runtime_bytecode) = get_contract_artifacts(sol_code_path, contract_name, runs);
+    let (abi, bytecode, runtime_bytecode) = get_contract_artifacts(&sol_code_path, contract_name, runs);
     let factory = get_sol_contract_factory(abi, bytecode, runtime_bytecode, client);
-
-    let contract = factory.deploy(args).expect("invalid deploy params").send().await.expect("failed to deploy the factory");
+    let (contract, receipt) = factory
+        .deploy(args)
+        .expect("invalid deploy params")
+        .send_with_receipt()
+        .await
+        .expect("failed to deploy the factory");
+    println!("solidity code path: {:?}", &sol_code_path);
+    println!("gas used: {:?}", receipt.gas_used);
     contract.address()
 }
 
 // original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L558-L578
-pub fn get_contract_artifacts(sol_code_path: PathBuf, contract_name: &str, runs: Option<usize>) -> (Abi, Bytes, Bytes) {
-    assert!(sol_code_path.exists());
+pub fn get_contract_artifacts(sol_code_path: &PathBuf, contract_name: &str, runs: Option<usize>) -> (Abi, Bytes, Bytes) {
+    assert!(sol_code_path.exists(), "sol_code_path {:?} does not exist", sol_code_path);
     // Create the compiler input, enabling the optimizer and setting the optimzer runs.
     let input: CompilerInput = if let Some(r) = runs {
         let mut i = CompilerInput::new(&sol_code_path).expect("invalid compiler input")[0].clone().optimizer(r);
@@ -242,7 +256,9 @@ pub fn get_contract_artifacts(sol_code_path: PathBuf, contract_name: &str, runs:
     } else {
         CompilerInput::new(&sol_code_path).expect("invalid compiler input")[0].clone()
     };
-    let compiled = Solc::default().compile(&input).unwrap();
+    let input = input.evm_version(EvmVersion::Paris);
+    let compiled = Solc::default().compile_exact(&input).unwrap();
+    // println!("compiled {:?}", compiled);
     let (abi, bytecode, runtime_bytecode) = compiled
         .find(contract_name)
         .expect(&format!("could not find contract {} in {:?}", contract_name, &sol_code_path))
@@ -253,6 +269,7 @@ pub fn get_contract_artifacts(sol_code_path: PathBuf, contract_name: &str, runs:
 fn get_sol_contract_factory<M: 'static + Middleware>(abi: Abi, bytecode: Bytes, runtime_bytecode: Bytes, client: Arc<M>) -> ContractFactory<M> {
     const MAX_RUNTIME_BYTECODE_SIZE: usize = 24577;
     let size = runtime_bytecode.len();
+    println!("bytecode size {}", size);
     if size > MAX_RUNTIME_BYTECODE_SIZE {
         // `_runtime_bytecode` exceeds the limit
         panic!(

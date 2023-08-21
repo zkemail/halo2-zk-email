@@ -219,9 +219,7 @@ pub async fn prove(
         writer.write_all(&proof).unwrap();
         writer.flush().unwrap();
     }
-    println!("instances {:?}", circuits.instances());
     let instance_json = circuits.instances().to_json();
-    println!("instance json {:?}", instance_json);
     {
         let f = File::create(instances_json_path).unwrap();
         let mut writer = BufWriter::new(f);
@@ -265,9 +263,7 @@ pub async fn evm_prove(
         writer.write_all(&proof).unwrap();
         writer.flush().unwrap();
     }
-    println!("instances {:?}", circuits.instances());
     let instance_json = circuits.instances().to_json();
-    println!("instance json {:?}", instance_json);
     {
         let f = File::create(instances_json_path).unwrap();
         let mut writer = BufWriter::new(f);
@@ -299,13 +295,14 @@ pub fn gen_evm_verifiers(params_path: &PathBuf, circuit_config_path: &PathBuf, v
         ParamsKZG::<Bn256>::read(&mut reader).unwrap()
     };
     let vks = read_vks(vks_dir);
-    let max_line_size_per_file = 24 * 1000;
+    let max_line_size_per_file = 72 * 1000;
     gen_sol_verifiers(&params, &vks, max_line_size_per_file, sols_dir);
 }
 
 pub async fn evm_verify(circuit_config_path: &PathBuf, sols_dir: &PathBuf, proofs_dir: &PathBuf, instances_json_path: &PathBuf) {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
-    let (_, client) = setup_eth_backend(None).await;
+    let anvil = setup_eth_backend().await;
+    let client = setup_eth_client(&anvil).await;
     let verifier_addr = deploy_verifiers(sols_dir, &client, None).await;
     let proofs = read_proofs(proofs_dir, "evm_proof");
     let instance_json = serde_json::from_reader::<_, EmailVerifyInstancesJson>(File::open(instances_json_path).unwrap()).unwrap();

@@ -127,7 +127,6 @@ fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) -> R
     let reader = BufReader::new(yul.as_bytes());
 
     let mut transcript_addrs: Vec<u32> = Vec::new();
-    let mut modified_lines: Vec<String> = Vec::new();
 
     // convert calldataload 0x0 to 0x40 to read from pubInputs, and the rest
     // from proof
@@ -168,6 +167,7 @@ fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) -> R
 
     // let file = File::open(input_file)?;
     let reader = BufReader::new(yul.as_bytes());
+    let mut modified_lines: Vec<String> = Vec::new();
 
     for line in reader.lines() {
         let mut line = line?;
@@ -334,29 +334,104 @@ fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) -> R
     //     outputs.push(template);
     //     // storage_file.write_all(template.as_bytes())?;
     // }
-    let mut lines = String::new();
+
+    let mut blocks = vec![];
+    let mut is_nest = false;
+    let mut cur_block = String::new();
+    for line in modified_lines[16..modified_lines.len() - 7].iter() {
+        if line.trim() == "{" {
+            debug_assert!(!is_nest, "depth >= 2 is not supported");
+            is_nest = true;
+            cur_block += line;
+        } else if line.trim() == "}" {
+            debug_assert!(is_nest, "there is no opening brace");
+            is_nest = false;
+            cur_block += line;
+            blocks.push(cur_block);
+            cur_block = String::new();
+        } else {
+            if is_nest {
+                cur_block += line;
+            } else {
+                blocks.push(line.to_string());
+            }
+        }
+    }
+
+    let mut codes = String::new();
     // let mut write = BufWriter::new(File::create(output_dir.join(format!("VerifierFunc{}.sol", func_idx)))?);
     let mut func_idx = 0;
-    for line in modified_lines[16..modified_lines.len() - 7].iter() {
-        let new_line = format!("{}\n", line);
-        if lines.len() + new_line.len() > max_line_size_per_file {
+    let declares = r"
+            let f_p
+            := 0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
+            let
+                f_q
+            := 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001
+            function validate_ec_point(x, y) -> valid {
+                {
+                    let x_lt_p := lt(
+                        x,
+                        0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
+                    )
+                    let y_lt_p := lt(
+                        y,
+                        0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
+                    )
+                    valid := and(x_lt_p, y_lt_p)
+                }
+                {
+                    let x_is_zero := eq(x, 0)
+                    let y_is_zero := eq(y, 0)
+                    let x_or_y_is_zero := or(x_is_zero, y_is_zero)
+                    let x_and_y_is_not_zero := not(x_or_y_is_zero)
+                    valid := and(x_and_y_is_not_zero, valid)
+                }
+                {
+                    let y_square := mulmod(
+                        y,
+                        y,
+                        0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
+                    )
+                    let x_square := mulmod(
+                        x,
+                        x,
+                        0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
+                    )
+                    let x_cube := mulmod(
+                        x_square,
+                        x,
+                        0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
+                    )
+                    let x_cube_plus_3 := addmod(
+                        x_cube,
+                        3,
+                        0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
+                    )
+                    let y_square_eq_x_cube_plus_3 := eq(x_cube_plus_3, y_square)
+                    valid := and(y_square_eq_x_cube_plus_3, valid)
+                }
+            }
+    ";
+    for block in blocks.iter() {
+        let new_block = format!("{}\n", block);
+        if codes.len() + new_block.len() > max_line_size_per_file {
             let mut template = include_str!("./VerifierFunc.sol").to_string();
             // template = template.replace("<%max_transcript_addr%>", &format!("{}", max_transcript_addr));
             template = template.replace("<%ID%>", &format!("{}", func_idx));
-            template = template.replace("<%ASSEMBLY%>", &lines);
+            template = template.replace("<%ASSEMBLY%>", &codes);
             // let mut func_file = File::create(output_dir.join(format!("VerifierFunc{}.sol", func_idx)))?;
             // func_file.write_all(template.as_bytes())?;
             outputs.push(template);
-            lines = String::new();
+            codes = declares.to_string();
             func_idx += 1;
         }
-        lines += &new_line;
+        codes += &new_block;
     }
-    if lines.len() > 0 {
+    if codes.len() > 0 {
         let mut template = include_str!("./VerifierFunc.sol").to_string();
         // template = template.replace("<%max_transcript_addr%>", &format!("{}", max_transcript_addr));
         template = template.replace("<%ID%>", &format!("{}", func_idx));
-        template = template.replace("<%ASSEMBLY%>", &lines);
+        template = template.replace("<%ASSEMBLY%>", &codes);
         outputs.push(template);
         // let mut func_file = File::create(output_dir.join(format!("VerifierFunc{}.sol", func_idx)))?;
         // func_file.write_all(template.as_bytes())?;

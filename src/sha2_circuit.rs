@@ -59,7 +59,7 @@ macro_rules! impl_sha2_circuit {
                 );
                 let inner = Sha256DynamicConfig::configure(
                     meta,
-                    vec![$max_bytes_size],
+                    vec![$max_bytes_size + 64],
                     range_config.clone(),
                     $sha2_num_bits_lookup,
                     $sha2_num_advice_columns,
@@ -95,7 +95,7 @@ macro_rules! impl_sha2_circuit {
                             QuantumCell::Existing(&assigned_hash_result.input_len),
                             QuantumCell::Constant(F::from($skip_prefix_bytes_size as u64)),
                         );
-                        for (idx, assigned_byte) in assigned_hash_result.input_bytes.iter().enumerate() {
+                        for (idx, assigned_byte) in assigned_hash_result.input_bytes[0..$max_bytes_size].iter().enumerate() {
                             let is_len_equal = gate.is_equal(ctx, QuantumCell::Existing(&expected_len), QuantumCell::Constant(F::from(idx as u64)));
                             is_input_revealed = gate.select(
                                 ctx,
