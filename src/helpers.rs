@@ -316,12 +316,13 @@ pub fn gen_evm_verifiers(params_path: &PathBuf, circuit_config_path: &PathBuf, v
 
 pub async fn evm_verify(circuit_config_path: &PathBuf, sols_dir: &PathBuf, proofs_dir: &PathBuf, instances_json_path: &PathBuf) {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
-    let anvil = setup_eth_backend().await;
-    let client = setup_eth_client(&anvil).await;
-    let verifier_addr = deploy_verifiers(sols_dir, &client, None).await;
+    // let anvil = setup_eth_backend().await;
+    // let client = setup_eth_client(&anvil).await;
+    // let verifier_addr = deploy_verifiers(sols_dir, &client, None).await;
     let proofs = read_proofs(proofs_dir, "evm_proof");
     let instance_json = serde_json::from_reader::<_, EmailVerifyInstancesJson>(File::open(instances_json_path).unwrap()).unwrap();
-    verify_evm_proofs(proofs.iter().map(|vec| vec.as_slice()).collect_vec().as_slice(), verifier_addr, &client, &instance_json).await;
+    // verify_evm_proofs(proofs.iter().map(|vec| vec.as_slice()).collect_vec().as_slice(), verifier_addr, &client, &instance_json).await;
+    deploy_and_call_verifiers(sols_dir, None, proofs.iter().map(|vec| vec.as_slice()).collect_vec().as_slice(), &instance_json).await;
 }
 
 // /// Generate proving and verifying keys of the aggregation circuit verifiable on EVM..

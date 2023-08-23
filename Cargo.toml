@@ -67,14 +67,14 @@ thiserror = "1.0.40"
 once_cell = "1.18.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-ethers = { version = "2.0.7", default_features = false, features = [
+ethers = { version = "2.0.8", default_features = false, features = [
     "ethers-solc",
-] }
-
-[build-dependencies]
-ethers = { version = "2.0.7", default_features = false, features = [
-    "ethers-solc",
-] }
+], git = "https://github.com/gakonst/ethers-rs.git", tag = "ethers-v2.0.8" }
+revm = { version = "3.3.0" }
+# [build-dependencies]
+# ethers = { version = "2.0.8", default_features = false, features = [
+#     "ethers-solc",
+# ] }
 
 
 [dev-dependencies]
