@@ -653,10 +653,11 @@ pub async fn deploy_and_call_verifiers(sols_dir: &PathBuf, runs: Option<usize>, 
         body_substrs: instance.body_substrs.clone().unwrap_or(vec![]),
         body_substr_idxes: instance.body_substr_idxes.clone().unwrap_or(vec![]).iter().map(|idx| U256::from(*idx)).collect_vec(),
     };
+    println!("instance {:?}", instance);
     let proofs = proofs.into_iter().map(|proof| Bytes::from(proof.to_vec())).collect_vec();
     let result = verifier.verify_email(instance.clone(), proofs.clone()).call().await;
     println!("result {:?}", result);
-    let call = verifier.method::<_, bool>("verifyEmail", (instance.clone(), proofs.clone())).unwrap();
+    let call = verifier.method::<_, ()>("verifyEmail", (instance.clone(), proofs.clone())).unwrap();
     println!("estimated gas {:?}", call.estimate_gas().await.unwrap());
     // drop(anvil);
 

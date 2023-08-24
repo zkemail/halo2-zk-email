@@ -416,7 +416,7 @@ fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) -> R
         let new_block = format!("{}\n", block);
         if codes.len() + new_block.len() > max_line_size_per_file {
             let mut template = include_str!("./VerifierFunc.sol").to_string();
-            // template = template.replace("<%max_transcript_addr%>", &format!("{}", max_transcript_addr));
+            template = template.replace("<%max_transcript_addr%>", &format!("{}", max_transcript_addr));
             template = template.replace("<%ID%>", &format!("{}", func_idx));
             template = template.replace("<%ASSEMBLY%>", &codes);
             // let mut func_file = File::create(output_dir.join(format!("VerifierFunc{}.sol", func_idx)))?;
@@ -429,7 +429,7 @@ fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) -> R
     }
     if codes.len() > 0 {
         let mut template = include_str!("./VerifierFunc.sol").to_string();
-        // template = template.replace("<%max_transcript_addr%>", &format!("{}", max_transcript_addr));
+        template = template.replace("<%max_transcript_addr%>", &format!("{}", max_transcript_addr));
         template = template.replace("<%ID%>", &format!("{}", func_idx));
         template = template.replace("<%ASSEMBLY%>", &codes);
         outputs.push(template);

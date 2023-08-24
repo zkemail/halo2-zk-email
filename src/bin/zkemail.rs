@@ -224,6 +224,7 @@ async fn main() {
                 &PathBuf::new().join(public_input_path),
             );
             assert!(result);
+            println!("verification passed");
         }
         Commands::GenEVMVerifiers {
             params_path,
