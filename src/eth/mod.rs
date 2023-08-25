@@ -901,7 +901,7 @@ pub fn get_contract_artifacts(sol_code_path: &PathBuf, contract_name: &str, runs
     };
     let input = input.evm_version(EvmVersion::Paris);
     let compiled = Solc::default().compile(&input).unwrap();
-    println!("compiled {:?}", compiled);
+    // println!("compiled {:?}", compiled);
     let (abi, bytecode, runtime_bytecode) = compiled
         .find(contract_name)
         .expect(&format!("could not find contract {} in {:?}", contract_name, &sol_code_path))
