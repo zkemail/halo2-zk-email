@@ -444,7 +444,7 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                     .into_iter()
                     .zip(assigned_public_hash_input.into_iter())
                 {
-                    // ctx.region.constrain_equal(a, b)?;
+                    ctx.region.constrain_equal(a, b)?;
                 }
                 debug_assert_eq!(public_hash_result.output_bytes.len(), 32);
                 let mut packed_public_hash = gate.load_zero(ctx);
