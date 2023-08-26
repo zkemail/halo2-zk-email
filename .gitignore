@@ -16,8 +16,8 @@ Cargo.lock
 /Cargo.lock
 /build
 /test_data/*.txt
-*.bin
-*.hex
+/*.bin
+/*.hex
 /*.sol
 /examples/*.sol
 /benches/*.pk
