@@ -7,20 +7,25 @@ contract VerifierFunc<%ID%> is VerifierFuncAbst {
         uint256[] memory pubInputs,
         bytes memory proof,
         bool success,
-        bytes32[] memory _transcript
-    ) public view override returns (bool, bytes32[] memory) {
+        bytes memory _transcript
+    ) public view override returns (bool, bytes memory) {
         bytes32[<%max_transcript_addr%>] memory transcript;
-        for(uint i=0; i<_transcript.length; i++) {
-            transcript[i] = _transcript[i];
+        // require(_transcript.length == <%max_transcript_addr%>, "transcript length is not <%max_transcript_addr%>");
+        if(_transcript.length != 0) {
+            transcript = abi.decode(_transcript, (bytes32[<%max_transcript_addr%>]));
         }
+        // for(uint i=0; i<_transcript.length; i++) {
+        //     transcript[i] = _transcript[i];
+        // }
         assembly {{
             <%ASSEMBLY%>
         }}
-        // transcriptBytes = abi.encode(transcript.length, transcript);
-        bytes32[] memory newTranscript = new bytes32[](_transcript.length);
-        for(uint i=0; i<_transcript.length; i++) {
-            newTranscript[i] = transcript[i];
-        }
-        return (success, newTranscript);
+        bytes memory transcriptBytes = abi.encode(transcript);
+        // bytes32[] memory newTranscript = new bytes32[](<%max_transcript_addr%>);
+        // for(uint i=0; i<_transcript.length; i++) {
+        //     newTranscript[i] = transcript[i];
+        // }
+        // require(newTranscript.length == <%max_transcript_addr%>, "newTranscript length is not <%max_transcript_addr%>");
+        return (success, transcriptBytes);
     } 
 }

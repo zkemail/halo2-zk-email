@@ -7,12 +7,16 @@ contract VerifierFunc0 is VerifierFuncAbst {
         uint256[] memory pubInputs,
         bytes memory proof,
         bool success,
-        bytes32[] memory _transcript
-    ) public view override returns (bool, bytes32[] memory) {
+        bytes memory _transcript
+    ) public view override returns (bool, bytes memory) {
         bytes32[1318] memory transcript;
-        for(uint i=0; i<_transcript.length; i++) {
-            transcript[i] = _transcript[i];
+        // require(_transcript.length == 1318, "transcript length is not 1318");
+        if(_transcript.length != 0) {
+            transcript = abi.decode(_transcript, (bytes32[1318]));
         }
+        // for(uint i=0; i<_transcript.length; i++) {
+        //     transcript[i] = _transcript[i];
+        // }
         assembly {{
                                 let f_p := 0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
                     let f_q := 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001
@@ -602,11 +606,12 @@ mstore(add(transcript, 0x4ba0), 218882428718392752222464057452572750885483644004
 success := and(eq(staticcall(gas(), 0x5, add(transcript, 0x4b00), 0xc0, add(transcript, 0x4ae0), 0x20), 1), success)
 
         }}
-        // transcriptBytes = abi.encode(transcript.length, transcript);
-        bytes32[] memory newTranscript = new bytes32[](_transcript.length);
-        for(uint i=0; i<_transcript.length; i++) {
-            newTranscript[i] = transcript[i];
-        }
-        return (success, newTranscript);
+        bytes memory transcriptBytes = abi.encode(transcript);
+        // bytes32[] memory newTranscript = new bytes32[](1318);
+        // for(uint i=0; i<_transcript.length; i++) {
+        //     newTranscript[i] = transcript[i];
+        // }
+        // require(newTranscript.length == 1318, "newTranscript length is not 1318");
+        return (success, transcriptBytes);
     } 
 }

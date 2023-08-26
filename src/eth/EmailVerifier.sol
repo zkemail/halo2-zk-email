@@ -157,180 +157,6 @@ contract EmailVerifier {
         if (bodyEnable) {
             proofIdx = verifyBody(instance, proofs, proofIdx);
         }
-        // if (headerExposeSubstrs) {
-        //     bytes memory expectedHeaderMaskedChars = new bytes(maxHeaderBytes);
-        //     bytes memory expectedHeaderSubstrIds = new bytes(maxHeaderBytes);
-        //     for (uint i = 0; i < instance.headerSubstrs.length; i++) {
-        //         uint startIdx = instance.headerSubstrIdxes[i];
-        //         for (
-        //             uint j = 0;
-        //             j < bytes(instance.headerSubstrs[i]).length;
-        //             j++
-        //         ) {
-        //             expectedHeaderMaskedChars[startIdx + j] = bytes(
-        //                 instance.headerSubstrs[i]
-        //             )[j];
-        //             expectedHeaderSubstrIds[startIdx + j] = bytes1(
-        //                 uint8(i + 1)
-        //             );
-        //         }
-        //     }
-        //     VerifierBase sha256HeaderMaskedCharsVerifierBase = VerifierBase(
-        //         sha256HeaderMaskedCharsVerifier
-        //     );
-        //     uint256[] memory sha256HeaderMaskedCharsVerifierIns = new uint256[](
-        //         2
-        //     );
-        //     sha256HeaderMaskedCharsVerifierIns[0] = instance
-        //         .headerMaskedCharsCommit;
-        //     sha256HeaderMaskedCharsVerifierIns[1] = uint256(
-        //         sha256(expectedHeaderMaskedChars)
-        //     );
-        //     require(
-        //         sha256HeaderMaskedCharsVerifierBase.verify(
-        //             sha256HeaderMaskedCharsVerifierIns,
-        //             proofs[proofIdx]
-        //         )
-        //     );
-        //     proofIdx++;
-        //     VerifierBase sha256HeaderSubstrIdsVerifierBase = VerifierBase(
-        //         sha256HeaderSubstrIdsVerifier
-        //     );
-        //     uint256[] memory sha256HeaderSubstrIdsVerifierIns = new uint256[](
-        //         2
-        //     );
-        //     sha256HeaderSubstrIdsVerifierIns[0] = instance
-        //         .headerSubstrIdsCommit;
-        //     sha256HeaderSubstrIdsVerifierIns[1] = uint256(
-        //         sha256(expectedHeaderSubstrIds)
-        //     );
-        //     require(
-        //         sha256HeaderSubstrIdsVerifierBase.verify(
-        //             sha256HeaderSubstrIdsVerifierIns,
-        //             proofs[proofIdx]
-        //         )
-        //     );
-        //     proofIdx++;
-        // }
-        // if (bodyEnable) {
-        //     VerifierBase regexBodyHashVerifierBase = VerifierBase(
-        //         regexBodyHashVerifier
-        //     );
-        //     uint256[] memory regexBodyHashVerifierIns = new uint256[](3);
-        //     regexBodyHashVerifierIns[0] = instance.bodyBytesCommit;
-        //     regexBodyHashVerifierIns[1] = instance.bodyhashMaskedCharsCommit;
-        //     regexBodyHashVerifierIns[2] = instance.bodyhashSubstrIdsCommit;
-        //     require(
-        //         regexBodyHashVerifierBase.verify(
-        //             regexBodyHashVerifierIns,
-        //             proofs[proofIdx]
-        //         )
-        //     );
-        //     proofIdx++;
-        //     VerifierBase charsShiftBodyHashVerifierBase = VerifierBase(
-        //         charsShiftBodyHashVerifier
-        //     );
-        //     uint256[] memory charsShiftBodyHashVerifierIns = new uint256[](2);
-        //     charsShiftBodyHashVerifierIns[0] = instance
-        //         .bodyhashMaskedCharsCommit;
-        //     charsShiftBodyHashVerifierIns[1] = instance.bodyhashBase64Commit;
-        //     require(
-        //         charsShiftBodyHashVerifierBase.verify(
-        //             charsShiftBodyHashVerifierIns,
-        //             proofs[proofIdx]
-        //         )
-        //     );
-        //     proofIdx++;
-        //     VerifierBase sha256BodyVerifierBase = VerifierBase(
-        //         sha256BodyVerifier
-        //     );
-        //     uint256[] memory sha256BodyVerifierIns = new uint256[](2);
-        //     sha256BodyVerifierIns[0] = instance.bodyBytesCommit;
-        //     sha256BodyVerifierIns[1] = instance.bodyhashCommit;
-        //     require(
-        //         sha256BodyVerifierBase.verify(
-        //             sha256BodyVerifierIns,
-        //             proofs[proofIdx]
-        //         )
-        //     );
-        //     proofIdx++;
-        //     VerifierBase base64VerifierBase = VerifierBase(base64Verifier);
-        //     uint256[] memory base64VerifierIns = new uint256[](2);
-        //     base64VerifierIns[0] = instance.bodyhashCommit;
-        //     base64VerifierIns[1] = instance.bodyhashBase64Commit;
-        //     require(
-        //         base64VerifierBase.verify(base64VerifierIns, proofs[proofIdx])
-        //     );
-        //     proofIdx++;
-        //     VerifierBase regexBodyVerifierBase = VerifierBase(
-        //         regexBodyVerifier
-        //     );
-        //     uint256[] memory regexBodyVerifierIns = new uint256[](3);
-        //     regexBodyVerifierIns[0] = instance.bodyBytesCommit;
-        //     regexBodyVerifierIns[1] = instance.bodyMaskedCharsCommit;
-        //     regexBodyVerifierIns[2] = instance.bodySubstrIdsCommit;
-        //     require(
-        //         regexBodyVerifierBase.verify(
-        //             regexBodyVerifierIns,
-        //             proofs[proofIdx]
-        //         )
-        //     );
-        //     proofIdx++;
-        //     if (bodyExposeSubstrs) {
-        //         bytes memory expectedBodyMaskedChars = new bytes(maxBodyBytes);
-        //         bytes memory expectedBodySubstrIds = new bytes(maxBodyBytes);
-        //         for (uint i = 0; i < instance.bodySubstrs.length; i++) {
-        //             uint startIdx = instance.bodySubstrIdxes[i];
-        //             for (
-        //                 uint j = 0;
-        //                 j < bytes(instance.bodySubstrs[i]).length;
-        //                 j++
-        //             ) {
-        //                 expectedBodyMaskedChars[startIdx + j] = bytes(
-        //                     instance.bodySubstrs[i]
-        //                 )[j];
-        //                 expectedBodySubstrIds[startIdx + j] = bytes1(
-        //                     uint8(i + 1)
-        //                 );
-        //             }
-        //         }
-        //         VerifierBase sha256BodyMaskedCharsVerifierBase = VerifierBase(
-        //             sha256BodyMaskedCharsVerifier
-        //         );
-        //         uint256[]
-        //             memory sha256BodyMaskedCharsVerifierIns = new uint256[](2);
-        //         sha256BodyMaskedCharsVerifierIns[0] = instance
-        //             .bodyMaskedCharsCommit;
-        //         sha256BodyMaskedCharsVerifierIns[1] = uint256(
-        //             sha256(expectedBodyMaskedChars)
-        //         );
-        //         require(
-        //             sha256BodyMaskedCharsVerifierBase.verify(
-        //                 sha256BodyMaskedCharsVerifierIns,
-        //                 proofs[proofIdx]
-        //             )
-        //         );
-        //         proofIdx++;
-        //         VerifierBase sha256BodySubstrIdsVerifierBase = VerifierBase(
-        //             sha256BodySubstrIdsVerifier
-        //         );
-        //         uint256[] memory sha256BodySubstrIdsVerifierIns = new uint256[](
-        //             2
-        //         );
-        //         sha256BodySubstrIdsVerifierIns[0] = instance
-        //             .bodySubstrIdsCommit;
-        //         sha256BodySubstrIdsVerifierIns[1] = uint256(
-        //             sha256(expectedBodySubstrIds)
-        //         );
-        //         require(
-        //             sha256BodySubstrIdsVerifierBase.verify(
-        //                 sha256BodySubstrIdsVerifierIns,
-        //                 proofs[proofIdx]
-        //             )
-        //         );
-        //         proofIdx++;
-        //     }
-        // }
     }
 
     function verifyHeaderSubstrs(
@@ -406,7 +232,7 @@ contract EmailVerifier {
             regexBodyHashVerifier
         );
         uint256[] memory regexBodyHashVerifierIns = new uint256[](3);
-        regexBodyHashVerifierIns[0] = instance.bodyBytesCommit;
+        regexBodyHashVerifierIns[0] = instance.headerBytesCommit;
         regexBodyHashVerifierIns[1] = instance.bodyhashMaskedCharsCommit;
         regexBodyHashVerifierIns[2] = instance.bodyhashSubstrIdsCommit;
         require(
@@ -420,9 +246,10 @@ contract EmailVerifier {
         VerifierBase charsShiftBodyHashVerifierBase = VerifierBase(
             charsShiftBodyHashVerifier
         );
-        uint256[] memory charsShiftBodyHashVerifierIns = new uint256[](2);
+        uint256[] memory charsShiftBodyHashVerifierIns = new uint256[](3);
         charsShiftBodyHashVerifierIns[0] = instance.bodyhashMaskedCharsCommit;
-        charsShiftBodyHashVerifierIns[1] = instance.bodyhashBase64Commit;
+        charsShiftBodyHashVerifierIns[1] = instance.bodyhashSubstrIdsCommit;
+        charsShiftBodyHashVerifierIns[2] = instance.bodyhashBase64Commit;
         require(
             charsShiftBodyHashVerifierBase.verify(
                 charsShiftBodyHashVerifierIns,
@@ -474,9 +301,9 @@ contract EmailVerifier {
     function verifyBodySubstrs(
         EmailProofInstance memory instance,
         bytes[] memory proofs,
-        uint proofIdx
+        uint _proofIdx
     ) private view returns (uint) {
-        // uint proofIdx = _proofIdx;
+        uint proofIdx = _proofIdx;
         bytes memory expectedBodyMaskedChars = new bytes(maxBodyBytes);
         bytes memory expectedBodySubstrIds = new bytes(maxBodyBytes);
         for (uint i = 0; i < instance.bodySubstrs.length; i++) {
@@ -496,9 +323,8 @@ contract EmailVerifier {
         bytes32 sha256Hash = sha256(expectedBodyMaskedChars);
         uint coeff = 1;
         for (uint i = 0; i < 31; i++) {
-            sha256BodyMaskedCharsVerifierIns[1] =
-                coeff *
-                uint(uint8(sha256Hash[i]));
+            sha256BodyMaskedCharsVerifierIns[1] += (coeff *
+                uint(uint8(sha256Hash[i])));
             coeff = coeff << 8;
         }
         sha256BodyMaskedCharsVerifierIns[2] = uint(uint8(sha256Hash[31]));
@@ -518,9 +344,8 @@ contract EmailVerifier {
         sha256Hash = sha256(expectedBodySubstrIds);
         coeff = 1;
         for (uint i = 0; i < 31; i++) {
-            sha256BodySubstrIdsVerifierIns[1] =
-                coeff *
-                uint(uint8(sha256Hash[i]));
+            sha256BodySubstrIdsVerifierIns[1] += (coeff *
+                uint(uint8(sha256Hash[i])));
             coeff = coeff << 8;
         }
         sha256BodySubstrIdsVerifierIns[2] = uint(uint8(sha256Hash[31]));

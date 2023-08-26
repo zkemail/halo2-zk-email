@@ -49,11 +49,11 @@ pub fn gen_sol_verifiers(params: &ParamsKZG<Bn256>, vks: &[VerifyingKey<G1Affine
     vk_idx += 1;
     store_sols(regex_header_sols, "regex_header", regex_header_max);
     if config_params.header_config.as_ref().unwrap().expose_substrs.unwrap_or(false) {
-        let sha2_header_masked_chars_yul = gen_evm_verifier_yul::<Sha256HeaderMaskedCharsCircuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
+        let sha2_header_masked_chars_yul = gen_evm_verifier_yul::<Sha256HeaderMaskedCharsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
         let (sha2_header_masked_chars_sols, sha2_header_masked_chars_max) = gen_evm_verifier_sols_from_yul(&sha2_header_masked_chars_yul, max_line_size_per_file).unwrap();
         vk_idx += 1;
         store_sols(sha2_header_masked_chars_sols, "sha2_header_masked_chars", sha2_header_masked_chars_max);
-        let sha2_header_substr_ids_yul = gen_evm_verifier_yul::<Sha256HeaderSubstrIdsCircuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
+        let sha2_header_substr_ids_yul = gen_evm_verifier_yul::<Sha256HeaderSubstrIdsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
         let (sha2_header_substr_ids_sols, sha2_header_substr_ids_max) = gen_evm_verifier_sols_from_yul(&sha2_header_substr_ids_yul, max_line_size_per_file).unwrap();
         vk_idx += 1;
         store_sols(sha2_header_substr_ids_sols, "sha2_header_substr_ids", sha2_header_substr_ids_max);
@@ -75,16 +75,16 @@ pub fn gen_sol_verifiers(params: &ParamsKZG<Bn256>, vks: &[VerifyingKey<G1Affine
         let (base64_sols, base64_max) = gen_evm_verifier_sols_from_yul(&base64_yul, max_line_size_per_file).unwrap();
         vk_idx += 1;
         store_sols(base64_sols, "base64", base64_max);
-        let regex_body_yul = gen_evm_verifier_yul::<RegexBodyCircuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
+        let regex_body_yul = gen_evm_verifier_yul::<RegexBodyCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
         let (regex_body_sols, regex_body_max) = gen_evm_verifier_sols_from_yul(&regex_body_yul, max_line_size_per_file).unwrap();
         vk_idx += 1;
         store_sols(regex_body_sols, "regex_body", regex_body_max);
         if body_configs.expose_substrs.unwrap_or(false) {
-            let sha2_body_masked_chars_yul = gen_evm_verifier_yul::<Sha256BodyMaskedCharsCircuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
+            let sha2_body_masked_chars_yul = gen_evm_verifier_yul::<Sha256BodyMaskedCharsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
             let (sha2_body_masked_chars_sols, sha2_body_masked_chars_max) = gen_evm_verifier_sols_from_yul(&sha2_body_masked_chars_yul, max_line_size_per_file).unwrap();
             vk_idx += 1;
             store_sols(sha2_body_masked_chars_sols, "sha2_body_masked_chars", sha2_body_masked_chars_max);
-            let sha2_body_substr_ids_yul = gen_evm_verifier_yul::<Sha256BodySubstrIdsCircuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
+            let sha2_body_substr_ids_yul = gen_evm_verifier_yul::<Sha256BodySubstrIdsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
             let (sha2_body_substr_ids_sols, sha2_body_substr_ids_max) = gen_evm_verifier_sols_from_yul(&sha2_body_substr_ids_yul, max_line_size_per_file).unwrap();
             store_sols(sha2_body_substr_ids_sols, "sha2_body_substr_ids", sha2_body_substr_ids_max);
         }
@@ -158,7 +158,7 @@ fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) -> R
     }
 
     let num_pubinputs = if let Some(s) = start { end.unwrap() - s } else { 0 };
-
+    // println!("num_pubinputs {}", num_pubinputs);
     let mut max_pubinputs_addr = 0;
     if num_pubinputs > 0 {
         max_pubinputs_addr = num_pubinputs * 32 - 32;
@@ -341,6 +341,7 @@ fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) -> R
     for line in modified_lines[16..modified_lines.len() - 7].iter() {
         if line.trim() == "{" {
             debug_assert!(!is_nest, "depth >= 2 is not supported");
+            debug_assert_eq!(cur_block.len(), 0, "cur_block is not empty");
             is_nest = true;
             cur_block += line;
         } else if line.trim() == "}" {

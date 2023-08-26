@@ -147,6 +147,7 @@ macro_rules! impl_sha2_circuit {
                     for field in hash_fields.into_iter() {
                         instances.push(field);
                     }
+                    // println!("sha2 instances {:?}",instances);
                 }
 
                 vec![instances]

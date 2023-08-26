@@ -6,6 +6,6 @@ abstract contract VerifierFuncAbst {
         uint256[] memory pubInputs,
         bytes memory proof,
         bool success,
-        bytes32[] memory transcript
-    ) public view virtual returns (bool, bytes32[] memory);
+        bytes memory _transcript
+    ) public view virtual returns (bool, bytes memory);
 }
