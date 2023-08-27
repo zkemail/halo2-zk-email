@@ -19,85 +19,111 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
 
-pub fn gen_sol_verifiers(params: &ParamsKZG<Bn256>, vks: &[VerifyingKey<G1Affine>], max_line_size_per_file: usize, sols_dir: &PathBuf) {
-    let store_sols = |sols: Vec<String>, dir_name: &str, max_transcript_addr: u32| {
-        let dir = sols_dir.join(dir_name);
-        fs::create_dir_all(&dir).unwrap();
+// pub fn gen_sol_verifiers(params: &ParamsKZG<Bn256>, vks: &[VerifyingKey<G1Affine>], max_line_size_per_file: usize, sols_dir: &PathBuf) {
+//     let store_sols = |sols: Vec<String>, dir_name: &str, max_transcript_addr: u32| {
+//         let dir = sols_dir.join(dir_name);
+//         fs::create_dir_all(&dir).unwrap();
+//         for (idx, sol) in sols.iter().enumerate() {
+//             let mut file = File::create(dir.join(format!("VerifierFunc{}.sol", idx))).unwrap();
+//             file.write_all(sol.as_bytes()).unwrap();
+//         }
+//         let deploy_params = DeployParamsJson {
+//             max_transcript_addr,
+//             num_func_contracts: sols.len(),
+//         };
+//         let mut json_file = File::create(dir.join("deploy_params.json")).unwrap();
+//         json_file.write_all(serde_json::to_string_pretty(&deploy_params).unwrap().as_bytes()).unwrap();
+//     };
+//     let config_params = default_config_params();
+//     let mut vk_idx = 0;
+//     let sha2_header_yul = gen_evm_verifier_yul::<Sha256HeaderCircuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
+//     let (sha2_header_sols, sha2_header_max) = gen_evm_verifier_sols_from_yul(&sha2_header_yul, max_line_size_per_file).unwrap();
+//     vk_idx += 1;
+//     store_sols(sha2_header_sols, "sha2_header", sha2_header_max);
+//     let sign_verify_yul = gen_evm_verifier_yul::<SignVerifyCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
+//     let (sign_verify_sols, sign_verify_max) = gen_evm_verifier_sols_from_yul(&sign_verify_yul, max_line_size_per_file).unwrap();
+//     vk_idx += 1;
+//     store_sols(sign_verify_sols, "sign_verify", sign_verify_max);
+//     let regex_header_yul = gen_evm_verifier_yul::<RegexHeaderCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
+//     let (regex_header_sols, regex_header_max) = gen_evm_verifier_sols_from_yul(&regex_header_yul, max_line_size_per_file).unwrap();
+//     vk_idx += 1;
+//     store_sols(regex_header_sols, "regex_header", regex_header_max);
+//     if config_params.header_config.as_ref().unwrap().expose_substrs.unwrap_or(false) {
+//         let sha2_header_masked_chars_yul = gen_evm_verifier_yul::<Sha256HeaderMaskedCharsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
+//         let (sha2_header_masked_chars_sols, sha2_header_masked_chars_max) = gen_evm_verifier_sols_from_yul(&sha2_header_masked_chars_yul, max_line_size_per_file).unwrap();
+//         vk_idx += 1;
+//         store_sols(sha2_header_masked_chars_sols, "sha2_header_masked_chars", sha2_header_masked_chars_max);
+//         let sha2_header_substr_ids_yul = gen_evm_verifier_yul::<Sha256HeaderSubstrIdsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
+//         let (sha2_header_substr_ids_sols, sha2_header_substr_ids_max) = gen_evm_verifier_sols_from_yul(&sha2_header_substr_ids_yul, max_line_size_per_file).unwrap();
+//         vk_idx += 1;
+//         store_sols(sha2_header_substr_ids_sols, "sha2_header_substr_ids", sha2_header_substr_ids_max);
+//     }
+//     if let Some(body_configs) = config_params.body_config.as_ref() {
+//         let regex_bodyhash_yul = gen_evm_verifier_yul::<RegexBodyHashCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
+//         let (regex_bodyhash_sols, regex_bodyhash_max) = gen_evm_verifier_sols_from_yul(&regex_bodyhash_yul, max_line_size_per_file).unwrap();
+//         vk_idx += 1;
+//         store_sols(regex_bodyhash_sols, "regex_bodyhash", regex_bodyhash_max);
+//         let chars_shift_bodyhash_yul = gen_evm_verifier_yul::<CharsShiftBodyHashCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
+//         let (chars_shift_bodyhash_sols, chars_shift_bodyhash_max) = gen_evm_verifier_sols_from_yul(&chars_shift_bodyhash_yul, max_line_size_per_file).unwrap();
+//         vk_idx += 1;
+//         store_sols(chars_shift_bodyhash_sols, "chars_shift_bodyhash", chars_shift_bodyhash_max);
+//         let sha2_body_yul = gen_evm_verifier_yul::<Sha256BodyCircuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
+//         let (sha2_body_sols, sha2_body_max) = gen_evm_verifier_sols_from_yul(&sha2_body_yul, max_line_size_per_file).unwrap();
+//         vk_idx += 1;
+//         store_sols(sha2_body_sols, "sha2_body", sha2_body_max);
+//         let base64_yul = gen_evm_verifier_yul::<Base64Circuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
+//         let (base64_sols, base64_max) = gen_evm_verifier_sols_from_yul(&base64_yul, max_line_size_per_file).unwrap();
+//         vk_idx += 1;
+//         store_sols(base64_sols, "base64", base64_max);
+//         let regex_body_yul = gen_evm_verifier_yul::<RegexBodyCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
+//         let (regex_body_sols, regex_body_max) = gen_evm_verifier_sols_from_yul(&regex_body_yul, max_line_size_per_file).unwrap();
+//         vk_idx += 1;
+//         store_sols(regex_body_sols, "regex_body", regex_body_max);
+//         if body_configs.expose_substrs.unwrap_or(false) {
+//             let sha2_body_masked_chars_yul = gen_evm_verifier_yul::<Sha256BodyMaskedCharsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
+//             let (sha2_body_masked_chars_sols, sha2_body_masked_chars_max) = gen_evm_verifier_sols_from_yul(&sha2_body_masked_chars_yul, max_line_size_per_file).unwrap();
+//             vk_idx += 1;
+//             store_sols(sha2_body_masked_chars_sols, "sha2_body_masked_chars", sha2_body_masked_chars_max);
+//             let sha2_body_substr_ids_yul = gen_evm_verifier_yul::<Sha256BodySubstrIdsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
+//             let (sha2_body_substr_ids_sols, sha2_body_substr_ids_max) = gen_evm_verifier_sols_from_yul(&sha2_body_substr_ids_yul, max_line_size_per_file).unwrap();
+//             store_sols(sha2_body_substr_ids_sols, "sha2_body_substr_ids", sha2_body_substr_ids_max);
+//         }
+//     }
+//     let email_verifier_sol = include_str!("./EmailVerifier.sol");
+//     fs::write(sols_dir.join("EmailVerifier.sol"), email_verifier_sol).unwrap();
+//     let verifier_base_sol = include_str!("./VerifierBase.sol");
+//     fs::write(sols_dir.join("VerifierBase.sol"), verifier_base_sol).unwrap();
+//     let verifier_func_abst_sol = include_str!("./VerifierFuncAbst.sol");
+//     fs::write(sols_dir.join("VerifierFuncAbst.sol"), verifier_func_abst_sol).unwrap();
+// }
+
+pub fn gen_sol_verifiers(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, max_line_size_per_file: usize, sols_dir: &PathBuf) {
+    let yul = gen_evm_verifier_yul::<DefaultEmailVerifyCircuit<Fr>>(params, vk, vec![3usize]);
+    let (sols, max_transcript_addr) = gen_evm_verifier_sols_from_yul(&yul, max_line_size_per_file).unwrap();
+    {
+        fs::create_dir_all(&sols_dir).unwrap();
         for (idx, sol) in sols.iter().enumerate() {
-            let mut file = File::create(dir.join(format!("VerifierFunc{}.sol", idx))).unwrap();
+            let mut file = File::create(sols_dir.join(format!("VerifierFunc{}.sol", idx))).unwrap();
             file.write_all(sol.as_bytes()).unwrap();
         }
         let deploy_params = DeployParamsJson {
             max_transcript_addr,
             num_func_contracts: sols.len(),
         };
-        let mut json_file = File::create(dir.join("deploy_params.json")).unwrap();
+        let mut json_file = File::create(sols_dir.join("deploy_params.json")).unwrap();
         json_file.write_all(serde_json::to_string_pretty(&deploy_params).unwrap().as_bytes()).unwrap();
-    };
-    let config_params = default_config_params();
-    let mut vk_idx = 0;
-    let sha2_header_yul = gen_evm_verifier_yul::<Sha256HeaderCircuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
-    let (sha2_header_sols, sha2_header_max) = gen_evm_verifier_sols_from_yul(&sha2_header_yul, max_line_size_per_file).unwrap();
-    vk_idx += 1;
-    store_sols(sha2_header_sols, "sha2_header", sha2_header_max);
-    let sign_verify_yul = gen_evm_verifier_yul::<SignVerifyCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-    let (sign_verify_sols, sign_verify_max) = gen_evm_verifier_sols_from_yul(&sign_verify_yul, max_line_size_per_file).unwrap();
-    vk_idx += 1;
-    store_sols(sign_verify_sols, "sign_verify", sign_verify_max);
-    let regex_header_yul = gen_evm_verifier_yul::<RegexHeaderCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-    let (regex_header_sols, regex_header_max) = gen_evm_verifier_sols_from_yul(&regex_header_yul, max_line_size_per_file).unwrap();
-    vk_idx += 1;
-    store_sols(regex_header_sols, "regex_header", regex_header_max);
-    if config_params.header_config.as_ref().unwrap().expose_substrs.unwrap_or(false) {
-        let sha2_header_masked_chars_yul = gen_evm_verifier_yul::<Sha256HeaderMaskedCharsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-        let (sha2_header_masked_chars_sols, sha2_header_masked_chars_max) = gen_evm_verifier_sols_from_yul(&sha2_header_masked_chars_yul, max_line_size_per_file).unwrap();
-        vk_idx += 1;
-        store_sols(sha2_header_masked_chars_sols, "sha2_header_masked_chars", sha2_header_masked_chars_max);
-        let sha2_header_substr_ids_yul = gen_evm_verifier_yul::<Sha256HeaderSubstrIdsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-        let (sha2_header_substr_ids_sols, sha2_header_substr_ids_max) = gen_evm_verifier_sols_from_yul(&sha2_header_substr_ids_yul, max_line_size_per_file).unwrap();
-        vk_idx += 1;
-        store_sols(sha2_header_substr_ids_sols, "sha2_header_substr_ids", sha2_header_substr_ids_max);
-    }
-    if let Some(body_configs) = config_params.body_config.as_ref() {
-        let regex_bodyhash_yul = gen_evm_verifier_yul::<RegexBodyHashCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-        let (regex_bodyhash_sols, regex_bodyhash_max) = gen_evm_verifier_sols_from_yul(&regex_bodyhash_yul, max_line_size_per_file).unwrap();
-        vk_idx += 1;
-        store_sols(regex_bodyhash_sols, "regex_bodyhash", regex_bodyhash_max);
-        let chars_shift_bodyhash_yul = gen_evm_verifier_yul::<CharsShiftBodyHashCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-        let (chars_shift_bodyhash_sols, chars_shift_bodyhash_max) = gen_evm_verifier_sols_from_yul(&chars_shift_bodyhash_yul, max_line_size_per_file).unwrap();
-        vk_idx += 1;
-        store_sols(chars_shift_bodyhash_sols, "chars_shift_bodyhash", chars_shift_bodyhash_max);
-        let sha2_body_yul = gen_evm_verifier_yul::<Sha256BodyCircuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
-        let (sha2_body_sols, sha2_body_max) = gen_evm_verifier_sols_from_yul(&sha2_body_yul, max_line_size_per_file).unwrap();
-        vk_idx += 1;
-        store_sols(sha2_body_sols, "sha2_body", sha2_body_max);
-        let base64_yul = gen_evm_verifier_yul::<Base64Circuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
-        let (base64_sols, base64_max) = gen_evm_verifier_sols_from_yul(&base64_yul, max_line_size_per_file).unwrap();
-        vk_idx += 1;
-        store_sols(base64_sols, "base64", base64_max);
-        let regex_body_yul = gen_evm_verifier_yul::<RegexBodyCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-        let (regex_body_sols, regex_body_max) = gen_evm_verifier_sols_from_yul(&regex_body_yul, max_line_size_per_file).unwrap();
-        vk_idx += 1;
-        store_sols(regex_body_sols, "regex_body", regex_body_max);
-        if body_configs.expose_substrs.unwrap_or(false) {
-            let sha2_body_masked_chars_yul = gen_evm_verifier_yul::<Sha256BodyMaskedCharsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-            let (sha2_body_masked_chars_sols, sha2_body_masked_chars_max) = gen_evm_verifier_sols_from_yul(&sha2_body_masked_chars_yul, max_line_size_per_file).unwrap();
-            vk_idx += 1;
-            store_sols(sha2_body_masked_chars_sols, "sha2_body_masked_chars", sha2_body_masked_chars_max);
-            let sha2_body_substr_ids_yul = gen_evm_verifier_yul::<Sha256BodySubstrIdsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-            let (sha2_body_substr_ids_sols, sha2_body_substr_ids_max) = gen_evm_verifier_sols_from_yul(&sha2_body_substr_ids_yul, max_line_size_per_file).unwrap();
-            store_sols(sha2_body_substr_ids_sols, "sha2_body_substr_ids", sha2_body_substr_ids_max);
-        }
     }
     let email_verifier_sol = include_str!("./EmailVerifier.sol");
     fs::write(sols_dir.join("EmailVerifier.sol"), email_verifier_sol).unwrap();
-    let verifier_base_sol = include_str!("./VerifierBase.sol");
+    let mut verifier_base_sol = include_str!("./VerifierBase.sol").to_string();
+    verifier_base_sol = verifier_base_sol.replace("<%max_transcript_addr%>", &format!("{}", max_transcript_addr));
     fs::write(sols_dir.join("VerifierBase.sol"), verifier_base_sol).unwrap();
-    let verifier_func_abst_sol = include_str!("./VerifierFuncAbst.sol");
+    let mut verifier_func_abst_sol = include_str!("./VerifierFuncAbst.sol").to_string();
+    verifier_func_abst_sol = verifier_func_abst_sol.replace("<%max_transcript_addr%>", &format!("{}", max_transcript_addr));
     fs::write(sols_dir.join("VerifierFuncAbst.sol"), verifier_func_abst_sol).unwrap();
 }
 
-fn gen_evm_verifier_yul<C>(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, num_instance: Vec<usize>) -> String
+pub fn gen_evm_verifier_yul<C>(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, num_instance: Vec<usize>) -> String
 where
     C: CircuitExt<Fr>,
 {
@@ -122,7 +148,7 @@ where
 }
 
 // original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L326-L602
-fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) -> Result<(Vec<String>, u32), Box<dyn std::error::Error>> {
+pub fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) -> Result<(Vec<String>, u32), Box<dyn std::error::Error>> {
     // let file = File::open(input_file.clone())?;
     let reader = BufReader::new(yul.as_bytes());
 

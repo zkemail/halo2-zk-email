@@ -1,7 +1,7 @@
-use std::fs::File;
-
+use crate::*;
 use fancy_regex::Regex;
 use itertools::Itertools;
+use std::fs::File;
 
 // pub fn get_email_circuit_public_hash_input(
 //     headerhash: &[u8],
@@ -42,55 +42,69 @@ use itertools::Itertools;
 //     .concat()
 // }
 
-// pub fn get_email_substrs(
-//     header_str: &str,
-//     body_str: &str,
-//     header_substr_regexes: Vec<Vec<String>>,
-//     body_substr_regexes: Vec<Vec<String>>,
-// ) -> (Vec<Option<(usize, String)>>, Vec<Option<(usize, String)>>) {
-//     let bodyhash_substr = get_substr(
-//         &header_str,
-//         &[r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)".to_string()],
-//     );
-//     let header_substrs = header_substr_regexes
-//         .iter()
-//         .map(|raws| {
-//             let raws = raws.into_iter().map(|raw| format!(r"{}", raw)).collect_vec();
-//             get_substr(&header_str, raws.as_slice())
-//         })
-//         .collect_vec();
-//     let header_substrings = vec![vec![bodyhash_substr], header_substrs].concat();
-//     let body_substrings = body_substr_regexes
-//         .iter()
-//         .map(|raws| {
-//             let raws = raws.into_iter().map(|raw| format!(r"{}", raw)).collect_vec();
-//             get_substr(&body_str, raws.as_slice())
-//         })
-//         .collect_vec();
-//     (header_substrings, body_substrings)
-// }
+pub fn get_expected_substr_chars_and_ids(max_byte_size: usize, substrs: &[Option<(usize, String)>]) -> (Vec<u8>, Vec<u8>) {
+    let mut expected_masked_chars = vec![0u8; max_byte_size];
+    let mut expected_substr_ids = vec![0u8; max_byte_size]; // We only support up to 256 substring patterns.
+    for (substr_idx, m) in substrs.iter().enumerate() {
+        if let Some((start, chars)) = m {
+            for (idx, char) in chars.as_bytes().iter().enumerate() {
+                expected_masked_chars[start + idx] = *char;
+                expected_substr_ids[start + idx] = substr_idx as u8 + 1;
+            }
+        }
+    }
+    (expected_masked_chars, expected_substr_ids)
+}
 
-// pub fn get_substr(input_str: &str, regexes: &[String]) -> Option<(usize, String)> {
-//     let regexes = regexes.into_iter().map(|raw| Regex::new(&raw).unwrap()).collect_vec();
-//     let mut start = 0;
-//     let mut substr = input_str;
-//     // println!("first regex {}", regexes[0]);
-//     for regex in regexes.into_iter() {
-//         // println!(r"regex {}", regex);
-//         match regex.find(substr).unwrap() {
-//             Some(m) => {
-//                 start += m.start();
-//                 substr = m.as_str();
-//             }
-//             None => {
-//                 return None;
-//             }
-//         };
-//     }
-//     // println!("substr {}", substr);
-//     // println!("start {}", start);
-//     Some((start, substr.to_string()))
-// }
+pub fn get_email_substrs(
+    header_str: &str,
+    body_str: &str,
+    header_substr_regexes: Vec<Vec<String>>,
+    body_substr_regexes: Vec<Vec<String>>,
+) -> (Vec<Option<(usize, String)>>, Vec<Option<(usize, String)>>) {
+    // let bodyhash_substr = get_substr(
+    //     &header_str,
+    //     &[r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)".to_string()],
+    // );
+    let header_substrs = header_substr_regexes
+        .iter()
+        .map(|raws| {
+            let raws = raws.into_iter().map(|raw| format!(r"{}", raw)).collect_vec();
+            get_substr(&header_str, raws.as_slice())
+        })
+        .collect_vec();
+    // let header_substrings = vec![vec![bodyhash_substr], header_substrs].concat();
+    let body_substrs = body_substr_regexes
+        .iter()
+        .map(|raws| {
+            let raws = raws.into_iter().map(|raw| format!(r"{}", raw)).collect_vec();
+            get_substr(&body_str, raws.as_slice())
+        })
+        .collect_vec();
+    (header_substrs, body_substrs)
+}
+
+pub fn get_substr(input_str: &str, regexes: &[String]) -> Option<(usize, String)> {
+    let regexes = regexes.into_iter().map(|raw| Regex::new(&raw).unwrap()).collect_vec();
+    let mut start = 0;
+    let mut substr = input_str;
+    // println!("first regex {}", regexes[0]);
+    for regex in regexes.into_iter() {
+        // println!(r"regex {}", regex);
+        match regex.find(substr).unwrap() {
+            Some(m) => {
+                start += m.start();
+                substr = m.as_str();
+            }
+            None => {
+                return None;
+            }
+        };
+    }
+    // println!("substr {}", substr);
+    // println!("start {}", start);
+    Some((start, substr.to_string()))
+}
 
 // pub fn read_default_circuit_config_params() -> DefaultEmailVerifyConfigParams {
 //     let path = std::env::var(EMAIL_VERIFY_CONFIG_ENV).expect("You must set the configure file path to EMAIL_VERIFY_CONFIG.");

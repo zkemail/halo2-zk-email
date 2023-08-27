@@ -1,7 +1,9 @@
 use clap::{Parser, Subcommand};
-use halo2_zk_email::helpers::gen_pks_and_vks;
+use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
 use halo2_zk_email::helpers::*;
 use halo2_zk_email::*;
+use std::env::set_var;
+use std::fs::File;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug, Clone)]
@@ -23,7 +25,7 @@ enum Commands {
         params_path: String,
     },
     /// Generate proving keys and verifying keys.
-    GenPksAndVks {
+    GenPkAndVk {
         /// setup parameters path
         #[arg(short, long, default_value = "./build/params.bin")]
         params_path: String,
@@ -33,14 +35,12 @@ enum Commands {
         /// emails path
         #[arg(short, long, default_value = "./build/demo.eml")]
         email_path: String,
-        #[arg(short, long, default_value = "0")]
-        tag: Option<String>,
         /// proving key path
-        #[arg(long, default_value = "./build/pks")]
-        pks_dir: String,
+        #[arg(long, default_value = "./build/app.pk")]
+        pk_path: String,
         /// verifying key file
-        #[arg(long, default_value = "./build/vks")]
-        vks_dir: String,
+        #[arg(long, default_value = "./build/app.vk")]
+        vk_path: String,
     },
     Prove {
         /// setup parameters path
@@ -50,16 +50,14 @@ enum Commands {
         #[arg(short, long, default_value = "./configs/default_app.config")]
         circuit_config_path: String,
         /// proving key path
-        #[arg(long, default_value = "./build/pks")]
-        pks_dir: String,
+        #[arg(long, default_value = "./build/app.pk")]
+        pk_path: String,
         /// emails path
         #[arg(short, long, default_value = "./build/demo.eml")]
         email_path: String,
-        #[arg(short, long, default_value = "0")]
-        tag: Option<String>,
         /// output proof file
-        #[arg(long, default_value = "./build/proofs")]
-        proofs_dir: String,
+        #[arg(long, default_value = "./build/app.proof")]
+        proof_path: String,
         /// public input file
         #[arg(long, default_value = "./build/public_input.json")]
         public_input_path: String,
@@ -72,16 +70,14 @@ enum Commands {
         #[arg(short, long, default_value = "./configs/default_app.config")]
         circuit_config_path: String,
         /// proving key path
-        #[arg(long, default_value = "./build/pks")]
-        pks_dir: String,
+        #[arg(long, default_value = "./build/app.pk")]
+        pk_path: String,
         /// emails path
         #[arg(short, long, default_value = "./build/demo.eml")]
         email_path: String,
-        #[arg(short, long, default_value = "0")]
-        tag: Option<String>,
         /// output proof file
-        #[arg(long, default_value = "./build/evm_proofs")]
-        proofs_dir: String,
+        #[arg(long, default_value = "./build/app_evm.proof")]
+        proof_path: String,
         /// public input file
         #[arg(long, default_value = "./build/public_input.json")]
         public_input_path: String,
@@ -94,16 +90,16 @@ enum Commands {
         #[arg(short, long, default_value = "./configs/default_app.config")]
         circuit_config_path: String,
         /// verifying key file
-        #[arg(long, default_value = "./build/vks")]
-        vks_dir: String,
+        #[arg(long, default_value = "./build/app.vk")]
+        vk_path: String,
         /// output proof file
-        #[arg(long, default_value = "./build/proofs")]
-        proofs_dir: String,
+        #[arg(long, default_value = "./build/app.proof")]
+        proof_path: String,
         /// public input file
         #[arg(long, default_value = "./build/public_input.json")]
         public_input_path: String,
     },
-    GenEVMVerifiers {
+    GenEVMVerifier {
         /// setup parameters path
         #[arg(short, long, default_value = "./build/params.bin")]
         params_path: String,
@@ -114,8 +110,8 @@ enum Commands {
         // #[arg(short, long, default_value = "./build/demo.eml")]
         // email_path: String,
         /// verifying key file
-        #[arg(long, default_value = "./build/vks")]
-        vks_dir: String,
+        #[arg(long, default_value = "./build/app.vk")]
+        vk_path: String,
         /// soldity files directory
         #[arg(short, long, default_value = "./build/sols")]
         sols_dir: String,
@@ -127,8 +123,8 @@ enum Commands {
         #[arg(short, long, default_value = "./build/sols")]
         sols_dir: String,
         /// output proof file
-        #[arg(long, default_value = "./build/evm_proofs")]
-        proofs_dir: String,
+        #[arg(long, default_value = "./build/app_evm.proof")]
+        proof_path: String,
         /// public input file
         #[arg(long, default_value = "./build/public_input.json")]
         public_input_path: String,
@@ -147,111 +143,74 @@ enum Commands {
 async fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::GenParams { k, params_path } => gen_params(&PathBuf::new().join(params_path), k).unwrap(),
-        Commands::GenPksAndVks {
+        Commands::GenParams { k, params_path } => gen_params(&params_path, k).unwrap(),
+        Commands::GenPkAndVk {
             params_path,
             circuit_config_path,
             email_path,
-            tag,
-            pks_dir,
-            vks_dir,
+            pk_path,
+            vk_path,
         } => {
-            gen_pks_and_vks(
-                &PathBuf::new().join(params_path),
-                &PathBuf::new().join(circuit_config_path),
-                &PathBuf::new().join(email_path),
-                tag,
-                &PathBuf::new().join(pks_dir),
-                &PathBuf::new().join(vks_dir),
-            )
-            .await
-            .expect("key generation failed");
+            let circuit = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
+            gen_pk_and_vk(&params_path, &circuit_config_path, &pk_path, &vk_path, circuit).expect("key generation failed");
         }
         Commands::Prove {
             params_path,
             circuit_config_path,
-            pks_dir,
+            pk_path,
             email_path,
-            tag,
-            proofs_dir,
+            proof_path,
             public_input_path,
         } => {
-            prove(
-                &PathBuf::new().join(params_path),
-                &PathBuf::new().join(circuit_config_path),
-                &PathBuf::new().join(pks_dir),
-                tag,
-                &PathBuf::new().join(email_path),
-                &PathBuf::new().join(proofs_dir),
-                &PathBuf::new().join(public_input_path),
-            )
-            .await
-            .expect("proof generation failed");
+            set_var(EMAIL_VERIFY_CONFIG_ENV, &circuit_config_path);
+            let circuit = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
+            let public_input = circuit.gen_default_public_input();
+            prove(&params_path, &circuit_config_path, &pk_path, &proof_path, circuit).unwrap();
+            serde_json::to_writer_pretty(File::create(&public_input_path).unwrap(), &public_input).unwrap();
         }
         Commands::EVMProve {
             params_path,
             circuit_config_path,
-            pks_dir,
+            pk_path,
             email_path,
-            tag,
-            proofs_dir,
+            proof_path,
             public_input_path,
         } => {
-            evm_prove(
-                &PathBuf::new().join(params_path),
-                &PathBuf::new().join(circuit_config_path),
-                &PathBuf::new().join(pks_dir),
-                tag,
-                &PathBuf::new().join(email_path),
-                &PathBuf::new().join(proofs_dir),
-                &PathBuf::new().join(public_input_path),
-            )
-            .await
-            .expect("evm proof generation failed");
+            set_var(EMAIL_VERIFY_CONFIG_ENV, &circuit_config_path);
+            let circuit = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
+            let public_input = circuit.gen_default_public_input();
+            evm_prove(&params_path, &circuit_config_path, &pk_path, &proof_path, circuit).unwrap();
+            serde_json::to_writer_pretty(File::create(&public_input_path).unwrap(), &public_input).unwrap();
         }
         Commands::Verify {
             params_path,
             circuit_config_path,
-            vks_dir,
-            proofs_dir,
+            vk_path,
+            proof_path,
             public_input_path,
         } => {
-            let result = verify(
-                &PathBuf::new().join(params_path),
-                &PathBuf::new().join(circuit_config_path),
-                &PathBuf::new().join(vks_dir),
-                &PathBuf::new().join(proofs_dir),
-                &PathBuf::new().join(public_input_path),
-            );
-            assert!(result);
-            println!("verification passed");
+            let result = verify::<DefaultEmailVerifyCircuit<Fr>>(&params_path, &circuit_config_path, &vk_path, &proof_path, &public_input_path).unwrap();
+            if result {
+                println!("proof is valid");
+            } else {
+                println!("proof is invalid");
+            }
         }
-        Commands::GenEVMVerifiers {
+        Commands::GenEVMVerifier {
             params_path,
             circuit_config_path,
-            vks_dir,
+            vk_path,
             sols_dir,
         } => {
-            gen_evm_verifiers(
-                &PathBuf::new().join(params_path),
-                &PathBuf::new().join(circuit_config_path),
-                &PathBuf::new().join(vks_dir),
-                &PathBuf::new().join(sols_dir),
-            );
+            gen_evm_verifier::<DefaultEmailVerifyCircuit<Fr>>(&params_path, &circuit_config_path, &vk_path, &sols_dir).unwrap();
         }
         Commands::EVMVerify {
             circuit_config_path,
             sols_dir,
-            proofs_dir,
+            proof_path,
             public_input_path,
         } => {
-            evm_verify(
-                &PathBuf::new().join(circuit_config_path),
-                &PathBuf::new().join(sols_dir),
-                &PathBuf::new().join(proofs_dir),
-                &PathBuf::new().join(public_input_path),
-            )
-            .await;
+            evm_verify(&circuit_config_path, &sols_dir, &proof_path, &public_input_path).await.unwrap();
         }
         Commands::GenRegexFiles {
             decomposed_regex_config_path,

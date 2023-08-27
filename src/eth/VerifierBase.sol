@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.17;
 import "./VerifierFuncAbst.sol";
 
 // MAX TRANSCRIPT ADDR: <%max_transcript_addr%>
@@ -23,7 +23,7 @@ contract VerifierBase {
         bytes memory proof
     ) public view returns (bool) {
         bool success = true;
-        bytes memory transcript;
+        bytes32[<%max_transcript_addr%>] memory transcript;
         // bytes32[] memory transcript = new bytes32[](maxTranscriptAddr);
         for (uint i = 0; i < pubInputs.length; i++) {
             require(
@@ -37,6 +37,7 @@ contract VerifierBase {
                 )
             );
         }
+        VerifierFuncAbst verifier;
         for (uint i = 0; i < numVerifierFuncs; i++) {
             // (bool callSuccess, bytes memory callData) = verifierFuncs[i]
             //     .delegatecall(
@@ -50,11 +51,9 @@ contract VerifierBase {
             //     );
             // require(callSuccess);
             // (success, newTranscript) = abi.decode(callData, (bool));
-            VerifierFuncAbst verifier = VerifierFuncAbst(verifierFuncs[i]);
-            (bool newSuccess, bytes memory newTranscript) = verifier
+            verifier = VerifierFuncAbst(verifierFuncs[i]);
+            (success, transcript) = verifier
                 .verifyPartial(pubInputs, proof, success, transcript);
-            success = newSuccess;
-            transcript = newTranscript;
         }
         return success;
     }
