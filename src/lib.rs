@@ -186,6 +186,9 @@ impl DefaultEmailVerifyPublicInput {
             if let Some(s) = s {
                 header_starts_vec.push(s.0);
                 header_substrs_vec.push(s.1);
+            } else {
+                header_starts_vec.push(0);
+                header_substrs_vec.push("".to_string());
             }
         }
         let mut body_starts_vec = vec![];
@@ -194,6 +197,9 @@ impl DefaultEmailVerifyPublicInput {
             if let Some(s) = s {
                 body_starts_vec.push(s.0);
                 body_substrs_vec.push(s.1);
+            } else {
+                body_starts_vec.push(0);
+                body_substrs_vec.push("".to_string());
             }
         }
         let field2string = |val: &F| {

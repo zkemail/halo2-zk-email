@@ -91,7 +91,7 @@ pub async fn setup_eth_client(anvil: &AnvilInstance) -> EthersClient {
     // Connect to the network
     let provider = Provider::<Http>::try_from(endpoint)
         .expect("fail to construct the provider")
-        .interval(Duration::from_millis(1u64));
+        .interval(Duration::from_millis(10u64));
 
     // let chain_id = provider.get_chainid().await.unwrap();
 
@@ -541,12 +541,14 @@ pub async fn deploy_and_call_verifiers(sols_dir: &PathBuf, runs: Option<usize>, 
         body_substr_starts: instance.body_starts.iter().map(|idx| U256::from(*idx)).collect_vec(),
     };
     println!("instance {:?}", instance);
-    let proof = Bytes::from(proof.to_vec());
+    let proof = Bytes::from(hex::decode(hex::encode(&proof)).unwrap());
+    println!("proof {:?}", proof);
+    // Bytes::from(proof.to_vec());
     let result = verifier.verify_email(instance.clone(), proof.clone()).call().await;
     println!("result {:?}", result);
     let call = verifier.method::<_, ()>("verifyEmail", (instance.clone(), proof.clone())).unwrap();
-    let tx = call.send().await;
-    println!("tx {:?}", tx);
+    // let tx = call.send().await;
+    // println!("tx {:?}", tx);
     println!("estimated gas {:?}", call.estimate_gas().await.unwrap());
     // drop(anvil);
 

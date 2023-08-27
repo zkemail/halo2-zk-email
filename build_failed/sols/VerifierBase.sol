@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.17;
 import "./VerifierFuncAbst.sol";
 
-// MAX TRANSCRIPT ADDR: <%max_transcript_addr%>
+// MAX TRANSCRIPT ADDR: 6992
 contract VerifierBase {
     uint256 constant SIZE_LIMIT =
         21888242871839275222246405745257275088696311157297823662689037894645226208583;
@@ -23,7 +23,7 @@ contract VerifierBase {
         bytes memory proof
     ) public view returns (bool) {
         bool success = true;
-        bytes memory transcript;
+        bytes32[6992] memory transcript;
         // bytes32[] memory transcript = new bytes32[](maxTranscriptAddr);
         for (uint i = 0; i < pubInputs.length; i++) {
             require(
@@ -37,6 +37,7 @@ contract VerifierBase {
                 )
             );
         }
+        VerifierFuncAbst verifier;
         for (uint i = 0; i < numVerifierFuncs; i++) {
             // (bool callSuccess, bytes memory callData) = verifierFuncs[i]
             //     .delegatecall(
@@ -50,11 +51,18 @@ contract VerifierBase {
             //     );
             // require(callSuccess);
             // (success, newTranscript) = abi.decode(callData, (bool));
-            VerifierFuncAbst verifier = VerifierFuncAbst(verifierFuncs[i]);
-            (bool newSuccess, bytes memory newTranscript) = verifier
-                .verifyPartial(pubInputs, proof, success, transcript);
-            success = newSuccess;
-            transcript = newTranscript;
+            // if (i == 5) {
+            //     // If the length of dummy is less than 29, it returns "error" message.
+            //     bytes32[29] memory dummy;
+            //     require(false, "error");
+            // }
+            verifier = VerifierFuncAbst(verifierFuncs[i]);
+            (success, transcript) = verifier.verifyPartial(
+                pubInputs,
+                proof,
+                success,
+                transcript
+            );
         }
         return success;
     }
