@@ -5,7 +5,7 @@ use ethereum_types::{Address, H256, U256};
 use ethers::solc::artifacts::Contract;
 use ethers::solc::{CompilerInput, EvmVersion, Solc};
 use ethers::types::transaction::eip2718::TypedTransaction;
-use ethers::types::Bytes;
+use ethers::types::{Bytes, TransactionRequest};
 use halo2_base::halo2_proofs::circuit::Value;
 use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, Fq, Fr, G1Affine};
 use halo2_base::halo2_proofs::halo2curves::FieldExt;
@@ -73,7 +73,7 @@ pub type EthersClient = Arc<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>
 // original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L58-L86
 pub async fn setup_eth_backend() -> AnvilInstance {
     // Launch anvil
-    let anvil = Anvil::new().spawn();
+    let anvil = Anvil::new().arg("--gas-limit").arg("1125899906842624").spawn();
     anvil
 }
 
@@ -452,68 +452,6 @@ pub async fn deploy_and_call_verifiers(sols_dir: &PathBuf, runs: Option<usize>, 
     let (base_addr, gas) = deploy_verifier_base_and_funcs(&client, sols_dir, runs).await;
     gas_sum += gas;
 
-    // let email_verify_args = (
-    //     Address::from_slice(&sha2_header_addr),
-    //     Address::from_slice(&sign_verify_addr),
-    //     Address::from_slice(&regex_header_addr),
-    //     Address::from_slice(&sha2_header_masked_chars_addr),
-    //     Address::from_slice(&sha2_header_substr_ids_addr),
-    //     Address::from_slice(&regex_bodyhash_addr),
-    //     Address::from_slice(&chars_shift_bodyhash_addr),
-    //     Address::from_slice(&sha2_body_addr),
-    //     Address::from_slice(&base64_addr),
-    //     Address::from_slice(&regex_body_addr),
-    //     Address::from_slice(&sha2_body_masked_chars_addr),
-    //     Address::from_slice(&sha2_body_substr_ids_addr),
-    //     header_expose_substrs,
-    //     body_enable,
-    //     body_expose_substrs,
-    //     max_header_bytes,
-    //     max_body_bytes,
-    // );
-    // let mut email_verify_constructor_args = encode(&[
-    //     Token::Address(Address::from_slice(&sha2_header_addr)),
-    //     Token::Address(Address::from_slice(&sign_verify_addr)),
-    // ]);
-    // email_verify_constructor_args = encode(&[Token::Bytes(email_verify_constructor_args), Token::Address(Address::from_slice(&regex_header_addr))]);
-    // email_verify_constructor_args = encode(&[
-    //     Token::Bytes(email_verify_constructor_args),
-    //     Token::Address(Address::from_slice(&sha2_header_masked_chars_addr)),
-    // ]);
-    // email_verify_constructor_args = encode(&[
-    //     Token::Bytes(email_verify_constructor_args),
-    //     Token::Address(Address::from_slice(&sha2_header_substr_ids_addr)),
-    // ]);
-    // email_verify_constructor_args = encode(&[Token::Bytes(email_verify_constructor_args), Token::Address(Address::from_slice(&regex_bodyhash_addr))]);
-    // email_verify_constructor_args = encode(&[Token::Bytes(email_verify_constructor_args), Token::Address(Address::from_slice(&chars_shift_bodyhash_addr))]);
-    // email_verify_constructor_args = encode(&[Token::Bytes(email_verify_constructor_args), Token::Address(Address::from_slice(&sha2_body_addr))]);
-    // email_verify_constructor_args = encode(&[Token::Bytes(email_verify_constructor_args), Token::Address(Address::from_slice(&base64_addr))]);
-    // email_verify_constructor_args = encode(&[Token::Bytes(email_verify_constructor_args), Token::Address(Address::from_slice(&regex_body_addr))]);
-    // email_verify_constructor_args = encode(&[
-    //     Token::Bytes(email_verify_constructor_args),
-    //     Token::Address(Address::from_slice(&sha2_body_masked_chars_addr)),
-    // ]);
-    // email_verify_constructor_args = encode(&[Token::Bytes(email_verify_constructor_args), Token::Address(Address::from_slice(&sha2_body_substr_ids_addr))]);
-
-    // let mut email_verify_constructor_args = encode(&[
-    //     Token::Address(Address::from_slice(&sha2_header_addr)),
-    //     Token::Address(Address::from_slice(&sign_verify_addr)),
-    //     Token::Address(Address::from_slice(&regex_header_addr)),
-    //     Token::Address(Address::from_slice(&sha2_header_masked_chars_addr)),
-    //     Token::Address(Address::from_slice(&sha2_header_substr_ids_addr)),
-    //     Token::Address(Address::from_slice(&regex_bodyhash_addr)),
-    //     Token::Address(Address::from_slice(&chars_shift_bodyhash_addr)),
-    //     Token::Address(Address::from_slice(&sha2_body_addr)),
-    //     Token::Address(Address::from_slice(&base64_addr)),
-    //     Token::Address(Address::from_slice(&regex_body_addr)),
-    //     Token::Address(Address::from_slice(&sha2_body_masked_chars_addr)),
-    //     Token::Address(Address::from_slice(&sha2_body_substr_ids_addr)),
-    //     Token::Bool(header_expose_substrs),
-    //     Token::Bool(body_enable),
-    //     Token::Bool(body_expose_substrs),
-    //     Token::Uint(max_header_bytes),
-    //     Token::Uint(max_body_bytes),
-    // ]);
     let max_header_bytes = config_params.header_config.as_ref().unwrap().max_variable_byte_size;
     let max_body_bytes = config_params.body_config.as_ref().unwrap().max_variable_byte_size;
     let (email_verifier, gas) = deploy_verifier_via_solidity(
@@ -530,25 +468,30 @@ pub async fn deploy_and_call_verifiers(sols_dir: &PathBuf, runs: Option<usize>, 
     .await;
     gas_sum += gas;
     println!("total deploy gas {}", gas_sum);
+    println!("address {:?}", Address::from(email_verifier));
 
     let verifier = EmailVerifier::new(email_verifier, client.clone());
-    let instance = EmailProofInstance {
-        header_hash_commit: U256::from_str_radix(&instance.header_hash_commit, 10).unwrap(),
-        public_key_hash: U256::from_str_radix(&instance.public_key_hash, 10).unwrap(),
-        header_substrs: instance.header_substrs.clone(),
-        header_substr_starts: instance.header_starts.iter().map(|idx| U256::from(*idx)).collect_vec(),
-        body_substrs: instance.body_substrs.clone(),
-        body_substr_starts: instance.body_starts.iter().map(|idx| U256::from(*idx)).collect_vec(),
-    };
-    println!("instance {:?}", instance);
-    let proof = Bytes::from(hex::decode(hex::encode(&proof)).unwrap());
-    println!("proof {:?}", proof);
+    let instance = encode(&[
+        Token::Uint(U256::from_str_radix(&instance.header_hash_commit, 10).unwrap()),
+        Token::Uint(U256::from_str_radix(&instance.public_key_hash, 10).unwrap()),
+        Token::Array(instance.header_substrs.iter().map(|s| Token::String(s.clone())).collect_vec()),
+        Token::Array(instance.header_starts.iter().map(|idx| Token::Uint(U256::from(idx.clone()))).collect_vec()),
+        Token::Array(instance.body_substrs.iter().map(|s| Token::String(s.clone())).collect_vec()),
+        Token::Array(instance.body_starts.iter().map(|idx| Token::Uint(U256::from(idx.clone()))).collect_vec()),
+    ]);
+    // EmailProofInstance {
+    //     header_hash_commit: U256::from_str_radix(&instance.header_hash_commit, 10).unwrap(),
+    //     public_key_hash: U256::from_str_radix(&instance.public_key_hash, 10).unwrap(),
+    //     header_substrs: instance.header_substrs.clone(),
+    //     header_substr_starts: instance.header_starts.iter().map(|idx| U256::from(*idx)).collect_vec(),
+    //     body_substrs: instance.body_substrs.clone(),
+    //     body_substr_starts: instance.body_starts.iter().map(|idx| U256::from(*idx)).collect_vec(),
+    // };
+    let proof = Bytes::from(proof.to_vec());
+    // println!("proof {:?}", proof);
     // Bytes::from(proof.to_vec());
-    let result = verifier.verify_email(instance.clone(), proof.clone()).call().await;
-    println!("result {:?}", result);
-    let call = verifier.method::<_, ()>("verifyEmail", (instance.clone(), proof.clone())).unwrap();
-    // let tx = call.send().await;
-    // println!("tx {:?}", tx);
+    verifier.verify_email(Bytes::from(instance.clone()), proof.clone()).call().await.unwrap();
+    let call = verifier.method::<_, ()>("verifyEmail", (Bytes::from(instance.clone()), proof.clone())).unwrap();
     println!("estimated gas {:?}", call.estimate_gas().await.unwrap());
     // drop(anvil);
 
@@ -558,122 +501,30 @@ pub async fn deploy_and_call_verifiers(sols_dir: &PathBuf, runs: Option<usize>, 
     //     inputs: vec![
     //         Param {
     //             name: "instance".to_owned(),
-    //             kind: ParamType::Tuple(vec![
-    //                 ParamType::Uint(256),
-    //                 ParamType::Uint(256),
-    //                 ParamType::Uint(256),
-    //                 ParamType::Uint(256),
-    //                 ParamType::Uint(256),
-    //                 ParamType::Uint(256),
-    //                 ParamType::Array(Box::new(ParamType::String)),
-    //                 ParamType::Array(Box::new(ParamType::Uint(256))),
-    //                 ParamType::Uint(256),
-    //                 ParamType::Uint(256),
-    //                 ParamType::Uint(256),
-    //                 ParamType::Uint(256),
-    //                 ParamType::Uint(256),
-    //                 ParamType::Uint(256),
-    //                 ParamType::Uint(256),
-    //                 ParamType::Array(Box::new(ParamType::String)),
-    //                 ParamType::Array(Box::new(ParamType::Uint(256))),
-    //             ]),
-    //             internal_type: Some("struct EmailVerifier.EmailProofInstance".to_string()),
+    //             kind: ParamType::Bytes,
+    //             internal_type: Some("bytes".to_string()),
     //         },
     //         Param {
     //             name: "proofs".to_owned(),
-    //             kind: ParamType::Array(Box::new(ParamType::Bytes)),
-    //             internal_type: Some("bytes[]".to_string()),
+    //             kind: ParamType::Bytes,
+    //             internal_type: Some("bytes".to_string()),
     //         },
     //     ],
-    //     outputs: vec![Param {
-    //         name: "".to_owned(),
-    //         kind: ParamType::Bool,
-    //         internal_type: Some("bool".to_string()),
-    //     }],
+    //     outputs: vec![],
     //     constant: None,
     //     state_mutability: ethers::abi::StateMutability::View,
     // };
-    // let encoded = func
-    //     .encode_input(&[
-    //         Token::Tuple(vec![
-    //             Token::Uint(U256::from_str_radix(&instance.header_bytes_commit, 10).unwrap()),
-    //             Token::Uint(U256::from_str_radix(&instance.header_hash_commit, 10).unwrap()),
-    //             Token::Uint(U256::from_str_radix(&instance.public_key_n_hash, 10).unwrap()),
-    //             Token::Uint(U256::from_str_radix(&instance.tag, 10).unwrap()),
-    //             Token::Uint(U256::from_str_radix(&instance.header_masked_chars_commit, 10).unwrap()),
-    //             Token::Uint(U256::from_str_radix(&instance.header_substr_ids_commit, 10).unwrap()),
-    //             Token::Array(instance.header_substrs.iter().map(|s| Token::String(s.clone())).collect_vec()),
-    //             Token::Array(instance.header_substr_idxes.iter().map(|idx| Token::Uint(U256::from(idx.clone()))).collect_vec()),
-    //             instance
-    //                 .bodyhash_masked_chars_commit
-    //                 .as_ref()
-    //                 .map(|s| Token::Uint(U256::from_str_radix(&s, 10).unwrap()))
-    //                 .unwrap_or(Token::Uint(U256::zero())),
-    //             instance
-    //                 .bodyhash_substr_ids_commit
-    //                 .as_ref()
-    //                 .map(|s| Token::Uint(U256::from_str_radix(&s, 10).unwrap()))
-    //                 .unwrap_or(Token::Uint(U256::zero())),
-    //             instance
-    //                 .bodyhash_base64_commit
-    //                 .as_ref()
-    //                 .map(|s| Token::Uint(U256::from_str_radix(&s, 10).unwrap()))
-    //                 .unwrap_or(Token::Uint(U256::zero())),
-    //             instance
-    //                 .body_bytes_commit
-    //                 .as_ref()
-    //                 .map(|s| Token::Uint(U256::from_str_radix(&s, 10).unwrap()))
-    //                 .unwrap_or(Token::Uint(U256::zero())),
-    //             instance
-    //                 .bodyhash_commit
-    //                 .as_ref()
-    //                 .map(|s| Token::Uint(U256::from_str_radix(&s, 10).unwrap()))
-    //                 .unwrap_or(Token::Uint(U256::zero())),
-    //             instance
-    //                 .body_masked_chars_commit
-    //                 .as_ref()
-    //                 .map(|s| Token::Uint(U256::from_str_radix(&s, 10).unwrap()))
-    //                 .unwrap_or(Token::Uint(U256::zero())),
-    //             instance
-    //                 .body_substr_ids_commit
-    //                 .as_ref()
-    //                 .map(|s| Token::Uint(U256::from_str_radix(&s, 10).unwrap()))
-    //                 .unwrap_or(Token::Uint(U256::zero())),
-    //             Token::Array(instance.body_substrs.as_ref().unwrap_or(&vec![]).iter().map(|s| Token::String(s.clone())).collect_vec()),
-    //             Token::Array(
-    //                 instance
-    //                     .body_substr_idxes
-    //                     .as_ref()
-    //                     .unwrap_or(&vec![])
-    //                     .iter()
-    //                     .map(|idx| Token::Uint(U256::from(idx.clone())))
-    //                     .collect_vec(),
-    //             ),
-    //         ]),
-    //         Token::Array(proofs),
-    //     ])
-    //     .unwrap();
-    // // println!("encoded {:?}", encoded);
-
-    // evm.env.tx = TxEnv {
-    //     gas_limit: u64::MAX,
-    //     transact_to: TransactTo::Call(email_verifier.into()),
-    //     data: encoded.into(),
-    //     ..Default::default()
-    // };
-    // let result = evm.transact_commit().unwrap();
-    // match result {
-    //     ExecutionResult::Success { gas_used, output, .. } => {
-    //         println!("gas_used: {}", gas_used);
-    //         if let Output::Call(output) = output {
-    //             println!("output: {:?}", output);
-    //         } else {
-    //             panic!("output is not bytes")
-    //         }
-    //     }
-    //     ExecutionResult::Revert { gas_used, output } => panic!("Contract call transaction reverts with gas_used {gas_used} and output {:#x}", output),
-    //     ExecutionResult::Halt { reason, gas_used } => panic!("Contract call transaction halts unexpectedly with gas_used {gas_used} and reason {:?}", reason),
-    // }
+    // let encoded = func.encode_input(&[Token::Bytes(instance), Token::Bytes(proof.to_vec())]).unwrap();
+    // let tx: TypedTransaction = TransactionRequest::default()
+    //     .to(email_verifier)
+    //     .from(client.address())
+    //     .data(encoded)
+    //     .chain_id(anvil.chain_id())
+    //     .gas(153526000)
+    //     .into();
+    // println!("tx {:?}", tx);
+    // let result = client.send_transaction(tx, None).await;
+    // println!("result {:?}", result);
 }
 
 async fn deploy_verifier_base_and_funcs(client: &EthersClient, sols_dir: &PathBuf, runs: usize) -> (Address, U256) {

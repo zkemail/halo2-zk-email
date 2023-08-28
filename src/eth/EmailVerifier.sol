@@ -9,14 +9,14 @@ contract EmailVerifier {
     uint public maxHeaderBytes;
     uint public maxBodyBytes;
 
-    struct EmailProofInstance {
-        uint headerHashCommit;
-        uint publicKeyHash;
-        string[] headerSubstrs;
-        uint[] headerSubstrStarts;
-        string[] bodySubstrs;
-        uint[] bodySubstrStarts;
-    }
+    // struct EmailProofInstance {
+    //     uint headerHashCommit;
+    //     uint publicKeyHash;
+    //     string[] headerSubstrs;
+    //     uint[] headerSubstrStarts;
+    //     string[] bodySubstrs;
+    //     uint[] bodySubstrStarts;
+    // }
 
     constructor(
         address _verifierBase,
@@ -29,56 +29,43 @@ contract EmailVerifier {
     }
 
     function verifyEmail(
-        EmailProofInstance memory instance,
+        bytes memory instance,
         bytes memory proof
     ) public view {
         (
-            bytes memory headerMaskedChars,
-            bytes memory headerSubstrIds
-        ) = getMaskedCharsAndIds(
-                maxHeaderBytes,
-                instance.headerSubstrs,
-                instance.headerSubstrStarts
-            );
-        (
-            bytes memory bodyMaskedChars,
-            bytes memory bodySubstrIds
-        ) = getMaskedCharsAndIds(
-                maxBodyBytes,
-                instance.bodySubstrs,
-                instance.bodySubstrStarts
+            uint headerHashCommit,
+            uint publicKeyHash,
+            string[] memory headerSubstrs,
+            uint[] memory headerSubstrStarts,
+            string[] memory bodySubstrs,
+            uint[] memory bodySubstrStarts
+        ) = abi.decode(
+                instance,
+                (uint, uint, string[], uint[], string[], uint[])
             );
         uint rlc = 0;
-        uint coeff = instance.headerHashCommit;
-        (rlc, coeff) = computeRLC(
-            rlc,
-            coeff,
-            instance.headerHashCommit,
-            headerMaskedChars
+        uint coeff = headerHashCommit;
+        bytes memory maskedChars;
+        bytes memory substrIds;
+        (maskedChars, substrIds) = getMaskedCharsAndIds(
+            maxHeaderBytes,
+            headerSubstrs,
+            headerSubstrStarts
         );
-        (rlc, coeff) = computeRLC(
-            rlc,
-            coeff,
-            instance.headerHashCommit,
-            headerSubstrIds
+        (rlc, coeff) = computeRLC(rlc, coeff, headerHashCommit, maskedChars);
+        (rlc, coeff) = computeRLC(rlc, coeff, headerHashCommit, substrIds);
+        (maskedChars, substrIds) = getMaskedCharsAndIds(
+            maxBodyBytes,
+            bodySubstrs,
+            bodySubstrStarts
         );
-        (rlc, coeff) = computeRLC(
-            rlc,
-            coeff,
-            instance.headerHashCommit,
-            bodyMaskedChars
-        );
-        (rlc, coeff) = computeRLC(
-            rlc,
-            coeff,
-            instance.headerHashCommit,
-            bodySubstrIds
-        );
+        (rlc, coeff) = computeRLC(rlc, coeff, headerHashCommit, maskedChars);
+        (rlc, coeff) = computeRLC(rlc, coeff, headerHashCommit, substrIds);
 
         VerifierBase verifier = VerifierBase(verifierBase);
         uint[] memory pubInputs = new uint[](3);
-        pubInputs[0] = instance.headerHashCommit;
-        pubInputs[1] = instance.publicKeyHash;
+        pubInputs[0] = headerHashCommit;
+        pubInputs[1] = publicKeyHash;
         pubInputs[2] = rlc;
         require(verifier.verify(pubInputs, proof), "invalid proof");
         // (bool success, bytes memory res) = address(verifier).staticcall(
