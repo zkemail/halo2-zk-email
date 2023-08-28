@@ -6,6 +6,7 @@ use crate::{default_config_params, DefaultEmailVerifyPublicInput};
 use crate::utils::get_email_substrs;
 use crate::vrm::DecomposedRegexConfig;
 use crate::EMAIL_VERIFY_CONFIG_ENV;
+use ark_std::{end_timer, start_timer};
 use cfdkim::{canonicalize_signed_email, resolve_public_key};
 use ethereum_types::Address;
 use halo2_base::halo2_proofs::circuit::Value;
@@ -277,8 +278,10 @@ pub fn evm_prove<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str
         ProvingKey::<G1Affine>::read::<_, C>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
     // let (circuit, headerhash, public_key_n, header_substrs, body_substrs) = gen_circuit_from_email_path(email_path).await;
+    let timer = start_timer!(|| "generate evm proof");
     let instances = circuit.instances();
     let proof = gen_evm_proof_shplonk(&params, &pk, circuit, instances, &mut OsRng);
+    end_timer!(timer);
     {
         // let proof_hex = hex::encode(&proof);
         // let mut file = File::create(proof_path)?;

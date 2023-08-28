@@ -13,7 +13,6 @@
 
 /target
 /build
-/test_data/*.txt
 /*.bin
 /*.hex
 /*.sol
