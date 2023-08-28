@@ -367,10 +367,10 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                     .chars_shift_config
                     .shift(ctx, &gate, &header_result.regex.masked_characters, &header_result.regex.all_substr_ids);
                 for (a, b) in extracted_bodyhash.iter().zip(body_result.encoded_hash.iter()) {
-                    ctx.region.constrain_equal(a.cell(), b.cell())?;
+                    gate.assert_equal(ctx, QuantumCell::Existing(a), QuantumCell::Existing(b));
                 }
 
-                /// 5. Compute public input values.
+                // 5. Compute public input values.
                 let poseidon = PoseidonChipBn254_8_58::new(ctx, &gate);
                 let sign_rand = poseidon.hash_elements(ctx, &gate, &assigned_signature.c.limbs()).unwrap().0[0].clone();
                 let header_hash_commit = assigned_commit_wtns_bytes(ctx, &gate, &poseidon, &sign_rand, &header_result.hash_bytes);

@@ -2,14 +2,17 @@ use std::collections::HashMap;
 
 use crate::regex_sha2::RegexSha2Config;
 use base64::{engine::general_purpose, Engine as _};
-use halo2_base::halo2_proofs::{
-    circuit::{AssignedCell, Layouter, Region},
-    plonk::{ConstraintSystem, Error},
-};
 use halo2_base::{
     gates::{flex_gate::FlexGateConfig, range::RangeConfig, RangeInstructions},
     utils::PrimeField,
     Context,
+};
+use halo2_base::{
+    halo2_proofs::{
+        circuit::{AssignedCell, Layouter, Region},
+        plonk::{ConstraintSystem, Error},
+    },
+    AssignedValue,
 };
 use halo2_base64::Base64Config;
 use halo2_dynamic_sha256::Sha256DynamicConfig;
@@ -26,7 +29,7 @@ pub struct RegexSha2Base64Result<'a, F: PrimeField> {
     /// The output of [`AssignedRegexResult`].
     pub regex: AssignedRegexResult<'a, F>,
     /// The assigned bytes of the base64 encoded SHA256 hash value constrained in [`Sha256DynamicConfig`].
-    pub encoded_hash: Vec<AssignedCell<F, F>>,
+    pub encoded_hash: Vec<AssignedValue<'a, F>>,
     /// The actual bytes of the base64 encoded SHA256 hash value.
     pub encoded_hash_value: Vec<u8>,
 }
@@ -61,7 +64,7 @@ impl<F: PrimeField> RegexSha2Base64Config<F> {
             range_config,
             regex_defs,
         );
-        let base64_config = Base64Config::configure(meta);
+        let base64_config = Base64Config::configure(meta, 32);
         Self { regex_sha2, base64_config }
     }
 
@@ -90,14 +93,15 @@ impl<F: PrimeField> RegexSha2Base64Config<F> {
             .encode_slice(&actual_hash, &mut hash_base64)
             .expect("fail to convert the hash bytes into the base64 strings");
         debug_assert_eq!(bytes_written, 44);
-        let base64_result = self.base64_config.assign_values(&mut ctx.region, &hash_base64)?;
-        debug_assert_eq!(base64_result.decoded.len(), 32);
-        for (assigned_hash, assigned_decoded) in regex_sha2_result.hash_bytes.into_iter().zip(base64_result.decoded.into_iter()) {
-            ctx.region.constrain_equal(assigned_hash.cell(), assigned_decoded.cell())?;
-        }
+        let encoded_hash = self.base64_config.encode(ctx, &sha256_config.range().gate(), &regex_sha2_result.hash_bytes)?;
+        // let base64_result = self.base64_config.assign_values(&mut ctx.region, &hash_base64)?;
+        debug_assert_eq!(encoded_hash.len(), 44);
+        // for (assigned_hash, assigned_decoded) in regex_sha2_result.hash_bytes.into_iter().zip(base64_result.decoded.into_iter()) {
+        //     ctx.region.constrain_equal(assigned_hash.cell(), assigned_decoded.cell())?;
+        // }
         let result = RegexSha2Base64Result {
             regex: regex_sha2_result.regex,
-            encoded_hash: base64_result.encoded,
+            encoded_hash: encoded_hash,
             encoded_hash_value: hash_base64,
         };
         Ok(result)

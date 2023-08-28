@@ -25,7 +25,7 @@ enum Commands {
         params_path: String,
     },
     /// Generate proving keys and verifying keys.
-    GenPkAndVk {
+    GenKeys {
         /// setup parameters path
         #[arg(short, long, default_value = "./build/params.bin")]
         params_path: String,
@@ -115,6 +115,9 @@ enum Commands {
         /// soldity files directory
         #[arg(short, long, default_value = "./build/sols")]
         sols_dir: String,
+        /// the maximum bytes size of each output Solidity code.
+        #[arg(short, long)]
+        max_line_size_per_file: Option<usize>,
     },
     EVMVerify {
         #[arg(short, long, default_value = "./configs/default_app.config")]
@@ -144,7 +147,7 @@ async fn main() {
     let cli = Cli::parse();
     match cli.command {
         Commands::GenParams { k, params_path } => gen_params(&params_path, k).unwrap(),
-        Commands::GenPkAndVk {
+        Commands::GenKeys {
             params_path,
             circuit_config_path,
             email_path,
@@ -201,8 +204,9 @@ async fn main() {
             circuit_config_path,
             vk_path,
             sols_dir,
+            max_line_size_per_file,
         } => {
-            gen_evm_verifier::<DefaultEmailVerifyCircuit<Fr>>(&params_path, &circuit_config_path, &vk_path, &sols_dir).unwrap();
+            gen_evm_verifier::<DefaultEmailVerifyCircuit<Fr>>(&params_path, &circuit_config_path, &vk_path, &sols_dir, max_line_size_per_file).unwrap();
         }
         Commands::EVMVerify {
             circuit_config_path,

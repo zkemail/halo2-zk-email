@@ -383,7 +383,14 @@ pub fn evm_prove<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str
 /// * `circuit_config_path` - a file path of the configuration of the email verification circuit.
 /// * `vk_path` - a file path of the verifying key.
 /// * `sols_path` - a directory path of the output Solidity codes.
-pub fn gen_evm_verifier<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str, vk_path: &str, sols_dir: &str) -> Result<(), Error> {
+/// * `max_line_size_per_file` - the maximum bytes size of each output Solidity code.
+pub fn gen_evm_verifier<C: CircuitExt<Fr>>(
+    params_path: &str,
+    circuit_config_path: &str,
+    vk_path: &str,
+    sols_dir: &str,
+    max_line_size_per_file: Option<usize>,
+) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let mut params = {
         let f = File::open(Path::new(params_path)).unwrap();
@@ -399,7 +406,7 @@ pub fn gen_evm_verifier<C: CircuitExt<Fr>>(params_path: &str, circuit_config_pat
         let mut reader = BufReader::new(f);
         VerifyingKey::<G1Affine>::read::<_, C>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
-    let max_line_size_per_file = 100 * 1000;
+    let max_line_size_per_file = max_line_size_per_file.unwrap_or(100 * 1000);
     if PathBuf::new().join(sols_dir).exists() {
         fs::remove_dir_all(sols_dir).unwrap();
     }
@@ -608,7 +615,7 @@ mod test {
             let result = verify::<DefaultEmailVerifyCircuit<Fr>>(params_path, circuit_config_path, vk_path, proof_path, public_input_path).unwrap();
             assert!(result);
             evm_prove(params_path, circuit_config_path, pk_path, evm_proof_path, circuit.clone()).unwrap();
-            gen_evm_verifier::<DefaultEmailVerifyCircuit<Fr>>(params_path, circuit_config_path, vk_path, sols_dir).unwrap();
+            gen_evm_verifier::<DefaultEmailVerifyCircuit<Fr>>(params_path, circuit_config_path, vk_path, sols_dir, None).unwrap();
         });
         evm_verify(circuit_config_path, sols_dir, evm_proof_path, public_input_path).await.unwrap();
     }
