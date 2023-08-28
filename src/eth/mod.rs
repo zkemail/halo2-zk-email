@@ -73,7 +73,7 @@ pub type EthersClient = Arc<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>
 // original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L58-L86
 pub async fn setup_eth_backend() -> AnvilInstance {
     // Launch anvil
-    let anvil = Anvil::new().arg("--gas-limit").arg("1125899906842624").spawn();
+    let anvil = Anvil::new().arg("--gas-limit").arg("100000000").spawn();
     anvil
 }
 
