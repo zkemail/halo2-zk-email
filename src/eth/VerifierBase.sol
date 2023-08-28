@@ -24,7 +24,6 @@ contract VerifierBase {
     ) public view returns (bool) {
         bool success = true;
         bytes32[<%max_transcript_addr%>] memory transcript;
-        // bytes32[] memory transcript = new bytes32[](maxTranscriptAddr);
         for (uint i = 0; i < pubInputs.length; i++) {
             require(
                 pubInputs[i] < SIZE_LIMIT,
@@ -39,18 +38,6 @@ contract VerifierBase {
         }
         VerifierFuncAbst verifier;
         for (uint i = 0; i < numVerifierFuncs; i++) {
-            // (bool callSuccess, bytes memory callData) = verifierFuncs[i]
-            //     .delegatecall(
-            //         abi.encodeWithSignature(
-            //             "verifyPartial(uint256[],bytes,bool,bytes32[])",
-            //             pubInputs,
-            //             proof,
-            //             success,
-            //             transcript
-            //         )
-            //     );
-            // require(callSuccess);
-            // (success, newTranscript) = abi.decode(callData, (bool));
             verifier = VerifierFuncAbst(verifierFuncs[i]);
             (success, transcript) = verifier
                 .verifyPartial(pubInputs, proof, success, transcript);

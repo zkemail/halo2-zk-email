@@ -9,24 +9,9 @@ contract VerifierFunc<%ID%> is VerifierFuncAbst {
         bool success,
         bytes32[<%max_transcript_addr%>] memory transcript
     ) public view override returns (bool, bytes32[<%max_transcript_addr%>] memory) {
-        // bytes32[<%max_transcript_addr%>] memory transcript;
-        // require(_transcript.length == <%max_transcript_addr%>, "transcript length is not <%max_transcript_addr%>");
-        // if(_transcript.length != 0) {
-        //     transcript = abi.decode(_transcript, (bytes32[<%max_transcript_addr%>]));
-        // }
-        // for(uint i=0; i<_transcript.length; i++) {
-        //     transcript[i] = _transcript[i];
-        // }
-        
         assembly {{
             <%ASSEMBLY%>
         }}
-        // bytes memory transcriptBytes = abi.encode(transcript);
-        // bytes32[] memory newTranscript = new bytes32[](<%max_transcript_addr%>);
-        // for(uint i=0; i<_transcript.length; i++) {
-        //     newTranscript[i] = transcript[i];
-        // }
-        // require(newTranscript.length == <%max_transcript_addr%>, "newTranscript length is not <%max_transcript_addr%>");
         return (success, transcript);
     } 
 }
