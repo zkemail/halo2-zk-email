@@ -19,84 +19,6 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
 
-// pub fn gen_sol_verifiers(params: &ParamsKZG<Bn256>, vks: &[VerifyingKey<G1Affine>], max_line_size_per_file: usize, sols_dir: &PathBuf) {
-//     let store_sols = |sols: Vec<String>, dir_name: &str, max_transcript_addr: u32| {
-//         let dir = sols_dir.join(dir_name);
-//         fs::create_dir_all(&dir).unwrap();
-//         for (idx, sol) in sols.iter().enumerate() {
-//             let mut file = File::create(dir.join(format!("VerifierFunc{}.sol", idx))).unwrap();
-//             file.write_all(sol.as_bytes()).unwrap();
-//         }
-//         let deploy_params = DeployParamsJson {
-//             max_transcript_addr,
-//             num_func_contracts: sols.len(),
-//         };
-//         let mut json_file = File::create(dir.join("deploy_params.json")).unwrap();
-//         json_file.write_all(serde_json::to_string_pretty(&deploy_params).unwrap().as_bytes()).unwrap();
-//     };
-//     let config_params = default_config_params();
-//     let mut vk_idx = 0;
-//     let sha2_header_yul = gen_evm_verifier_yul::<Sha256HeaderCircuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
-//     let (sha2_header_sols, sha2_header_max) = gen_evm_verifier_sols_from_yul(&sha2_header_yul, max_line_size_per_file).unwrap();
-//     vk_idx += 1;
-//     store_sols(sha2_header_sols, "sha2_header", sha2_header_max);
-//     let sign_verify_yul = gen_evm_verifier_yul::<SignVerifyCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-//     let (sign_verify_sols, sign_verify_max) = gen_evm_verifier_sols_from_yul(&sign_verify_yul, max_line_size_per_file).unwrap();
-//     vk_idx += 1;
-//     store_sols(sign_verify_sols, "sign_verify", sign_verify_max);
-//     let regex_header_yul = gen_evm_verifier_yul::<RegexHeaderCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-//     let (regex_header_sols, regex_header_max) = gen_evm_verifier_sols_from_yul(&regex_header_yul, max_line_size_per_file).unwrap();
-//     vk_idx += 1;
-//     store_sols(regex_header_sols, "regex_header", regex_header_max);
-//     if config_params.header_config.as_ref().unwrap().expose_substrs.unwrap_or(false) {
-//         let sha2_header_masked_chars_yul = gen_evm_verifier_yul::<Sha256HeaderMaskedCharsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-//         let (sha2_header_masked_chars_sols, sha2_header_masked_chars_max) = gen_evm_verifier_sols_from_yul(&sha2_header_masked_chars_yul, max_line_size_per_file).unwrap();
-//         vk_idx += 1;
-//         store_sols(sha2_header_masked_chars_sols, "sha2_header_masked_chars", sha2_header_masked_chars_max);
-//         let sha2_header_substr_ids_yul = gen_evm_verifier_yul::<Sha256HeaderSubstrIdsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-//         let (sha2_header_substr_ids_sols, sha2_header_substr_ids_max) = gen_evm_verifier_sols_from_yul(&sha2_header_substr_ids_yul, max_line_size_per_file).unwrap();
-//         vk_idx += 1;
-//         store_sols(sha2_header_substr_ids_sols, "sha2_header_substr_ids", sha2_header_substr_ids_max);
-//     }
-//     if let Some(body_configs) = config_params.body_config.as_ref() {
-//         let regex_bodyhash_yul = gen_evm_verifier_yul::<RegexBodyHashCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-//         let (regex_bodyhash_sols, regex_bodyhash_max) = gen_evm_verifier_sols_from_yul(&regex_bodyhash_yul, max_line_size_per_file).unwrap();
-//         vk_idx += 1;
-//         store_sols(regex_bodyhash_sols, "regex_bodyhash", regex_bodyhash_max);
-//         let chars_shift_bodyhash_yul = gen_evm_verifier_yul::<CharsShiftBodyHashCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-//         let (chars_shift_bodyhash_sols, chars_shift_bodyhash_max) = gen_evm_verifier_sols_from_yul(&chars_shift_bodyhash_yul, max_line_size_per_file).unwrap();
-//         vk_idx += 1;
-//         store_sols(chars_shift_bodyhash_sols, "chars_shift_bodyhash", chars_shift_bodyhash_max);
-//         let sha2_body_yul = gen_evm_verifier_yul::<Sha256BodyCircuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
-//         let (sha2_body_sols, sha2_body_max) = gen_evm_verifier_sols_from_yul(&sha2_body_yul, max_line_size_per_file).unwrap();
-//         vk_idx += 1;
-//         store_sols(sha2_body_sols, "sha2_body", sha2_body_max);
-//         let base64_yul = gen_evm_verifier_yul::<Base64Circuit<Fr>>(params, &vks[vk_idx], vec![2usize]);
-//         let (base64_sols, base64_max) = gen_evm_verifier_sols_from_yul(&base64_yul, max_line_size_per_file).unwrap();
-//         vk_idx += 1;
-//         store_sols(base64_sols, "base64", base64_max);
-//         let regex_body_yul = gen_evm_verifier_yul::<RegexBodyCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-//         let (regex_body_sols, regex_body_max) = gen_evm_verifier_sols_from_yul(&regex_body_yul, max_line_size_per_file).unwrap();
-//         vk_idx += 1;
-//         store_sols(regex_body_sols, "regex_body", regex_body_max);
-//         if body_configs.expose_substrs.unwrap_or(false) {
-//             let sha2_body_masked_chars_yul = gen_evm_verifier_yul::<Sha256BodyMaskedCharsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-//             let (sha2_body_masked_chars_sols, sha2_body_masked_chars_max) = gen_evm_verifier_sols_from_yul(&sha2_body_masked_chars_yul, max_line_size_per_file).unwrap();
-//             vk_idx += 1;
-//             store_sols(sha2_body_masked_chars_sols, "sha2_body_masked_chars", sha2_body_masked_chars_max);
-//             let sha2_body_substr_ids_yul = gen_evm_verifier_yul::<Sha256BodySubstrIdsCircuit<Fr>>(params, &vks[vk_idx], vec![3usize]);
-//             let (sha2_body_substr_ids_sols, sha2_body_substr_ids_max) = gen_evm_verifier_sols_from_yul(&sha2_body_substr_ids_yul, max_line_size_per_file).unwrap();
-//             store_sols(sha2_body_substr_ids_sols, "sha2_body_substr_ids", sha2_body_substr_ids_max);
-//         }
-//     }
-//     let email_verifier_sol = include_str!("./EmailVerifier.sol");
-//     fs::write(sols_dir.join("EmailVerifier.sol"), email_verifier_sol).unwrap();
-//     let verifier_base_sol = include_str!("./VerifierBase.sol");
-//     fs::write(sols_dir.join("VerifierBase.sol"), verifier_base_sol).unwrap();
-//     let verifier_func_abst_sol = include_str!("./VerifierFuncAbst.sol");
-//     fs::write(sols_dir.join("VerifierFuncAbst.sol"), verifier_func_abst_sol).unwrap();
-// }
-
 pub fn gen_sol_verifiers(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, max_line_size_per_file: usize, sols_dir: &PathBuf) {
     let yul = gen_evm_verifier_yul::<DefaultEmailVerifyCircuit<Fr>>(params, vk, vec![3usize]);
     let (sols, max_transcript_addr) = gen_evm_verifier_sols_from_yul(&yul, max_line_size_per_file).unwrap();
@@ -184,14 +106,11 @@ pub fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) 
     }
 
     let num_pubinputs = if let Some(s) = start { end.unwrap() - s } else { 0 };
-    // println!("num_pubinputs {}", num_pubinputs);
     let mut max_pubinputs_addr = 0;
     if num_pubinputs > 0 {
         max_pubinputs_addr = num_pubinputs * 32 - 32;
     }
-    // println!("max_pubinputs_addr {}", max_pubinputs_addr);
 
-    // let file = File::open(input_file)?;
     let reader = BufReader::new(yul.as_bytes());
     let mut modified_lines: Vec<String> = Vec::new();
 
@@ -210,11 +129,9 @@ pub fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) 
 
             if addr_as_num <= max_pubinputs_addr {
                 let pub_addr = format!("{:#x}", addr_as_num + 32);
-                // println!("pub_addr {}", pub_addr);
                 line = line.replace(calldata_and_addr, &format!("mload(add(pubInputs, {}))", pub_addr));
             } else {
                 let proof_addr = format!("{:#x}", addr_as_num - max_pubinputs_addr);
-                // println!("proof_addr {}", proof_addr);
                 line = line.replace(calldata_and_addr, &format!("mload(add(proof, {}))", proof_addr));
             }
         }
@@ -226,7 +143,6 @@ pub fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) 
             let addr_as_num = u32::from_str_radix(addr, 10)?;
             let transcript_addr = format!("{:#x}", addr_as_num);
             transcript_addrs.push(addr_as_num);
-            // [TODO] Check mstore8 -> sstore is OK.
             line = line.replace(mstore, &format!("mstore8(add(transcript, {})", transcript_addr));
         }
 
@@ -352,14 +268,6 @@ pub fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) 
     let mut outputs = vec![];
     // get the max transcript addr
     let max_transcript_addr = transcript_addrs.iter().max().unwrap() / 32;
-    // {
-    //     // let mut storage_file = File::create(output_dir.join("VerifierBase.sol"))?;
-    //     let mut template = include_str!("./VerifierBase.sol").to_string();
-    //     // template = template.replace("<%name%>", &format!("{}", max_transcript_addr));
-    //     template = template.replace("<%max_transcript_addr%>", &format!("{}", max_transcript_addr));
-    //     outputs.push(template);
-    //     // storage_file.write_all(template.as_bytes())?;
-    // }
 
     let mut blocks = vec![];
     let mut is_nest = false;
@@ -386,7 +294,6 @@ pub fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) 
     }
 
     let mut codes = String::new();
-    // let mut write = BufWriter::new(File::create(output_dir.join(format!("VerifierFunc{}.sol", func_idx)))?);
     let mut func_idx = 0;
     let declares = r"
             let f_p
@@ -446,8 +353,6 @@ pub fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) 
             template = template.replace("<%max_transcript_addr%>", &format!("{}", max_transcript_addr));
             template = template.replace("<%ID%>", &format!("{}", func_idx));
             template = template.replace("<%ASSEMBLY%>", &codes);
-            // let mut func_file = File::create(output_dir.join(format!("VerifierFunc{}.sol", func_idx)))?;
-            // func_file.write_all(template.as_bytes())?;
             outputs.push(template);
             codes = declares.to_string();
             func_idx += 1;
@@ -460,38 +365,6 @@ pub fn gen_evm_verifier_sols_from_yul(yul: &str, max_line_size_per_file: usize) 
         template = template.replace("<%ID%>", &format!("{}", func_idx));
         template = template.replace("<%ASSEMBLY%>", &codes);
         outputs.push(template);
-        // let mut func_file = File::create(output_dir.join(format!("VerifierFunc{}.sol", func_idx)))?;
-        // func_file.write_all(template.as_bytes())?;
     }
-    // let template = include_str!("./EmailVerifier.sol").to_string();
-    // let mut func_file = File::create(output_dir.join("EmailVerifier.sol"))?;
-    // func_file.write_all(template.as_bytes())?;
-
-    // let mut contract = format!(
-    //     "// SPDX-License-Identifier: MIT
-    // pragma solidity ^0.8.17;
-
-    // contract Verifier {{
-    //     function verify(
-    //         uint256[] memory pubInputs,
-    //         bytes memory proof
-    //     ) public view returns (bool) {{
-    //         bool success = true;
-    //         bytes32[{}] memory transcript;
-    //         assembly {{
-    //     ",
-    //     max_transcript_addr
-    // )
-    // .trim()
-    // .to_string();
-
-    // using a boxed Write trait object here to show it works for any Struct impl'ing Write
-    // you may also use a std::fs::File here
-    // let mut write: Box<&mut dyn std::fmt::Write> = Box::new(&mut contract);
-
-    // for line in modified_lines[16..modified_lines.len() - 7].iter() {
-    //     write!(write, "{}", line).unwrap();
-    // }
-    // writeln!(write, "}} return success; }} }}")?;
     Ok((outputs, max_transcript_addr))
 }

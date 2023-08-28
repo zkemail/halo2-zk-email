@@ -47,10 +47,10 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-/// The number of limbs of the accumulator in the aggregation circuit.
-pub const NUM_ACC_INSTANCES: usize = 4 * LIMBS;
-/// The name of env variable for the path to the configuration json of the aggregation circuit.
-pub const VERIFY_CONFIG_KEY: &'static str = "VERIFY_CONFIG";
+// /// The number of limbs of the accumulator in the aggregation circuit.
+// pub const NUM_ACC_INSTANCES: usize = 4 * LIMBS;
+// /// The name of env variable for the path to the configuration json of the aggregation circuit.
+// pub const VERIFY_CONFIG_KEY: &'static str = "VERIFY_CONFIG";
 
 /// Generate SRS parameters.
 ///
@@ -93,7 +93,7 @@ pub fn downsize_params(original_params_path: &str, new_params_path: &str, k: u32
 /// * `pk_path` - a file path of the output proving key.
 /// * `vk_path` - a file path of the output verifying key.
 /// * `circuit` - an email verification circuit.
-pub fn gen_pk_and_vk<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str, pk_path: &str, vk_path: &str, circuit: C) -> Result<(), Error> {
+pub fn gen_keys<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str, pk_path: &str, vk_path: &str, circuit: C) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
 
     let mut params = {
@@ -220,6 +220,16 @@ pub fn prove<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str, pk
     Ok(())
 }
 
+/// Verify a proof for the email verification circuit.
+///
+/// # Arguments
+/// * `params_path` - a file path of the SRS parameters.
+/// * `circuit_config_path` - a file path of the configuration of the email verification circuit.
+/// * `vk_path` - a file path of the verifying key.
+/// * `proof_path` - a file path of the proof.
+/// * `public_input_path` - a file path of the public input.
+/// # Return values
+/// Return `true` if the proof is valid, otherwise `false`.
 pub fn verify<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str, vk_path: &str, proof_path: &str, public_input_path: &str) -> Result<bool, Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let params = {
@@ -372,8 +382,7 @@ pub fn evm_prove<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str
 /// * `params_path` - a file path of the SRS parameters.
 /// * `circuit_config_path` - a file path of the configuration of the email verification circuit.
 /// * `vk_path` - a file path of the verifying key.
-/// * `bytecode_path` - a file path of the output yul bytecode.
-/// * `solidity_path` - a file path of the output Solidity code.
+/// * `sols_path` - a directory path of the output Solidity codes.
 pub fn gen_evm_verifier<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str, vk_path: &str, sols_dir: &str) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let mut params = {
@@ -458,7 +467,7 @@ pub fn gen_evm_verifier<C: CircuitExt<Fr>>(params_path: &str, circuit_config_pat
 ///
 /// # Arguments
 /// * `circuit_config_path` - a file path of the configuration of the email verification circuit.
-/// * `bytecode_path` - a file path of the yul bytecode.
+/// * `sols_dir` - a directory path of
 /// * `proof_path` - a file path of the proof for the email verification circuit.
 /// * `instances` - instances (public inputs) for the email verification circuit.
 ///
@@ -594,7 +603,7 @@ mod test {
             let public_input = circuit.gen_default_public_input();
             public_input.write_file(&public_input_path);
             gen_params(params_path, config_params.degree).unwrap();
-            gen_pk_and_vk(params_path, circuit_config_path, pk_path, vk_path, circuit.clone()).unwrap();
+            gen_keys(params_path, circuit_config_path, pk_path, vk_path, circuit.clone()).unwrap();
             prove(params_path, circuit_config_path, pk_path, proof_path, circuit.clone()).unwrap();
             let result = verify::<DefaultEmailVerifyCircuit<Fr>>(params_path, circuit_config_path, vk_path, proof_path, public_input_path).unwrap();
             assert!(result);

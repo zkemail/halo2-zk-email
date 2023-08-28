@@ -9,6 +9,7 @@ use halo2_base::{AssignedValue, QuantumCell};
 use halo2_dynamic_sha256::Sha256DynamicConfig;
 use halo2_rsa::{AssignedRSAPublicKey, AssignedRSASignature, RSAConfig, RSAInstructions, RSAPubE, RSAPublicKey, RSASignature};
 
+/// Configuration to verify the RSA signature.
 #[derive(Debug, Clone)]
 pub struct SignVerifyConfig<F: PrimeField> {
     /// Configuration for [`RSAConfig`].
@@ -18,20 +19,52 @@ pub struct SignVerifyConfig<F: PrimeField> {
 pub const LIMB_BITS: usize = 64;
 
 impl<F: PrimeField> SignVerifyConfig<F> {
+    /// Construct a new [`SignVerifyConfig`].
+    ///
+    /// # Arguments
+    /// * `range_config` - a configuration for [`RangeConfig`].
+    /// * `public_key_bits` - the number of bits of RSA public key.
+    /// # Return values
+    /// Return a new [`SignVerifyConfig`].
     pub fn configure(range_config: RangeConfig<F>, public_key_bits: usize) -> Self {
         let biguint_config = halo2_rsa::BigUintConfig::construct(range_config, LIMB_BITS);
         let rsa_config = RSAConfig::construct(biguint_config, public_key_bits, 5);
         Self { rsa_config }
     }
 
+    /// Assign the given RSA public key.
+    ///
+    /// # Arguments
+    /// * `ctx` - a region context.
+    /// * `public_key` - an RSA public key.
+    /// # Return values
+    /// Return an assigned RSA public key.
     pub fn assign_public_key<'v>(&self, ctx: &mut Context<'v, F>, public_key: RSAPublicKey<F>) -> Result<AssignedRSAPublicKey<'v, F>, Error> {
         self.rsa_config.assign_public_key(ctx, public_key)
     }
 
+    /// Assign the given RSA signature.
+    ///
+    /// # Arguments
+    /// * `ctx` - a region context.
+    /// * `signature` - an RSA signature.
+    /// # Return values
+    /// Return an assigned RSA signature.
     pub fn assign_signature<'v>(&self, ctx: &mut Context<'v, F>, signature: RSASignature<F>) -> Result<AssignedRSASignature<'v, F>, Error> {
         self.rsa_config.assign_signature(ctx, signature)
     }
 
+    /// Verify the given RSA signature with the given RSA public key and the given assgined bytes.
+    ///
+    /// # Arguments
+    /// * `ctx` - a region context.
+    /// * `hash_bytes` - a list of the assigned bytes.
+    /// * `public_key` - an RSA public key.
+    /// * `signature` - an RSA signature.
+    /// # Return values
+    /// Return a tuple of the assigned RSA public key and the assigned RSA signature.
+    /// # Notes
+    /// The constraints are not satisfied if the given RSA signature is invalid.
     pub fn verify_signature<'v: 'a, 'a>(
         &self,
         ctx: &mut Context<'v, F>,

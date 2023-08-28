@@ -83,81 +83,12 @@ use std::io::{Read, Write};
 /// The name of env variable for the path to the email configuration json.
 pub const EMAIL_VERIFY_CONFIG_ENV: &'static str = "EMAIL_VERIFY_CONFIG";
 
-// /// Configuration parameters for [`Sha256DynamicConfig`]
-// #[derive(serde::Serialize, serde::Deserialize)]
-// pub struct Sha256ConfigParams {
-//     /// The bits of lookup table. It must be a divisor of 16, i.e., 1, 2, 4, 8, and 16.
-//     pub num_bits_lookup: usize,
-//     /// The number of advice columns used to assign values in [`Sha256DynamicConfig`].
-//     /// Specifying a larger number of columns increases the verification cost and decreases the proving cost.
-//     pub num_advice_columns: usize,
-// }
-
-// /// Configuration parameters for [`RegexSha2Config`].
-// #[derive(serde::Serialize, serde::Deserialize)]
-// pub struct HeaderConfigParams {
-//     pub bodyhash_allstr_filepath: String,
-//     pub bodyhash_substr_filepath: String,
-//     pub allstr_filepathes: Vec<String>,
-//     pub substr_filepathes: Vec<Vec<String>>,
-//     pub max_variable_byte_size: usize,
-//     pub substr_regexes: Vec<Vec<String>>,
-//     /// The bytes of the skipped email header that do not satisfy the regexes.
-//     /// It must be multiple of 64 and less than `max_variable_byte_size`.
-//     pub skip_prefix_bytes_size: Option<usize>,
-// }
-
-// /// Configuration parameters for [`RegexSha2Base64Config`].
-// #[derive(serde::Serialize, serde::Deserialize)]
-// pub struct BodyConfigParams {
-//     pub allstr_filepathes: Vec<String>,
-//     pub substr_filepathes: Vec<Vec<String>>,
-//     pub max_variable_byte_size: usize,
-//     pub substr_regexes: Vec<Vec<String>>,
-//     /// The bytes of the skipped email body that do not satisfy the regexes.
-//     /// It must be multiple of 64 and less than `max_variable_byte_size`.
-//     pub skip_prefix_bytes_size: Option<usize>,
-// }
-
-// /// Configuration parameters for [`SignVerifyConfig`].
-// #[derive(serde::Serialize, serde::Deserialize)]
-// pub struct SignVerifyConfigParams {
-//     /// The bits of RSA public key.
-//     pub public_key_bits: usize,
-// }
-
-// /// Configuration parameters for [`DefaultEmailVerifyCircuit`].
-// ///
-// /// Although the types of some parameters are defined as [`Option`], you will get an error if they are omitted for [`DefaultEmailVerifyCircuit`].
-// /// You can build a circuit that accepts the same format configuration file except that some parameters are omitted.
-// #[derive(serde::Serialize, serde::Deserialize)]
-// pub struct DefaultEmailVerifyConfigParams {
-//     /// The degree of the number of rows, i.e., 2^(`degree`) rows are set.
-//     pub degree: u32,
-//     /// The number of advice columns in [`FlexGateConfig`].
-//     pub num_flex_advice: usize,
-//     /// The number of advice columns for lookup constraints in [`RangeConfig`].
-//     pub num_range_lookup_advice: usize,
-//     /// The number of fix columns in [`FlexGateConfig`].
-//     pub num_flex_fixed: usize,
-//     /// The bits of lookup table in [`RangeConfig`], which must be less than `degree`.
-//     pub range_lookup_bits: usize,
-//     /// Configuration parameters for [`Sha256DynamicConfig`].
-//     pub sha256_config: Option<Sha256ConfigParams>,
-//     /// Configuration parameters for [`SignVerifyConfig`].
-//     pub sign_verify_config: Option<SignVerifyConfigParams>,
-//     /// Configuration parameters for [`RegexSha2Config`].
-//     pub header_config: Option<HeaderConfigParams>,
-//     /// Configuration parameters for [`RegexSha2Base64Config`].
-//     pub body_config: Option<BodyConfigParams>,
-// }
-
 /// Public input definition of [`DefaultEmailVerifyCircuit`].
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DefaultEmailVerifyPublicInput {
-    /// A hex string of the SHA256 hash computed from the email header.
+    /// A decimal string of a commitment of the email header defined as poseidon(poseidon(rsaSign), sha256(headerBytes)).
     pub header_hash_commit: String,
-    /// A hex string of the n parameter in the RSA public key. (The e parameter is fixed to 65537.)
+    /// A decimal string of the poseidon hash of the `n` parameter in the RSA public key. (The e parameter is fixed to 65537.)
     pub public_key_hash: String,
     /// The start position of the substrings in the email header.
     pub header_starts: Vec<usize>,
@@ -173,8 +104,8 @@ impl DefaultEmailVerifyPublicInput {
     /// Create a public input for [`DefaultEmailVerifyCircuit`].
     ///
     /// # Arguments
-    /// * `headerhash` - a hex string of the SHA256 hash computed from the email header.
-    /// * `public_key_n` - a hex string of the n parameter in the RSA public key.
+    /// * `header_hash_commit` - a decimal string of a commitment of the email header defined as poseidon(poseidon(rsaSign), sha256(headerBytes)).
+    /// * `public_key_hash` - a decimal string of the poseidon hash of the `n` parameter in the RSA public key.
     /// * `header_substrs` a vector of (the start position, the bytes) of the substrings in the email header.
     /// * `body_starts` - a vector of (the start position, the bytes) of the substrings in the email body.
     /// # Return values
@@ -227,6 +158,7 @@ impl DefaultEmailVerifyPublicInput {
         file.flush().unwrap();
     }
 
+    /// Output a vector of field values in the instance column.
     pub fn instances<F: PrimeField>(&self) -> Vec<F> {
         let header_hash_commit = F::from_str_vartime(&self.header_hash_commit).unwrap();
         let public_key_hash = F::from_str_vartime(&self.public_key_hash).unwrap();
@@ -277,22 +209,17 @@ pub struct DefaultEmailVerifyConfig<F: PrimeField> {
     pub header_config: RegexSha2Config<F>,
     pub body_config: RegexSha2Base64Config<F>,
     pub chars_shift_config: CharsShiftConfig<F>,
-    /// An instance column for the SHA256 hash of the all public inputs, i.e., the SHA256 hash of the email header, the base64 encoded SHA256 hash of the email body, the RSA public key, and the substrings and their ids in the email header and body.
+    /// An instance column that contains a commitment of the email header, a hash of the public key `n` parameter, and a random linear combination of the masked characters and their substring ids in the email header and body.
     pub instances: Column<Instance>,
 }
 
 /// Default email verification circuit.
 #[derive(Debug, Clone)]
 pub struct DefaultEmailVerifyCircuit<F: PrimeField> {
-    // /// Email header bytes.
-    // pub header_bytes: Vec<u8>,
-    // /// Email body bytes.
-    // pub body_bytes: Vec<u8>,
+    /// Email bytes.
     pub email_bytes: Vec<u8>,
-    /// RSA public key.
+    /// A `n` parameter of the RSA public key.
     pub public_key_n: BigUint, // pub public_key: RSAPublicKey<F>,
-    // / RSA digital signature.
-    // pub signature: RSASignature<F>,
     _f: PhantomData<F>,
 }
 
@@ -329,14 +256,7 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
 
         let sha256_config = Sha256DynamicConfig::configure(
             meta,
-            vec![
-                body_params.max_variable_byte_size,
-                header_params.max_variable_byte_size,
-                // header_params.max_variable_byte_size,
-                // header_params.max_variable_byte_size,
-                // body_params.max_variable_byte_size,
-                // body_params.max_variable_byte_size,
-            ],
+            vec![body_params.max_variable_byte_size, header_params.max_variable_byte_size],
             range_config.clone(),
             sha256_params.num_bits_lookup,
             sha256_params.num_advice_columns,
@@ -345,7 +265,6 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
 
         let sign_verify_config = SignVerifyConfig::configure(range_config.clone(), sign_verify_params.public_key_bits);
 
-        // assert_eq!(params.body_regex_filepathes.len(), params.body_substr_filepathes.len());
         let bodyhash_allstr_def = AllstrRegexDef::read_from_text(&header_params.bodyhash_allstr_filepath);
         let bodyhash_substr_def = SubstrRegexDef::read_from_text(&header_params.bodyhash_substr_filepath);
         let bodyhash_defs = RegexDefs {
@@ -427,7 +346,6 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                 }
                 let ctx = &mut config.sha256_config.new_context(region);
                 let header_params = params.header_config.as_ref().expect("header_config is required");
-                let body_params = params.body_config.as_ref().expect("body_config is required");
 
                 let range = config.sha256_config.range().clone();
                 let gate = range.gate.clone();
@@ -452,13 +370,13 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                     ctx.region.constrain_equal(a.cell(), b.cell())?;
                 }
 
+                /// 5. Compute public input values.
                 let poseidon = PoseidonChipBn254_8_58::new(ctx, &gate);
                 let sign_rand = poseidon.hash_elements(ctx, &gate, &assigned_signature.c.limbs()).unwrap().0[0].clone();
                 let header_hash_commit = assigned_commit_wtns_bytes(ctx, &gate, &poseidon, &sign_rand, &header_result.hash_bytes);
                 let public_key_n_hash = poseidon.hash_elements(ctx, &gate, &assigned_public_key.n.limbs()).unwrap().0[0].clone();
                 public_hash_cell.push(header_hash_commit.cell());
                 public_hash_cell.push(public_key_n_hash.cell());
-
                 let mut rlc_inputs = vec![];
                 let mut bodyhash_masked_chars = vec![];
                 let mut bodyhash_masked_substr_ids = vec![];
@@ -489,101 +407,6 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
                 }
                 public_hash_cell.push(rlc.cell());
 
-                // {
-                //     let public_hash_result: AssignedHashResult<F> = config.sha256_config.digest(ctx, &public_hash_input, None)?;
-                // }
-
-                // let public_hash_input = get_email_circuit_public_hash_input(
-                //     &header_result.hash_value,
-                //     &self.public_key_n.to_bytes_le(),
-                //     header_substrs,
-                //     body_substrs,
-                //     header_params.max_variable_byte_size,
-                //     body_params.max_variable_byte_size,
-                // );
-                // let public_hash_result: AssignedHashResult<F> = config.sha256_config.digest(ctx, &public_hash_input, None)?;
-                // for (idx, v) in public_hash_result.input_bytes[128..(128 + 256)].iter().enumerate() {
-                //     v.value().map(|v| println!("idx {} code {}", idx, v.get_lower_32()));
-                // }
-
-                // for (idx, v) in header_result.regex.masked_characters.iter().enumerate() {
-                //     v.value().map(|v| {
-                //         println!(
-                //             "idx {} code {} char {} substr id {:?}",
-                //             idx,
-                //             v.get_lower_32(),
-                //             (v.get_lower_32() as u8) as char,
-                //             header_result.regex.all_substr_ids[idx]
-                //         )
-                //     });
-                // }
-                // for (idx, v) in body_result.regex.masked_characters.iter().enumerate() {
-                //     v.value()
-                //         .map(|v| println!("idx {} code {} char {}", idx, v.get_lower_32(), (v.get_lower_32() as u8) as char));
-                // }
-                // let assigned_public_key_bytes = assigned_public_key
-                //     .n
-                //     .limbs()
-                //     .into_iter()
-                //     .flat_map(|limb| {
-                //         let limb_val = value_to_option(limb.value()).unwrap();
-                //         let bytes = decompose_fe_to_u64_limbs(limb_val, 64 / 8, 8);
-                //         let mut sum = gate.load_zero(ctx);
-                //         let assigned = bytes
-                //             .into_iter()
-                //             .enumerate()
-                //             .map(|(idx, byte)| {
-                //                 let assigned = gate.load_witness(ctx, Value::known(F::from(byte)));
-                //                 range.range_check(ctx, &assigned, 8);
-                //                 sum = gate.mul_add(
-                //                     ctx,
-                //                     QuantumCell::Existing(&assigned),
-                //                     QuantumCell::Constant(F::from(1u64 << (8 * idx))),
-                //                     QuantumCell::Existing(&sum),
-                //                 );
-                //                 assigned
-                //             })
-                //             .collect_vec();
-                //         gate.assert_equal(ctx, QuantumCell::Existing(&sum), QuantumCell::Existing(limb));
-                //         assigned
-                //     })
-                //     .collect_vec();
-                // // for (idx, v) in assigned_public_key_bytes.iter().enumerate() {
-                // //     v.value().map(|v| println!("idx {} byte {}", 128 + idx, v.get_lower_32()));
-                // // }
-                // let assigned_public_hash_input = vec![
-                //     header_result.hash_bytes.into_iter().map(|v| v.cell()).collect_vec(),
-                //     body_result.encoded_hash.into_iter().map(|v| v.cell()).collect_vec(),
-                //     vec![gate.load_zero(ctx).cell(); 128 - 32 - 44],
-                //     assigned_public_key_bytes.into_iter().map(|v| v.cell()).collect_vec(),
-                //     vec![header_result.regex.masked_characters, body_result.regex.masked_characters]
-                //         .concat()
-                //         .into_iter()
-                //         .map(|v| v.cell())
-                //         .collect_vec(),
-                //     vec![header_result.regex.all_substr_ids, body_result.regex.all_substr_ids]
-                //         .concat()
-                //         .into_iter()
-                //         .map(|v| v.cell())
-                //         .collect_vec(),
-                // ]
-                // .concat();
-                // for (a, b) in public_hash_result.input_bytes[0..assigned_public_hash_input.len()]
-                //     .into_iter()
-                //     .map(|v| v.cell())
-                //     .collect_vec()
-                //     .into_iter()
-                //     .zip(assigned_public_hash_input.into_iter())
-                // {
-                //     ctx.region.constrain_equal(a, b)?;
-                // }
-                // debug_assert_eq!(public_hash_result.output_bytes.len(), 32);
-                // let mut packed_public_hash = gate.load_zero(ctx);
-                // let mut coeff = F::from(1u64);
-                // for byte in public_hash_result.output_bytes[0..31].iter() {
-                //     packed_public_hash = gate.mul_add(ctx, QuantumCell::Existing(byte), QuantumCell::Constant(coeff), QuantumCell::Existing(&packed_public_hash));
-                //     coeff *= F::from(256u64);
-                // }
                 range.finalize(ctx);
                 Ok(())
             },
@@ -603,21 +426,19 @@ impl<F: PrimeField> CircuitExt<F> for DefaultEmailVerifyCircuit<F> {
     fn instances(&self) -> Vec<Vec<F>> {
         let public_input = self.gen_default_public_input();
         vec![public_input.instances()]
-
-        // let header_str = String::from_utf8(header_bytes).unwrap();
-        // let body_str = String::from_utf8(body_bytes).unwrap();
-        // let params = Self::read_config_params();
-        // let header_params = params.header_config.as_ref().expect("header_config is required");
-        // let body_params = params.body_config.as_ref().expect("body_config is required");
-        // let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, header_params.substr_regexes.clone(), body_params.substr_regexes.clone());
-        // let public_input = DefaultEmailVerifyPublicInput::new(headerhash, self.public_key_n.clone(), header_substrs, body_substrs);
-        // vec![Self::_get_instances_from_default_public_input(public_input)]
     }
 }
 
 impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
     pub const DEFAULT_E: u128 = 65537;
 
+    /// Create a new [`DefaultEmailVerifyCircuit`].
+    /// # Arguments
+    /// * `email_bytes` - email bytes.
+    /// * `public_key_n` - `n` parameter of the RSA public key.
+    ///
+    /// # Return values
+    /// Return a new [`DefaultEmailVerifyCircuit`].
     pub fn new(email_bytes: Vec<u8>, public_key_n: BigUint) -> Self {
         Self {
             email_bytes,
@@ -632,7 +453,7 @@ impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
     /// * `email_path` - a file path of the email file.
     ///
     /// # Return values
-    /// Return a new [`DefaultEmailVerifyCircuit`], the SHA256 hash bytes of the email header, a vector of (`start_position`, `substr`) in the email header, and a vector of (`start_position`, `substr`) in the email body.
+    /// Return a new [`DefaultEmailVerifyCircuit`].
     pub async fn gen_circuit_from_email_path(email_path: &str) -> Self {
         let email_bytes = {
             let mut f = File::open(email_path).unwrap();
@@ -652,21 +473,11 @@ impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
                 }
             }
         };
-        // let header_str = String::from_utf8(canonicalized_header.clone()).unwrap();
-        // let body_str = String::from_utf8(canonicalized_body.clone()).unwrap();
-        // let config_params = default_config_params();
-        // let header_config = config_params.header_config.as_ref().expect("header_config is required");
-        // let body_config = config_params.body_config.as_ref().expect("body_config is required");
-        // let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, header_config.substr_regexes.clone(), body_config.substr_regexes.clone());
-        // let circuit = Self {
-        //     email_bytes,
-        //     public_key_n,
-        //     _f: PhantomData,
-        // };
         let circuit = Self::new(email_bytes, public_key_n);
         circuit
     }
 
+    /// Compute public input values as [`DefaultEmailVerifyPublicInput`] from the circuit.
     pub fn gen_default_public_input(&self) -> DefaultEmailVerifyPublicInput {
         let (header_bytes, body_bytes, signature_bytes) = canonicalize_signed_email(&self.email_bytes).unwrap();
         let header_hash = Sha256::digest(&header_bytes).to_vec();
@@ -689,63 +500,12 @@ impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
         let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, header_params.substr_regexes.clone(), body_params.substr_regexes.clone());
         DefaultEmailVerifyPublicInput::new(header_hash_commit, public_key_hash, header_substrs, body_substrs)
     }
-
-    // /// Retrieve instance values from the given [`DefaultEmailVerifyPublicInput`] json file.
-    // ///
-    // /// # Arguments
-    // /// * `public_input_path` - a file path of the [`DefaultEmailVerifyPublicInput`] json file.
-    // ///
-    // /// # Return values
-    // /// Return a vector of the instance values.
-    // pub fn get_instances_from_default_public_input(public_input_path: &str) -> Vec<F> {
-    //     let public_input = serde_json::from_reader::<File, DefaultEmailVerifyPublicInput>(File::open(public_input_path).unwrap()).unwrap();
-    //     Self::_get_instances_from_default_public_input(public_input)
-    // }
-
-    // fn _get_instances_from_default_public_input(public_input: DefaultEmailVerifyPublicInput) -> Vec<F> {
-    //     let config_params = default_config_params();
-    //     let header_params = config_params.header_config.as_ref().expect("header_config is required");
-    //     let body_params = config_params.body_config.as_ref().expect("body_config is required");
-    //     let headerhash = hex::decode(&public_input.headerhash[2..]).unwrap();
-    //     let public_key_n_bytes = hex::decode(&public_input.public_key_n_bytes[2..]).unwrap();
-    //     let header_substrs = public_input
-    //         .header_starts
-    //         .into_iter()
-    //         .zip(public_input.header_substrs.into_iter())
-    //         .map(|(start, substr)| Some((start, substr)))
-    //         .collect_vec();
-    //     let body_substrs = public_input
-    //         .body_starts
-    //         .into_iter()
-    //         .zip(public_input.body_substrs.into_iter())
-    //         .map(|(start, substr)| Some((start, substr)))
-    //         .collect_vec();
-    //     let public_hash_input = get_email_circuit_public_hash_input(
-    //         &headerhash,
-    //         &public_key_n_bytes,
-    //         header_substrs,
-    //         body_substrs,
-    //         header_params.max_variable_byte_size,
-    //         body_params.max_variable_byte_size,
-    //     );
-    //     let public_hash: Vec<u8> = Sha256::digest(&public_hash_input).to_vec();
-    //     let public_fr = {
-    //         let lo = F::from_u128(u128::from_le_bytes(public_hash[0..16].try_into().unwrap()));
-    //         let mut hi_bytes = [0; 16];
-    //         for idx in 0..15 {
-    //             hi_bytes[idx] = public_hash[16 + idx];
-    //         }
-    //         let hi = F::from_u128(u128::from_le_bytes(hi_bytes));
-    //         hi * F::from(2).pow_const(128) + lo
-    //     };
-    //     vec![public_fr]
-    // }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use cfdkim::{canonicalize_signed_email, resolve_public_key, SignerBuilder};
+    use cfdkim::{resolve_public_key, SignerBuilder};
     use halo2_base::halo2_proofs::{
         circuit::Value,
         dev::{CircuitCost, FailureLocation, MockProver, VerifyFailure},
@@ -948,11 +708,6 @@ mod test {
         };
         temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex1_email_verify.config"), move || {
             let params = default_config_params();
-            // let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-            // println!("header len\n {}", canonicalized_header.len());
-            // println!("body len\n {}", canonicalized_body.len());
-            // println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
-            // println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
             let public_key_n = BigUint::from_bytes_be(&public_key.n().clone().to_bytes_be());
             let circuit = DefaultEmailVerifyCircuit::<Fr>::new(email_bytes.clone(), public_key_n);
 
@@ -1022,12 +777,6 @@ mod test {
         };
         temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex2_email_verify.config"), move || {
             let params = default_config_params();
-            // let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-            // println!("header len\n {}", canonicalized_header.len());
-            // println!("body len\n {}", canonicalized_body.len());
-            // println!("body\n{:?}", canonicalized_body);
-            // println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
-            // println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
             let public_key_n = BigUint::from_bytes_be(&public_key.n().clone().to_bytes_be());
             let circuit = DefaultEmailVerifyCircuit::<Fr>::new(email_bytes.clone(), public_key_n);
 
@@ -1076,12 +825,6 @@ mod test {
         };
         temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex3_email_verify.config"), move || {
             let params = default_config_params();
-            // let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-            // println!("header len\n {}", canonicalized_header.len());
-            // println!("body len\n {}", canonicalized_body.len());
-            // println!("body\n{:?}", canonicalized_body);
-            // println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
-            // println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
             let public_key_n = BigUint::from_bytes_be(&public_key.n().clone().to_bytes_be());
             let circuit = DefaultEmailVerifyCircuit::<Fr>::new(email_bytes.clone(), public_key_n);
 
@@ -1151,11 +894,6 @@ mod test {
         };
         temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex1_email_verify.config"), move || {
             let params = default_config_params();
-            // let (canonicalized_header, canonicalized_body, mut signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-            // println!("header len\n {}", canonicalized_header.len());
-            // println!("body len\n {}", canonicalized_body.len());
-            // println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
-            // println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
             let mut public_key_n_bytes = public_key.n().clone().to_bytes_be();
             for i in 0..256 {
                 public_key_n_bytes[i] = 255;
@@ -1229,11 +967,6 @@ mod test {
         };
         temp_env::with_var(EMAIL_VERIFY_CONFIG_ENV, Some("./configs/test_ex1_email_verify.config"), move || {
             let params = default_config_params();
-            // let (canonicalized_header, canonicalized_body, signature_bytes) = canonicalize_signed_email(&email_bytes).unwrap();
-            // println!("header len\n {}", canonicalized_header.len());
-            // println!("body len\n {}", canonicalized_body.len());
-            // println!("canonicalized_header:\n{}", String::from_utf8(canonicalized_header.clone()).unwrap());
-            // println!("canonicalized_body:\n{}", String::from_utf8(canonicalized_body.clone()).unwrap());
             let public_key_n = BigUint::from_bytes_be(&public_key.n().clone().to_bytes_be());
             let circuit = DefaultEmailVerifyCircuit::<Fr>::new(email_bytes.clone(), public_key_n);
 

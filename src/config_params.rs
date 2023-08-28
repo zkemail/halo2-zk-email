@@ -1,63 +1,10 @@
-//! Email verification circuit compatible with the [halo2 library developed by privacy-scaling-explorations team](https://github.com/privacy-scaling-explorations/halo2).
-//!
-//! Our email verification circuit [`DefaultEmailVerifyCircuit`] enables you to prove that
-//! - your email is authenticated by a domain server with an RSA digital signature according to the DKIM protocol.
-//! - the string in your email satisfies regular expressions (regexes) specified in the circuit.
-//! - the string in the public input of the circuit is a correct substring in your email.
-//!
-//! You can specify the configuration of that circuit with two kinds of json files:
-//! 1. Decomposed regex json: defining a regex that the string in the email header/body must satisfy and which kinds of substring will be exposed in the public input.
-//! 2. Email configuration json: defining some parameters of the email, e.g., the max size of the email header and body, the RSA public key size, pathes to text files to describe the regex definitions.
-//!
-//! With these files, you can call our CLI commands or helper functions to generate proving and verifying keys, proofs, and verifier Solidity contracts that conform to your configuration.
-//!
-//! Our circuit consists of three chips: [`RegexSha2Config`], [`RegexSha2Base64Config`], [`SignVerifyConfig`].
-//! - The [`RegexSha2Config`] verifies that the input string satisfies the specified regex, extracts its substrings, and computes its SHA256 hash.
-//! - The [`RegexSha2Base64Config`] additionally computes the base64 encoding of the SHA256 hash.
-//! - The [`SignVerifyConfig`] verifies the RSA signature with the given SHA256 hash and RSA public key.
-//!
-//! The [`RegexSha2Config`], [`RegexSha2Base64Config`], [`SignVerifyConfig`] are used for the email header, email body, and RSA signature, respectively.
-//! If you want to omit some verification in our circuit, you can build your own circuit with these chips.  
-
-use std::fs::File;
-
-// pub use crate::helpers::*;
-// use crate::regex_sha2::RegexSha2Config;
-use crate::sign_verify::*;
-use cfdkim::canonicalize_signed_email;
-use cfdkim::resolve_public_key;
-use halo2_base::halo2_proofs::circuit::{SimpleFloorPlanner, Value};
-use halo2_base::halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
-use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
-use halo2_base::utils::{decompose_fe_to_u64_limbs, value_to_option};
-use halo2_base::QuantumCell;
-use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
-use halo2_base::{
-    gates::{flex_gate::FlexGateConfig, range::RangeConfig, GateInstructions, RangeInstructions},
-    utils::PrimeField,
-};
-/// Re-export [halo2_base64](https://github.com/zkemail/halo2-base64).
-pub use halo2_base64;
-/// Re-export [halo2_dynamic_sha256](https://github.com/zkemail/halo2-dynamic-sha256/tree/feat/lookup)
-pub use halo2_dynamic_sha256;
+use halo2_base::gates::{flex_gate::FlexGateConfig, range::RangeConfig};
 use halo2_dynamic_sha256::*;
-/// Re-export [halo2_regex](https://github.com/zkemail/halo2-regex/tree/feat/multi_path)
-pub use halo2_regex;
 use halo2_regex::defs::{AllstrRegexDef, RegexDefs, SubstrRegexDef};
-use halo2_regex::*;
-/// Re-export [halo2_rsa](https://github.com/zkemail/halo2-rsa)
-pub use halo2_rsa;
-use halo2_rsa::*;
-use itertools::Itertools;
-use num_bigint::BigUint;
+use std::fs::File;
 // use regex_sha2_base64::RegexSha2Base64Config;
+use crate::{DefaultEmailVerifyCircuit, RegexSha2Base64Config, RegexSha2Config, SignVerifyConfig};
 use once_cell::sync::OnceCell;
-use rsa::PublicKeyParts;
-use sha2::{Digest, Sha256};
-use snark_verifier::loader::LoadedScalar;
-use snark_verifier_sdk::CircuitExt;
-use std::io::{Read, Write};
-
 #[cfg(not(test))]
 #[cfg(not(target_arch = "wasm32"))]
 pub fn default_config_params() -> &'static EmailVerifyConfigParams {
@@ -102,7 +49,7 @@ pub struct HeaderConfigParams {
     /// The bytes of the skipped email header that do not satisfy the regexes.
     /// It must be multiple of 64 and less than `max_variable_byte_size`.
     pub skip_prefix_bytes_size: Option<usize>,
-    pub expose_substrs: Option<bool>,
+    // pub expose_substrs: Option<bool>,
 }
 
 /// Configuration parameters for [`RegexSha2Base64Config`].
@@ -115,7 +62,7 @@ pub struct BodyConfigParams {
     /// The bytes of the skipped email body that do not satisfy the regexes.
     /// It must be multiple of 64 and less than `max_variable_byte_size`.
     pub skip_prefix_bytes_size: Option<usize>,
-    pub expose_substrs: Option<bool>,
+    // pub expose_substrs: Option<bool>,
 }
 
 /// Configuration parameters for [`SignVerifyConfig`].
@@ -154,15 +101,18 @@ pub struct EmailVerifyConfigParams {
 }
 
 impl EmailVerifyConfigParams {
+    /// Return the [`EmailVerifyConfigParams`] stored in [`GLOBAL_CONFIG_PARAMS`].
     pub fn global() -> &'static Self {
         GLOBAL_CONFIG_PARAMS.get().expect("GLOBAL_CONFIG_PARAMS is not set.")
     }
 
+    /// Set the [`EmailVerifyConfigParams`] in the path of [`EMAIL_VERIFY_CONFIG_ENV`]  to [`GLOBAL_CONFIG_PARAMS`].
     pub fn set_from_env() {
         let params: Self = Self::get_from_env();
         GLOBAL_CONFIG_PARAMS.set(params).unwrap();
     }
 
+    /// Get the [`EmailVerifyConfigParams`] from the path of [`EMAIL_VERIFY_CONFIG_ENV`].
     pub fn get_from_env() -> Self {
         let path = std::env::var(EMAIL_VERIFY_CONFIG_ENV).expect("You must set the configure file path to EMAIL_VERIFY_CONFIG.");
         serde_json::from_reader(File::open(path.as_str()).expect(&format!("{} does not exist.", path))).expect("File is found but invalid.")

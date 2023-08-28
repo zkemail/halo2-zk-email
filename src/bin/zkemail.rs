@@ -152,7 +152,7 @@ async fn main() {
             vk_path,
         } => {
             let circuit = DefaultEmailVerifyCircuit::<Fr>::gen_circuit_from_email_path(&email_path).await;
-            gen_pk_and_vk(&params_path, &circuit_config_path, &pk_path, &vk_path, circuit).expect("key generation failed");
+            gen_keys(&params_path, &circuit_config_path, &pk_path, &vk_path, circuit).expect("key generation failed");
         }
         Commands::Prove {
             params_path,
