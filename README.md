@@ -12,6 +12,7 @@ DO NOT USE THIS LIBRARY IN PRODUCTION. At this point, this is under development 
 - rustc 1.68.0-nightly (0468a00ae 2022-12-17)
 - cargo 1.68.0-nightly (cc0a32087 2022-12-14)
 - solc 0.8.19+commit.7dd6d404
+- anvil 0.1.0 (0d3bd04 2022-11-20T00:11:22.107775Z)
 
 Install solc (Mac instructions):
 ```bash
@@ -34,11 +35,17 @@ You can open the API specification by executing `cargo doc --open`.
 You can run the tests by executing `cargo test --release`.
 
 ## Description
-To generate a sample circuit and it's non aggregated EVM verifier, do:
+To generate a proof and verify it on EVM, do:
 ```bash
 cargo build --release
 cargo run --release -- gen-params --k 18
-cargo run --release -- gen-app-key
+cargo run --release -- gen-keys
 cargo run --release -- gen-evm-verifier
-cargo run --release -- evm-verify-app
+cargo run --release -- evm-prove
+cargo run --release -- evm-verify
+```
+
+To generate regex files for a new decomposed regex definition. do:
+```bash
+cargo run --release -- gen-regex-files --decomposed-regex-config-path new_regex_file.json --regex-files-prefix new_regex
 ```
