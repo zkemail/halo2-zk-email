@@ -1,23 +1,19 @@
-use std::fs::File;
-
+use crate::*;
 use fancy_regex::Regex;
 use itertools::Itertools;
+use std::fs::File;
 
-use crate::{DefaultEmailVerifyConfigParams, EMAIL_VERIFY_CONFIG_ENV};
-
-pub fn get_email_circuit_public_hash_input(
-    headerhash: &[u8],
-    public_key_n_bytes: &[u8],
-    header_substrs: Vec<Option<(usize, String)>>,
-    body_substrs: Vec<Option<(usize, String)>>,
-    header_max_byte_size: usize,
-    body_max_byte_size: usize,
-) -> Vec<u8> {
-    let bodyhash = header_substrs[0].as_ref().unwrap().1.as_bytes();
-    let max_len = header_max_byte_size + body_max_byte_size;
-    let mut expected_masked_chars = vec![0u8; max_len];
-    let mut expected_substr_ids = vec![0u8; max_len]; // We only support up to 256 substring patterns.
-    for (substr_idx, m) in header_substrs.iter().enumerate() {
+/// Compute expected masked chars and substring ids from the given list of the substrings and their start positions.
+///
+/// # Arguments
+/// * `max_byte_size` - The maximum byte size of the input string.
+/// * `substrs` - A list of the substrings and their start positions.
+/// # Return values
+/// Return a tuple of the expected masked chars and substring ids.
+pub fn get_expected_substr_chars_and_ids(max_byte_size: usize, substrs: &[Option<(usize, String)>]) -> (Vec<u8>, Vec<u8>) {
+    let mut expected_masked_chars = vec![0u8; max_byte_size];
+    let mut expected_substr_ids = vec![0u8; max_byte_size]; // We only support up to 256 substring patterns.
+    for (substr_idx, m) in substrs.iter().enumerate() {
         if let Some((start, chars)) = m {
             for (idx, char) in chars.as_bytes().iter().enumerate() {
                 expected_masked_chars[start + idx] = *char;
@@ -25,35 +21,24 @@ pub fn get_email_circuit_public_hash_input(
             }
         }
     }
-    for (substr_idx, m) in body_substrs.iter().enumerate() {
-        if let Some((start, chars)) = m {
-            for (idx, char) in chars.as_bytes().iter().enumerate() {
-                expected_masked_chars[header_max_byte_size + start + idx] = *char;
-                expected_substr_ids[header_max_byte_size + start + idx] = substr_idx as u8 + 1;
-            }
-        }
-    }
-    vec![
-        headerhash,
-        bodyhash,
-        &[0u8; (128 - 32 - 44)][..],
-        &public_key_n_bytes,
-        &expected_masked_chars,
-        &expected_substr_ids,
-    ]
-    .concat()
+    (expected_masked_chars, expected_substr_ids)
 }
 
+/// Extract substrings and their start positions from the given header and body strings.
+///
+/// # Arguments
+/// * `header_str` - The header string.
+/// * `body_str` - The body string.
+/// * `header_substr_regexes` - A list of the substring regexes for the header string.
+/// * `body_substr_regexes` - A list of the substring regexes for the body string.
+/// # Return values
+/// Return a tuple of the extracted substrings and their start positions.
 pub fn get_email_substrs(
     header_str: &str,
     body_str: &str,
     header_substr_regexes: Vec<Vec<String>>,
     body_substr_regexes: Vec<Vec<String>>,
 ) -> (Vec<Option<(usize, String)>>, Vec<Option<(usize, String)>>) {
-    let bodyhash_substr = get_substr(
-        &header_str,
-        &[r"(?<=bh=)(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|0|1|2|3|4|5|6|7|8|9|\+|/|=)+(?=;)".to_string()],
-    );
     let header_substrs = header_substr_regexes
         .iter()
         .map(|raws| {
@@ -61,17 +46,23 @@ pub fn get_email_substrs(
             get_substr(&header_str, raws.as_slice())
         })
         .collect_vec();
-    let header_substrings = vec![vec![bodyhash_substr], header_substrs].concat();
-    let body_substrings = body_substr_regexes
+    let body_substrs = body_substr_regexes
         .iter()
         .map(|raws| {
             let raws = raws.into_iter().map(|raw| format!(r"{}", raw)).collect_vec();
             get_substr(&body_str, raws.as_slice())
         })
         .collect_vec();
-    (header_substrings, body_substrings)
+    (header_substrs, body_substrs)
 }
 
+/// Extract a substring and its start position from the given input string.
+///
+/// # Arguments
+/// * `input_str` - The input string.
+/// * `regexes` - A list of the substring regexes.
+/// # Return values
+/// Return a tuple of the extracted substring and its start position.
 pub fn get_substr(input_str: &str, regexes: &[String]) -> Option<(usize, String)> {
     let regexes = regexes.into_iter().map(|raw| Regex::new(&raw).unwrap()).collect_vec();
     let mut start = 0;
@@ -92,11 +83,4 @@ pub fn get_substr(input_str: &str, regexes: &[String]) -> Option<(usize, String)
     // println!("substr {}", substr);
     // println!("start {}", start);
     Some((start, substr.to_string()))
-}
-
-pub fn read_default_circuit_config_params() -> DefaultEmailVerifyConfigParams {
-    let path = std::env::var(EMAIL_VERIFY_CONFIG_ENV).expect("You must set the configure file path to EMAIL_VERIFY_CONFIG.");
-    let params: DefaultEmailVerifyConfigParams =
-        serde_json::from_reader(File::open(path.as_str()).expect(&format!("{} does not exist.", path))).expect("File is found but invalid.");
-    params
 }
