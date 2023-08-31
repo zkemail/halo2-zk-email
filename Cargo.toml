@@ -72,31 +72,15 @@ ethers = { version = "2.0.8", default_features = false, features = [
 criterion = { version = "0.3" }
 temp-env = "0.3.3"
 
-[[bench]]
-name = "regex"
-harness = false
 
 [[bench]]
-name = "sha2"
+name = "email_verify"
 harness = false
-
-[[bench]]
-name = "sign_verify"
-harness = false
-
-
-# [[bench]]
-# name = "email_verify"
-# harness = false
 
 # [[bench]]
 # name = "recursion"
 # harness = false
 
-# [[bin]]
-# name = "zkemail"
-# test = false
-# bench = false
 
 # [patch."https://github.com/axiom-crypto/halo2-lib.git"]
 # halo2-base = { version = "0.2.2", default-features = false, features = [
