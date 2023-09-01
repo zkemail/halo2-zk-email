@@ -68,7 +68,7 @@ pub type EthersClient = Arc<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>
 // original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L58-L86
 pub async fn setup_eth_backend() -> AnvilInstance {
     // Launch anvil
-    let anvil = Anvil::new().arg("--gas-limit").arg("100000000").spawn();
+    let anvil = Anvil::new().arg("--gas-limit").arg("1000000000").spawn();
     anvil
 }
 
@@ -94,9 +94,13 @@ pub async fn deploy_and_call_verifiers(sols_dir: &PathBuf, runs: Option<usize>, 
     let runs = runs.unwrap_or(1);
     let config_params = default_config_params();
     let mut gas_sum = U256::zero();
-    let (base_addr, gas) = deploy_verifier_base_and_funcs(&client, sols_dir, runs).await;
-    gas_sum += gas;
+    // let (base_addr, gas) = deploy_verifier_base_and_funcs(&client, sols_dir, runs).await;
+    // gas_sum += gas;
 
+    let (vk_addr, gas) = deploy_verifier_via_solidity(&client, sols_dir.join("VerifyingKey.sol"), "Halo2VerifyingKey", (), None).await;
+    gas_sum += gas;
+    let (halo2_addr, gas) = deploy_verifier_via_solidity(&client, sols_dir.join("Halo2Verifier.sol"), "Halo2Verifier", (), None).await;
+    gas_sum += gas;
     let max_header_bytes = config_params.header_config.as_ref().unwrap().max_variable_byte_size;
     let max_body_bytes = config_params.body_config.as_ref().unwrap().max_variable_byte_size;
     let (email_verifier, gas) = deploy_verifier_via_solidity(
@@ -104,7 +108,9 @@ pub async fn deploy_and_call_verifiers(sols_dir: &PathBuf, runs: Option<usize>, 
         sols_dir.join("EmailVerifier.sol"),
         "EmailVerifier",
         (
-            Token::Address(base_addr),
+            // Token::Address(base_addr),
+            Token::Address(vk_addr),
+            Token::Address(halo2_addr),
             Token::Uint(U256::from(max_header_bytes)),
             Token::Uint(U256::from(max_body_bytes)),
         ),
