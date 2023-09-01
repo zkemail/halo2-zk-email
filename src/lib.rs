@@ -25,6 +25,7 @@ pub mod config_params;
 pub mod eth;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod helpers;
+pub mod recursion;
 /// Regex verification + SHA256 computation.
 pub mod regex_sha2;
 /// Regex verification + SHA256 computation + base64 encoding.
