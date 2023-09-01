@@ -409,70 +409,70 @@ contract Halo2Verifier {
                     let num_limbs := mload(NUM_ACC_LIMBS_MPTR)
                     let num_limb_bits := mload(NUM_ACC_LIMB_BITS_MPTR)
 
-                //     let cptr := add(
-                //         INSTANCE_CPTR,
-                //         mul(mload(ACC_OFFSET_MPTR), 0x20)
-                //     )
-                //     let lhs_y_off := mul(num_limbs, 0x20)
-                //     let rhs_x_off := mul(lhs_y_off, 2)
-                //     let rhs_y_off := mul(lhs_y_off, 3)
-                //     let lhs_x := calldataload(cptr)
-                //     let lhs_y := calldataload(add(cptr, lhs_y_off))
-                //     let rhs_x := calldataload(add(cptr, rhs_x_off))
-                //     let rhs_y := calldataload(add(cptr, rhs_y_off))
-                //     for {
-                //         let cptr_end := add(cptr, mul(0x20, num_limbs))
-                //         let shift := num_limb_bits
-                //     } lt(cptr, cptr_end) {
+                    let cptr := add(
+                        INSTANCE_CPTR,
+                        mul(mload(ACC_OFFSET_MPTR), 0x20)
+                    )
+                    let lhs_y_off := mul(num_limbs, 0x20)
+                    let rhs_x_off := mul(lhs_y_off, 2)
+                    let rhs_y_off := mul(lhs_y_off, 3)
+                    let lhs_x := calldataload(cptr)
+                    let lhs_y := calldataload(add(cptr, lhs_y_off))
+                    let rhs_x := calldataload(add(cptr, rhs_x_off))
+                    let rhs_y := calldataload(add(cptr, rhs_y_off))
+                    for {
+                        let cptr_end := add(cptr, mul(0x20, num_limbs))
+                        let shift := num_limb_bits
+                    } lt(cptr, cptr_end) {
 
-                //     } {
-                //         cptr := add(cptr, 0x20)
-                //         lhs_x := add(lhs_x, shl(shift, calldataload(cptr)))
-                //         lhs_y := add(
-                //             lhs_y,
-                //             shl(shift, calldataload(add(cptr, lhs_y_off)))
-                //         )
-                //         rhs_x := add(
-                //             rhs_x,
-                //             shl(shift, calldataload(add(cptr, rhs_x_off)))
-                //         )
-                //         rhs_y := add(
-                //             rhs_y,
-                //             shl(shift, calldataload(add(cptr, rhs_y_off)))
-                //         )
-                //         shift := add(shift, num_limb_bits)
-                //     }
+                    } {
+                        cptr := add(cptr, 0x20)
+                        lhs_x := add(lhs_x, shl(shift, calldataload(cptr)))
+                        lhs_y := add(
+                            lhs_y,
+                            shl(shift, calldataload(add(cptr, lhs_y_off)))
+                        )
+                        rhs_x := add(
+                            rhs_x,
+                            shl(shift, calldataload(add(cptr, rhs_x_off)))
+                        )
+                        rhs_y := add(
+                            rhs_y,
+                            shl(shift, calldataload(add(cptr, rhs_y_off)))
+                        )
+                        shift := add(shift, num_limb_bits)
+                    }
 
-                //     success := and(
-                //         success,
-                //         eq(
-                //             mulmod(lhs_y, lhs_y, q),
-                //             addmod(
-                //                 mulmod(lhs_x, mulmod(lhs_x, lhs_x, q), q),
-                //                 3,
-                //                 q
-                //             )
-                //         )
-                //     )
-                //     success := and(
-                //         success,
-                //         eq(
-                //             mulmod(rhs_y, rhs_y, q),
-                //             addmod(
-                //                 mulmod(rhs_x, mulmod(rhs_x, rhs_x, q), q),
-                //                 3,
-                //                 q
-                //             )
-                //         )
-                //     )
+                    //     success := and(
+                    //         success,
+                    //         eq(
+                    //             mulmod(lhs_y, lhs_y, q),
+                    //             addmod(
+                    //                 mulmod(lhs_x, mulmod(lhs_x, lhs_x, q), q),
+                    //                 3,
+                    //                 q
+                    //             )
+                    //         )
+                    //     )
+                    //     success := and(
+                    //         success,
+                    //         eq(
+                    //             mulmod(rhs_y, rhs_y, q),
+                    //             addmod(
+                    //                 mulmod(rhs_x, mulmod(rhs_x, rhs_x, q), q),
+                    //                 3,
+                    //                 q
+                    //             )
+                    //         )
+                    //     )
 
-                //     mstore(ACC_LHS_X_MPTR, lhs_x)
-                //     mstore(ACC_LHS_Y_MPTR, lhs_y)
-                //     mstore(ACC_RHS_X_MPTR, rhs_x)
-                //     mstore(ACC_RHS_Y_MPTR, rhs_y)
-                // }
+                    //     mstore(ACC_LHS_X_MPTR, lhs_x)
+                    //     mstore(ACC_LHS_Y_MPTR, lhs_y)
+                    //     mstore(ACC_RHS_X_MPTR, rhs_x)
+                    //     mstore(ACC_RHS_Y_MPTR, rhs_y)
+                }
 
-                // pop(q)
+                pop(q)
             }
 
             // // Revert earlier if anything from calldata is invalid
