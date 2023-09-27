@@ -131,7 +131,7 @@ pub async fn deploy_and_call_verifiers(sols_dir: &PathBuf, runs: Option<usize>, 
     // drop(anvil);
 }
 
-async fn deploy_verifier_base_and_funcs(client: &EthersClient, sols_dir: &PathBuf, runs: usize) -> (Address, U256) {
+pub(crate) async fn deploy_verifier_base_and_funcs(client: &EthersClient, sols_dir: &PathBuf, runs: usize) -> (Address, U256) {
     let deploy_params =
         serde_json::from_reader::<_, DeployParamsJson>(File::open(&sols_dir.join("deploy_params.json")).expect(&format!("deploy_params.json in {:?} cannot open", sols_dir)))
             .expect(&format!("fail to convert deploy_params.json in {:?}", sols_dir));

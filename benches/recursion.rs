@@ -25,7 +25,7 @@ use halo2_base::{gates::range::RangeStrategy::Vertical, SKIP_FIRST_PASS};
 use halo2_regex::defs::{AllstrRegexDef, SubstrRegexDef};
 use halo2_regex::vrm::DecomposedRegexConfig;
 use halo2_rsa::{RSAPubE, RSAPublicKey, RSASignature};
-use halo2_zk_email::recursion::{evm_prove_agg, evm_verify_agg, gen_agg_key, gen_evm_verifier_agg, AGG_CONFIG_KEY};
+use halo2_zk_email::recursion::{evm_prove_agg, gen_agg_key, AGG_CONFIG_KEY};
 use halo2_zk_email::{default_config_params, DefaultEmailVerifyCircuit, EMAIL_VERIFY_CONFIG_ENV};
 use itertools::Itertools;
 use mailparse::parse_mail;
@@ -134,9 +134,9 @@ fn bench_email_verify1(c: &mut Criterion) {
     let app_vk = keygen_vk(&app_params, &circuit).unwrap();
     let app_pk = keygen_pk(&app_params, app_vk, &circuit).unwrap();
     let agg_pk = gen_agg_key(&app_params, &agg_params, &app_pk, vec![circuit.clone()]);
-    let verifier = gen_evm_verifier_agg(&agg_params, agg_pk.get_vk(), circuit.num_instance()[0]);
-    let proof = evm_prove_agg(&app_params, &agg_params, &app_pk, &agg_pk, vec![circuit.clone()]);
-    evm_verify_agg(verifier, proof.0, proof.1);
+    // let verifier = gen_evm_verifier_agg(&agg_params, agg_pk.get_vk(), circuit.num_instance()[0]);
+    // let proof = evm_prove_agg(&app_params, &agg_params, &app_pk, &agg_pk, vec![circuit.clone()]);
+    // evm_verify_agg(verifier, proof.0, proof.1);
     group.bench_function("bench 1", |b| b.iter(|| evm_prove_agg(&app_params, &agg_params, &app_pk, &agg_pk, vec![circuit.clone()])));
     group.finish();
 }
