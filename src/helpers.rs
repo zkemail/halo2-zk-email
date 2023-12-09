@@ -552,6 +552,7 @@ pub fn gen_regex_files(decomposed_regex_config_path: &str, regex_dir_path: &str,
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 mod test {
     use crate::{DefaultEmailVerifyCircuit, DefaultEmailVerifyPublicInput};

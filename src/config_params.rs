@@ -3,15 +3,24 @@ use halo2_dynamic_sha256::*;
 use halo2_regex::defs::{AllstrRegexDef, RegexDefs, SubstrRegexDef};
 use std::fs::File;
 // use regex_sha2_base64::RegexSha2Base64Config;
+#[cfg(target_arch = "wasm32")]
+use crate::wasm;
 use crate::{DefaultEmailVerifyCircuit, RegexSha2Base64Config, RegexSha2Config, SignVerifyConfig};
 use once_cell::sync::OnceCell;
+
 #[cfg(not(test))]
-#[cfg(not(target_arch = "wasm32"))]
-pub fn default_config_params() -> &'static EmailVerifyConfigParams {
-    if GLOBAL_CONFIG_PARAMS.get().is_none() {
-        EmailVerifyConfigParams::set_from_env();
+pub fn default_config_params() -> EmailVerifyConfigParams {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if GLOBAL_CONFIG_PARAMS.get().is_none() {
+            EmailVerifyConfigParams::set_from_env();
+        }
+        EmailVerifyConfigParams::global().clone()
     }
-    EmailVerifyConfigParams::global()
+    #[cfg(target_arch = "wasm32")]
+    {
+        wasm::get_config_params_wasm()
+    }
 }
 
 #[cfg(test)]
@@ -28,7 +37,7 @@ static GLOBAL_CONFIG_PARAMS: OnceCell<EmailVerifyConfigParams> = OnceCell::new()
 pub const EMAIL_VERIFY_CONFIG_ENV: &'static str = "EMAIL_VERIFY_CONFIG";
 
 /// Configuration parameters for [`Sha256DynamicConfig`]
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct Sha256ConfigParams {
     /// The bits of lookup table. It must be a divisor of 16, i.e., 1, 2, 4, 8, and 16.
     pub num_bits_lookup: usize,
@@ -38,7 +47,7 @@ pub struct Sha256ConfigParams {
 }
 
 /// Configuration parameters for [`RegexSha2Config`].
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct HeaderConfigParams {
     pub bodyhash_allstr_filepath: String,
     pub bodyhash_substr_filepath: String,
@@ -53,7 +62,7 @@ pub struct HeaderConfigParams {
 }
 
 /// Configuration parameters for [`RegexSha2Base64Config`].
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct BodyConfigParams {
     pub allstr_filepathes: Vec<String>,
     pub substr_filepathes: Vec<Vec<String>>,
@@ -66,7 +75,7 @@ pub struct BodyConfigParams {
 }
 
 /// Configuration parameters for [`SignVerifyConfig`].
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct SignVerifyConfigParams {
     /// The bits of RSA public key.
     pub public_key_bits: usize,
@@ -78,7 +87,7 @@ pub struct SignVerifyConfigParams {
 ///
 /// Although the types of some parameters are defined as [`Option`], you will get an error if they are omitted for [`DefaultEmailVerifyCircuit`].
 /// You can build a circuit that accepts the same format configuration file except that some parameters are omitted.
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct EmailVerifyConfigParams {
     /// The degree of the number of rows, i.e., 2^(`degree`) rows are set.
     pub degree: u32,

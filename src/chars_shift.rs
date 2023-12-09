@@ -15,7 +15,6 @@ use halo2_regex::{
     defs::{AllstrRegexDef, RegexDefs, SubstrRegexDef},
     AssignedRegexResult, RegexVerifyConfig,
 };
-use snark_verifier_sdk::CircuitExt;
 
 /// Configuration to shift the input characters by a variable number of bytes, used to extract a target substring from the masked characters.
 #[derive(Debug, Clone)]

@@ -33,11 +33,14 @@ pub mod regex_sha2_base64;
 pub mod sign_verify;
 /// Util functions.
 pub mod utils;
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
 pub mod wtns_commit;
 use std::fs::File;
 use std::marker::PhantomData;
 
 use crate::chars_shift::CharsShiftConfig;
+#[cfg(not(target_arch = "wasm32"))]
 pub use crate::helpers::*;
 use crate::regex_sha2::RegexSha2Config;
 use crate::sign_verify::*;
@@ -45,6 +48,7 @@ use crate::utils::*;
 use crate::wtns_commit::poseidon_circuit::*;
 use crate::wtns_commit::*;
 use cfdkim::canonicalize_signed_email;
+#[cfg(not(target_arch = "wasm32"))]
 use cfdkim::resolve_public_key;
 pub use config_params::*;
 use halo2_base::halo2_proofs::circuit;
@@ -76,6 +80,7 @@ use num_bigint::BigUint;
 use regex_sha2_base64::RegexSha2Base64Config;
 use rsa::traits::PublicKeyParts;
 use sha2::{Digest, Sha256};
+#[cfg(not(target_arch = "wasm32"))]
 use snark_verifier::loader::LoadedScalar;
 use snark_verifier_sdk::CircuitExt;
 use std::io::{Read, Write};
@@ -237,90 +242,11 @@ impl<F: PrimeField> Circuit<F> for DefaultEmailVerifyCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        let params = default_config_params();
-        let range_config = RangeConfig::configure(
-            meta,
-            Vertical,
-            &[params.num_flex_advice],
-            &[params.num_range_lookup_advice],
-            params.num_flex_advice,
-            params.range_lookup_bits,
-            0,
-            params.degree as usize,
-        );
-        let header_params = params.header_config.as_ref().expect("header_config is required");
-        let body_params = params.body_config.as_ref().expect("body_config is required");
-        let sign_verify_params = params.sign_verify_config.as_ref().expect("sign_verify_config is required");
-        let sha256_params = params.sha256_config.as_ref().expect("sha256_config is required");
-        assert_eq!(header_params.allstr_filepathes.len(), header_params.substr_filepathes.len());
-        assert_eq!(body_params.allstr_filepathes.len(), body_params.substr_filepathes.len());
-
-        let sha256_config = Sha256DynamicConfig::configure(
-            meta,
-            vec![body_params.max_variable_byte_size, header_params.max_variable_byte_size],
-            range_config.clone(),
-            sha256_params.num_bits_lookup,
-            sha256_params.num_advice_columns,
-            false,
-        );
-
-        let sign_verify_config = SignVerifyConfig::configure(range_config.clone(), sign_verify_params.public_key_bits);
-
-        let bodyhash_allstr_def = AllstrRegexDef::read_from_text(&header_params.bodyhash_allstr_filepath);
-        let bodyhash_substr_def = SubstrRegexDef::read_from_text(&header_params.bodyhash_substr_filepath);
-        let bodyhash_defs = RegexDefs {
-            allstr: bodyhash_allstr_def,
-            substrs: vec![bodyhash_substr_def],
-        };
-        let mut bodyhash_substr_id = 1;
-        let header_regex_defs = header_params
-            .allstr_filepathes
-            .iter()
-            .zip(header_params.substr_filepathes.iter())
-            .map(|(allstr_path, substr_pathes)| {
-                let allstr = AllstrRegexDef::read_from_text(&allstr_path);
-                let substrs = substr_pathes.into_iter().map(|path| SubstrRegexDef::read_from_text(&path)).collect_vec();
-                bodyhash_substr_id += substrs.len();
-                RegexDefs { allstr, substrs }
-            })
-            .collect_vec();
-        let header_config = RegexSha2Config::configure(
-            meta,
-            header_params.max_variable_byte_size,
-            header_params.skip_prefix_bytes_size.unwrap_or(0),
-            range_config.clone(),
-            vec![header_regex_defs, vec![bodyhash_defs]].concat(),
-        );
-
-        let body_regex_defs = body_params
-            .allstr_filepathes
-            .iter()
-            .zip(body_params.substr_filepathes.iter())
-            .map(|(allstr_path, substr_pathes)| {
-                let allstr = AllstrRegexDef::read_from_text(&allstr_path);
-                let substrs = substr_pathes.into_iter().map(|path| SubstrRegexDef::read_from_text(&path)).collect_vec();
-                RegexDefs { allstr, substrs }
-            })
-            .collect_vec();
-        let body_config = RegexSha2Base64Config::configure(
-            meta,
-            body_params.max_variable_byte_size,
-            body_params.skip_prefix_bytes_size.unwrap_or(0),
-            range_config,
-            body_regex_defs,
-        );
-        let chars_shift_config = CharsShiftConfig::configure(header_params.max_variable_byte_size, 44, bodyhash_substr_id as u64);
-
-        let instances = meta.instance_column();
-        meta.enable_equality(instances);
-        DefaultEmailVerifyConfig {
-            sha256_config,
-            sign_verify_config,
-            header_config,
-            body_config,
-            chars_shift_config,
-            instances,
-        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let config = Self::configure_native(meta);
+        #[cfg(target_arch = "wasm32")]
+        let config = wasm::configure_wasm(meta);
+        config
     }
 
     fn synthesize(&self, mut config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
@@ -462,6 +388,7 @@ impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
     ///
     /// # Return values
     /// Return a new [`DefaultEmailVerifyCircuit`].
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn gen_circuit_from_email_path(email_path: &str) -> Self {
         let email_bytes = {
             let mut f = File::open(email_path).unwrap();
@@ -506,6 +433,94 @@ impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
         let body_str = String::from_utf8(body_bytes[body_params.skip_prefix_bytes_size.unwrap_or(0)..].to_vec()).unwrap();
         let (header_substrs, body_substrs) = get_email_substrs(&header_str, &body_str, header_params.substr_regexes.clone(), body_params.substr_regexes.clone());
         DefaultEmailVerifyPublicInput::new(sign_commit, public_key_hash, header_substrs, body_substrs)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn configure_native(meta: &mut ConstraintSystem<F>) -> DefaultEmailVerifyConfig<F> {
+        let params = default_config_params();
+        let range_config = RangeConfig::configure(
+            meta,
+            Vertical,
+            &[params.num_flex_advice],
+            &[params.num_range_lookup_advice],
+            params.num_flex_advice,
+            params.range_lookup_bits,
+            0,
+            params.degree as usize,
+        );
+        let header_params = params.header_config.as_ref().expect("header_config is required");
+        let body_params = params.body_config.as_ref().expect("body_config is required");
+        let sign_verify_params = params.sign_verify_config.as_ref().expect("sign_verify_config is required");
+        let sha256_params = params.sha256_config.as_ref().expect("sha256_config is required");
+        assert_eq!(header_params.allstr_filepathes.len(), header_params.substr_filepathes.len());
+        assert_eq!(body_params.allstr_filepathes.len(), body_params.substr_filepathes.len());
+
+        let sha256_config = Sha256DynamicConfig::configure(
+            meta,
+            vec![body_params.max_variable_byte_size, header_params.max_variable_byte_size],
+            range_config.clone(),
+            sha256_params.num_bits_lookup,
+            sha256_params.num_advice_columns,
+            false,
+        );
+
+        let sign_verify_config = SignVerifyConfig::configure(range_config.clone(), sign_verify_params.public_key_bits);
+
+        let bodyhash_allstr_def = AllstrRegexDef::read_from_text(&header_params.bodyhash_allstr_filepath);
+        let bodyhash_substr_def = SubstrRegexDef::read_from_text(&header_params.bodyhash_substr_filepath);
+        let bodyhash_defs = RegexDefs {
+            allstr: bodyhash_allstr_def,
+            substrs: vec![bodyhash_substr_def],
+        };
+        let mut bodyhash_substr_id = 1;
+        let header_regex_defs = header_params
+            .allstr_filepathes
+            .iter()
+            .zip(header_params.substr_filepathes.iter())
+            .map(|(allstr_path, substr_pathes)| {
+                let allstr = AllstrRegexDef::read_from_text(&allstr_path);
+                let substrs = substr_pathes.into_iter().map(|path| SubstrRegexDef::read_from_text(&path)).collect_vec();
+                bodyhash_substr_id += substrs.len();
+                RegexDefs { allstr, substrs }
+            })
+            .collect_vec();
+        let header_config = RegexSha2Config::configure(
+            meta,
+            header_params.max_variable_byte_size,
+            header_params.skip_prefix_bytes_size.unwrap_or(0),
+            range_config.clone(),
+            vec![header_regex_defs, vec![bodyhash_defs]].concat(),
+        );
+
+        let body_regex_defs = body_params
+            .allstr_filepathes
+            .iter()
+            .zip(body_params.substr_filepathes.iter())
+            .map(|(allstr_path, substr_pathes)| {
+                let allstr = AllstrRegexDef::read_from_text(&allstr_path);
+                let substrs = substr_pathes.into_iter().map(|path| SubstrRegexDef::read_from_text(&path)).collect_vec();
+                RegexDefs { allstr, substrs }
+            })
+            .collect_vec();
+        let body_config = RegexSha2Base64Config::configure(
+            meta,
+            body_params.max_variable_byte_size,
+            body_params.skip_prefix_bytes_size.unwrap_or(0),
+            range_config,
+            body_regex_defs,
+        );
+        let chars_shift_config = CharsShiftConfig::configure(header_params.max_variable_byte_size, 44, bodyhash_substr_id as u64);
+
+        let instances = meta.instance_column();
+        meta.enable_equality(instances);
+        DefaultEmailVerifyConfig {
+            sha256_config,
+            sign_verify_config,
+            header_config,
+            body_config,
+            chars_shift_config,
+            instances,
+        }
     }
 }
 

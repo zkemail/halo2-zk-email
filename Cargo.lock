@@ -426,13 +426,16 @@ dependencies = [
 [[package]]
 name = "cfdkim"
 version = "0.3.0"
-source = "git+https://github.com/SoraSuegami/dkim.git#a974a456257989fb28fd5e3a175e456a489fcb76"
+source = "git+https://github.com/SoraSuegami/dkim.git#d5635de989f1bb54741bc8a7a63837550e23ae93"
 dependencies = [
  "base64 0.21.5",
  "chrono",
+ "console_error_panic_hook",
  "ed25519-dalek",
  "futures",
+ "getrandom",
  "indexmap 1.9.3",
+ "js-sys",
  "mailparse",
  "nom",
  "quick-error 2.0.1",
@@ -1543,9 +1546,9 @@ dependencies = [
 
 [[package]]
 name = "eyre"
-version = "0.6.9"
+version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80f656be11ddf91bd709454d15d5bd896fbaf4cc3314e69349e4d1569f5b46cd"
+checksum = "8bbb8258be8305fb0237d7b295f47bb24ff1b136a535f473baf40e70468515aa"
 dependencies = [
  "indenter",
  "once_cell",
@@ -2067,19 +2070,27 @@ dependencies = [
 [[package]]
 name = "halo2-regex"
 version = "0.1.0"
-source = "git+https://github.com/zkemail/halo2-regex.git#e2cde46807e051a2cef5c5f35780f0ca5d93c7ea"
+source = "git+https://github.com/zkemail/halo2-regex.git#39ef78f9eb8d24e0ee7096adb664bf8f9f5112ee"
 dependencies = [
  "clap 4.2.1",
+ "console_error_panic_hook",
  "fancy-regex",
+ "getrandom",
  "graph-cycles",
  "halo2-base 0.2.2 (git+https://github.com/axiom-crypto/halo2-lib.git?rev=9860acc)",
  "halo2-ecc 0.2.2 (git+https://github.com/axiom-crypto/halo2-lib.git?rev=9860acc)",
  "itertools",
  "js-sandbox",
+ "js-sys",
  "petgraph",
+ "rayon",
  "serde",
  "serde_json",
  "thiserror",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-bindgen-rayon",
+ "web-sys",
 ]
 
 [[package]]
@@ -2114,10 +2125,12 @@ dependencies = [
  "base64 0.21.5",
  "cfdkim",
  "clap 4.2.1",
+ "console_error_panic_hook",
  "criterion",
  "ethereum-types",
  "ethers",
  "fancy-regex",
+ "getrandom",
  "halo2-base 0.2.2 (git+https://github.com/axiom-crypto/halo2-lib.git?rev=9860acc)",
  "halo2-base64",
  "halo2-dynamic-sha256",
@@ -2126,12 +2139,15 @@ dependencies = [
  "halo2-rsa",
  "hex",
  "itertools",
+ "js-sys",
  "mailparse",
  "num-bigint",
  "num-traits",
  "once_cell",
  "poseidon 0.2.0 (git+https://github.com/privacy-scaling-explorations/poseidon.git?rev=2fb4a2385bada39b50dce12fe50cb80d2fd33476)",
+ "quad-storage",
  "rand",
+ "rayon",
  "regex",
  "rsa",
  "serde",
@@ -2141,9 +2157,14 @@ dependencies = [
  "slog",
  "snark-verifier",
  "snark-verifier-sdk",
+ "stringreader",
  "temp-env",
  "thiserror",
  "tokio",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-bindgen-rayon",
+ "web-sys",
 ]
 
 [[package]]
@@ -2314,9 +2335,9 @@ dependencies = [
 
 [[package]]
 name = "http-body"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5f38f16d184e36f2408a55281cd658ecbd3ca05cce6d6510a176eca393e26d1"
+checksum = "7ceab25649e9960c0311ea418d17bee82c0dcec1bd053b5f9a66e265a693bed2"
 dependencies = [
  "bytes",
  "http",
@@ -2552,9 +2573,9 @@ dependencies = [
 
 [[package]]
 name = "itoa"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af150ab688ff2122fcef229be89cb50dd66af9e01a4ff320cc137eecc9bacc38"
+checksum = "b1a46d1a171d865aa5f83f92695765caa047a9b4cbae2cbf37dbd613a793fd4c"
 
 [[package]]
 name = "jpeg-decoder"
@@ -2811,6 +2832,21 @@ dependencies = [
  "wasi",
  "windows-sys 0.48.0",
 ]
+
+[[package]]
+name = "nanoserde"
+version = "0.1.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a983d0b19ed0fcd803c4f04f9b20d5e6dd17e06d44d98742a0985ac45dab1bc"
+dependencies = [
+ "nanoserde-derive",
+]
+
+[[package]]
+name = "nanoserde-derive"
+version = "0.1.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4dc96541767a4279572fdcf9f95af9cc1c9b2a2254e7a079203c81e206a9059"
 
 [[package]]
 name = "new_debug_unreachable"
@@ -3466,6 +3502,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "quad-storage"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e73edba8c792f3b5a45c68a1086f6f8c1bbda34ab9399a7faabd7dc7d4e14a0e"
+dependencies = [
+ "lazy_static",
+ "nanoserde",
+ "quad-storage-sys",
+]
+
+[[package]]
+name = "quad-storage-sys"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1187c77ced2cc6ae79bd6e35cc09e22159164a05c4d867e299bfbf1f801e9157"
+dependencies = [
+ "sapp-jsutils",
+]
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3784,9 +3840,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.38.26"
+version = "0.38.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9470c4bf8246c8daf25f9598dca807fb6510347b1e1cfa55749113850c79d88a"
+checksum = "72e572a5e8ca657d7366229cdde4bd14c4eb5499a9573d4d366fe1b599daa316"
 dependencies = [
  "bitflags 2.4.1",
  "errno",
@@ -3803,9 +3859,9 @@ checksum = "7ffc183a10b4478d04cbbbfc96d0873219d962dd5accaff2ffbd4ceb7df837f4"
 
 [[package]]
 name = "ryu"
-version = "1.0.15"
+version = "1.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ad4cc8da4ef723ed60bced201181d83791ad433213d8c24efffda1eec85d741"
+checksum = "f98d2aa92eebf49b69786be48e4477826b256916e84a57ff2a4f21923b48eb4c"
 
 [[package]]
 name = "salsa20"
@@ -3824,6 +3880,12 @@ checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
 ]
+
+[[package]]
+name = "sapp-jsutils"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb8ababa867431fa6c0a178248bfe7e77b5d1de357c9848883ba8e3946bb21d4"
 
 [[package]]
 name = "scale-info"
@@ -4267,6 +4329,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "stringreader"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "913e7b03d63752f6cdd2df77da36749d82669904798fe8944b9ec3d23f159905"
+
+[[package]]
 name = "strsim"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4477,9 +4545,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.34.0"
+version = "1.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0c014766411e834f7af5b8f4cf46257aab4036ca95e9d2c144a10f59ad6f5b9"
+checksum = "841d45b238a16291a4e1584e61820b8ae57d696cc5015c459c229ccc6990cc1c"
 dependencies = [
  "backtrace",
  "bytes",
@@ -4656,9 +4724,9 @@ dependencies = [
 
 [[package]]
 name = "try-lock"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3528ecfd12c466c6f163363caf2d02a71161dd5e1cc6ae7b34207ea2d42d81ed"
+checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "ttf-parser"
@@ -5154,9 +5222,9 @@ checksum = "dff9641d1cd4be8d1a070daf9e3773c5f67e78b4d9d42263020c057706765c04"
 
 [[package]]
 name = "winnow"
-version = "0.5.25"
+version = "0.5.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7e87b8dfbe3baffbe687eef2e164e32286eff31a5ee16463ce03d991643ec94"
+checksum = "b67b5f0a4e7a27a64c651977932b9dc5667ca7fc31ac44b03ed37a0cf42fdfff"
 dependencies = [
  "memchr",
 ]
@@ -5228,18 +5296,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.7.29"
+version = "0.7.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d075cf85bbb114e933343e087b92f2146bac0d55b534cbb8188becf0039948e"
+checksum = "306dca4455518f1f31635ec308b6b3e4eb1b11758cefafc782827d0aa7acb5c7"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.7.29"
+version = "0.7.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86cd5ca076997b97ef09d3ad65efe811fa68c9e874cb636ccb211223a813b0c2"
+checksum = "be912bf68235a88fbefd1b73415cb218405958d1655b2ece9035a19920bdf6ba"
 dependencies = [
  "proc-macro2",
  "quote",

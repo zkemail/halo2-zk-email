@@ -1,18 +1,20 @@
 use clap::{Parser, Subcommand};
 use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
+#[cfg(not(target_arch = "wasm32"))]
 use halo2_zk_email::helpers::*;
 use halo2_zk_email::*;
 use std::env::set_var;
 use std::fs::File;
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 }
-
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Subcommand, Clone)]
 enum Commands {
     /// Generate a setup parameter (not for production).
@@ -142,6 +144,7 @@ enum Commands {
     },
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -223,3 +226,6 @@ async fn main() {
         } => gen_regex_files(&decomposed_regex_config_path, &regex_dir_path, &regex_files_prefix).unwrap(),
     }
 }
+
+#[cfg(target_arch = "wasm32")]
+fn main() {}
