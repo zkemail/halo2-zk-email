@@ -19,7 +19,7 @@ use num_bigint::BigUint;
 use rand::rngs::OsRng;
 use rand::thread_rng;
 use regex_simple::Regex;
-use rsa::PublicKeyParts;
+use rsa::traits::PublicKeyParts;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use snark_verifier::loader::evm::{compile_yul, EvmLoader, ExecutorBuilder};
@@ -117,7 +117,7 @@ pub async fn deploy_and_call_verifiers(sols_dir: &PathBuf, runs: Option<usize>, 
 
     let verifier = EmailVerifier::new(email_verifier, client.clone());
     let instance = encode(&[
-        Token::Uint(U256::from_str_radix(&instance.header_hash_commit, 10).unwrap()),
+        Token::Uint(U256::from_str_radix(&instance.sign_commit, 10).unwrap()),
         Token::Uint(U256::from_str_radix(&instance.public_key_hash, 10).unwrap()),
         Token::Array(instance.header_substrs.iter().map(|s| Token::String(s.clone())).collect_vec()),
         Token::Array(instance.header_starts.iter().map(|idx| Token::Uint(U256::from(idx.clone()))).collect_vec()),

@@ -7,7 +7,7 @@ edition = "2021"
 num-bigint = { version = "0.4", features = ["rand"] }
 sha2 = "0.10.6"
 rand = "0.8.5"
-rsa = { version = "0.6.1", features = ["serde"] }
+rsa = { version = "0.9.6", features = ["serde", "sha2"] }
 halo2-base = { version = "0.2.2", default-features = false, features = [
     "halo2-pse",
     "display",
@@ -20,7 +20,7 @@ halo2-ecc = { version = "0.2.2", default-features = false, features = [
 halo2-dynamic-sha256 = { git = "https://github.com/zkemail/halo2-dynamic-sha256.git", version = "0.1.0", branch = "main" }
 halo2-rsa = { git = "https://github.com/zkemail/halo2-rsa.git", version = "0.1.0", branch = "main", default-features = false }
 halo2-regex = { git = "https://github.com/zkemail/halo2-regex.git", version = "0.1.0" }
-# halo2-regex = { path = "../halo2-regex-2", version = "0.1.0" }
+# halo2-regex = { path = "../halo2-regex-1", version = "0.1.0" }
 halo2-base64 = { git = "https://github.com/zkemail/halo2-base64.git", version = "0.1.0", branch = "feat/main_gate" }
 num-traits = "0.2.15"
 base64 = "0.21"
@@ -44,7 +44,7 @@ itertools = "0.10.3"
 clap = { version = "=4.2.1", features = ["derive"] }
 serde_json = "1.0.95"
 serde = { version = "1.0.159", features = ["derive"] }
-cfdkim = { version = "0.2.6", git = "https://github.com/SoraSuegami/dkim.git" }
+cfdkim = { version = "0.3.0", git = "https://github.com/SoraSuegami/dkim.git" }
 slog = "2.7.0"
 fancy-regex = "0.11.0"
 poseidon = { version = "0.2.0", git = "https://github.com/privacy-scaling-explorations/poseidon.git", rev = "2fb4a2385bada39b50dce12fe50cb80d2fd33476" }

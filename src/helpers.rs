@@ -26,7 +26,7 @@ use num_bigint::BigUint;
 use rand::rngs::OsRng;
 use rand::thread_rng;
 use regex_simple::Regex;
-use rsa::PublicKeyParts;
+use rsa::traits::PublicKeyParts;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use snark_verifier::loader::evm::{compile_yul, EvmLoader, ExecutorBuilder};
@@ -564,7 +564,7 @@ mod test {
     };
     use halo2_rsa::RSAPubE;
     use num_bigint::BigUint;
-    use rsa::PublicKeyParts;
+    use rsa::traits::PublicKeyParts;
     use std::{fs::File, io::Read, path::Path};
     use temp_env;
 

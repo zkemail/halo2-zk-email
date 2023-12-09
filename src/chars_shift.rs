@@ -82,6 +82,7 @@ impl<F: PrimeField> CharsShiftConfig<F> {
             );
             is_target_vec.push(is_target);
         }
+        gate.assert_equal(ctx, QuantumCell::Existing(&is_target_found), QuantumCell::Constant(F::one()));
         let shifted = self.shift_variable(ctx, gate, assigned_masked_chars, &shift_value);
         let assigned_substr = &shifted[0..self.max_substr_size];
         (assigned_substr.to_vec(), is_target_vec)
