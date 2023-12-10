@@ -93,6 +93,8 @@ snark-verifier-sdk = { git = "https://github.com/zkemail/snark-verifier.git", ve
 ] }
 quad-storage = "0.1.3"
 stringreader = "0.1.1"
+serde-wasm-bindgen = "0.6.2"
+
 
 [dev-dependencies]
 criterion = { version = "0.3" }

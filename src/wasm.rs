@@ -1,8 +1,23 @@
 use crate::*;
 use halo2_base::halo2_proofs::circuit;
+use halo2_base::halo2_proofs::circuit::Layouter;
 use halo2_base::halo2_proofs::circuit::{SimpleFloorPlanner, Value};
-use halo2_base::halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
-use halo2_base::halo2_proofs::{circuit::Layouter, plonk::Error};
+use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, Fq, Fr, G1Affine};
+use halo2_base::halo2_proofs::halo2curves::FieldExt;
+use halo2_base::halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk, verify_proof, Circuit, Column, ConstraintSystem, Instance, ProvingKey, VerifyingKey};
+use halo2_base::halo2_proofs::poly::kzg::multiopen::VerifierSHPLONK;
+use halo2_base::halo2_proofs::poly::kzg::strategy::AccumulatorStrategy;
+use halo2_base::halo2_proofs::poly::{
+    commitment::{Params, ParamsProver},
+    kzg::{
+        commitment::{KZGCommitmentScheme, ParamsKZG},
+        multiopen::{ProverGWC, VerifierGWC},
+        strategy::SingleStrategy,
+    },
+    Rotation, VerificationStrategy,
+};
+use halo2_base::halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
+use halo2_base::halo2_proofs::SerdeFormat;
 use halo2_base::utils::fe_to_biguint;
 use halo2_base::utils::{decompose_fe_to_u64_limbs, value_to_option};
 use halo2_base::QuantumCell;
@@ -11,10 +26,109 @@ use halo2_base::{
     gates::{flex_gate::FlexGateConfig, range::RangeConfig, GateInstructions, RangeInstructions},
     utils::PrimeField,
 };
+use js_sys::Uint8Array;
 use quad_storage;
 use serde_json;
 use std::io::BufReader;
 use stringreader::StringReader;
+use wasm_bindgen::prelude::*;
+pub use wasm_bindgen_rayon::init_thread_pool;
+extern crate console_error_panic_hook;
+use cfdkim::resolve_rsa_public_key;
+use js_sys::Promise;
+use num_bigint::BigUint;
+use rsa::rand_core::OsRng;
+use serde_wasm_bindgen::*;
+use wasm_bindgen_futures::future_to_promise;
+
+#[wasm_bindgen]
+pub fn init_panic_hook() {
+    console_error_panic_hook::set_once();
+}
+
+#[wasm_bindgen]
+pub fn prove_email(params: JsValue, proving_key: JsValue, email_str: String) -> Promise {
+    console_error_panic_hook::set_once();
+
+    future_to_promise(async move {
+        let params = Uint8Array::new(&params).to_vec();
+        let params = match ParamsKZG::<Bn256>::read(&mut BufReader::new(&params[..])) {
+            Ok(params) => params,
+            Err(_) => {
+                return Err(JsValue::from_str("fail to read params"));
+            }
+        };
+
+        let pk: Vec<u8> = Uint8Array::new(&proving_key).to_vec();
+        let pk = match ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut BufReader::new(&pk[..]), SerdeFormat::RawBytes) {
+            Ok(pk) => pk,
+            Err(_) => {
+                return Err(JsValue::from_str("fail to read proving key"));
+            }
+        };
+        let circuit = build_circuit::<Fr>(&email_str).await;
+        let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
+        let instances = circuit.instances();
+        match create_proof::<KZGCommitmentScheme<_>, ProverGWC<_>, _, _, _, _>(&params, &pk, &[circuit], &[&[instances[0].as_slice()]], OsRng, &mut transcript) {
+            Ok(_) => (),
+            Err(_) => {
+                return Err(JsValue::from_str("fail to create proof"));
+            }
+        };
+        let proof = transcript.finalize();
+        {
+            let strategy = SingleStrategy::new(&params);
+            let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+            verify_proof::<_, VerifierGWC<_>, _, _, _>(&params, pk.get_vk(), strategy, &[&[instances[0].as_slice()]], &mut transcript).expect("proof invalid");
+        }
+        Ok(serde_wasm_bindgen::to_value(&proof).unwrap())
+    })
+}
+
+// #[wasm_bindgen]
+// pub fn verify_email_proof(params: JsValue, verifying_key: JsValue, proof: JsValue, public_input: JsValue) -> Promise {
+//     console_error_panic_hook::set_once();
+
+//     future_to_promise(async move {
+//         let params = Uint8Array::new(&params).to_vec();
+//         let params = match ParamsKZG::<Bn256>::read(&mut BufReader::new(&params[..])) {
+//             Ok(params) => params,
+//             Err(_) => {
+//                 return Err(JsValue::from_str("fail to read params"));
+//             }
+//         };
+
+//         let vk: Vec<u8> = Uint8Array::new(&verifying_key).to_vec();
+//         let vk = match VerifyingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut BufReader::new(&vk[..]), SerdeFormat::RawBytes) {
+//             Ok(vk) => vk,
+//             Err(_) => {
+//                 return Err(JsValue::from_str("fail to read verifying key"));
+//             }
+//         };
+
+//         let proof: Vec<u8> = Uint8Array::new(&proof).to_vec();
+//         let proof = match <KZGCommitmentScheme<_> as VerificationStrategy<DefaultEmailVerifyCircuit<Fr>, _>>::Proof::read(&mut BufReader::new(&proof[..])) {
+//             Ok(proof) => proof,
+//             Err(_) => {
+//                 return Err(JsValue::from_str("fail to read proof"));
+//             }
+//         };
+
+//         let public_input: Vec<u8> = Uint8Array::new(&public_input).to_vec();
+//         let public_input = match <KZGCommitmentScheme<_> as VerificationStrategy<DefaultEmailVerifyCircuit<Fr>, _>>::PublicInput::read(&mut BufReader::new(&public_input[..])) {
+//             Ok(public_input) => public_input,
+//             Err(_) => {
+//                 return Err(JsValue::from_str("fail to read public input"));
+//             }
+//         };
+
+//         let mut transcript = Blake2bRead::<_, G1Affine, Challenge255<_>>::init(&proof);
+//         match proof.verify(&params, &vk, &[public_input], &mut transcript) {
+//             Ok(_) => Ok(JsValue::from_bool(true)),
+//             Err(_) => Ok(JsValue::from_bool(false)),
+//         }
+//     })
+// }
 
 pub(crate) fn configure_wasm<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> DefaultEmailVerifyConfig<F> {
     let storage = &mut quad_storage::STORAGE.lock().unwrap();
@@ -141,4 +255,15 @@ pub(crate) fn get_config_params_wasm() -> EmailVerifyConfigParams {
     let config_params_str = storage.get(EMAIL_VERIFY_CONFIG_ENV).expect("failed to get config params");
     let config_params: EmailVerifyConfigParams = serde_json::from_str(&config_params_str).expect("failed to parse config params");
     config_params
+}
+
+pub(crate) async fn build_circuit<F: PrimeField>(email_str: &str) -> DefaultEmailVerifyCircuit<F> {
+    let email_bytes = email_str.as_bytes().to_vec();
+    let public_key = resolve_rsa_public_key(&email_bytes).await.expect("failed to resolve public key");
+    let public_key_n = BigUint::from_radix_le(&public_key.n().clone().to_radix_le(16), 16).unwrap();
+    DefaultEmailVerifyCircuit {
+        email_bytes,
+        public_key_n,
+        _f: PhantomData,
+    }
 }
