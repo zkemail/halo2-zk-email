@@ -619,8 +619,7 @@ checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 [[package]]
 name = "colored"
 version = "2.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2674ec482fbc38012cf31e6c42ba0177b431a0cb6f15fe40efa5aab1bda516f6"
+source = "git+https://github.com/colored-rs/colored.git?tag=v2.0.4#b391ff0e3b29262441b6a948dd49344b5645c398"
 dependencies = [
  "is-terminal",
  "lazy_static",
@@ -1909,7 +1908,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-sink",
- "gloo-utils",
+ "gloo-utils 0.1.7",
  "js-sys",
  "pin-project",
  "serde",
@@ -1917,6 +1916,21 @@ dependencies = [
  "thiserror",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "gloo-storage"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbc8031e8c92758af912f9bc08fbbadd3c6f3cfcbf6b64cdf3d6a81f0139277a"
+dependencies = [
+ "gloo-utils 0.2.0",
+ "js-sys",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "wasm-bindgen",
  "web-sys",
 ]
 
@@ -1937,6 +1951,19 @@ name = "gloo-utils"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "037fcb07216cb3a30f7292bd0176b050b7b9a052ba830ef7d5d65f6dc64ba58e"
+dependencies = [
+ "js-sys",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "gloo-utils"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b5555354113b18c547c1d3a98fbf7fb32a9ff4f6fa112ce823a21641a0ba3aa"
 dependencies = [
  "js-sys",
  "serde",
@@ -2107,7 +2134,7 @@ dependencies = [
 [[package]]
 name = "halo2-regex"
 version = "0.1.0"
-source = "git+https://github.com/zkemail/halo2-regex.git#39ef78f9eb8d24e0ee7096adb664bf8f9f5112ee"
+source = "git+https://github.com/zkemail/halo2-regex.git#b64905e8bc4deabed5a409cd5dbda1b2e8e241b2"
 dependencies = [
  "clap 4.2.1",
  "console_error_panic_hook",
@@ -2168,6 +2195,7 @@ dependencies = [
  "ethers",
  "fancy-regex",
  "getrandom",
+ "gloo-storage",
  "halo2-base 0.2.2 (git+https://github.com/axiom-crypto/halo2-lib.git?rev=9860acc)",
  "halo2-base64",
  "halo2-dynamic-sha256",
@@ -2182,10 +2210,10 @@ dependencies = [
  "num-traits",
  "once_cell",
  "poseidon 0.2.0 (git+https://github.com/privacy-scaling-explorations/poseidon.git?rev=2fb4a2385bada39b50dce12fe50cb80d2fd33476)",
- "quad-storage",
  "rand",
  "rayon",
  "regex",
+ "reqwasm",
  "rsa",
  "serde",
  "serde-wasm-bindgen 0.6.2",
@@ -2872,21 +2900,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nanoserde"
-version = "0.1.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a983d0b19ed0fcd803c4f04f9b20d5e6dd17e06d44d98742a0985ac45dab1bc"
-dependencies = [
- "nanoserde-derive",
-]
-
-[[package]]
-name = "nanoserde-derive"
-version = "0.1.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4dc96541767a4279572fdcf9f95af9cc1c9b2a2254e7a079203c81e206a9059"
-
-[[package]]
 name = "new_debug_unreachable"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3540,26 +3553,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quad-storage"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e73edba8c792f3b5a45c68a1086f6f8c1bbda34ab9399a7faabd7dc7d4e14a0e"
-dependencies = [
- "lazy_static",
- "nanoserde",
- "quad-storage-sys",
-]
-
-[[package]]
-name = "quad-storage-sys"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1187c77ced2cc6ae79bd6e35cc09e22159164a05c4d867e299bfbf1f801e9157"
-dependencies = [
- "sapp-jsutils",
-]
-
-[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3927,12 +3920,6 @@ checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
 ]
-
-[[package]]
-name = "sapp-jsutils"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb8ababa867431fa6c0a178248bfe7e77b5d1de357c9848883ba8e3946bb21d4"
 
 [[package]]
 name = "scale-info"

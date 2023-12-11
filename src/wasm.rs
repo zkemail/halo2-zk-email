@@ -1,4 +1,5 @@
 use crate::*;
+use gloo_storage::{LocalStorage, Storage};
 use halo2_base::halo2_proofs::circuit;
 use halo2_base::halo2_proofs::circuit::Layouter;
 use halo2_base::halo2_proofs::circuit::{SimpleFloorPlanner, Value};
@@ -27,7 +28,6 @@ use halo2_base::{
     utils::PrimeField,
 };
 use js_sys::Uint8Array;
-use quad_storage;
 use serde_json;
 use std::io::BufReader;
 use stringreader::StringReader;
@@ -35,11 +35,13 @@ use wasm_bindgen::prelude::*;
 pub use wasm_bindgen_rayon::init_thread_pool;
 extern crate console_error_panic_hook;
 use cfdkim::resolve_rsa_public_key;
-use js_sys::Promise;
+use js_sys::{Array as JsArray, Promise};
 use num_bigint::BigUint;
 use rsa::rand_core::OsRng;
 use serde_wasm_bindgen::*;
+use std::io::Read;
 use wasm_bindgen_futures::future_to_promise;
+use web_sys::console::log_1;
 
 #[wasm_bindgen]
 pub fn init_panic_hook() {
@@ -47,9 +49,9 @@ pub fn init_panic_hook() {
 }
 
 #[wasm_bindgen]
-pub fn prove_email(params: JsValue, proving_key: JsValue, email_str: String) -> Promise {
+pub fn prove_email(params: JsValue, pk_chunks: JsArray, email_str: String) -> Promise {
     console_error_panic_hook::set_once();
-
+    log_1(&JsValue::from_str("prove_email"));
     future_to_promise(async move {
         let params = Uint8Array::new(&params).to_vec();
         let params = match ParamsKZG::<Bn256>::read(&mut BufReader::new(&params[..])) {
@@ -58,30 +60,44 @@ pub fn prove_email(params: JsValue, proving_key: JsValue, email_str: String) -> 
                 return Err(JsValue::from_str("fail to read params"));
             }
         };
+        log_1(&JsValue::from_str("params read"));
 
-        let pk: Vec<u8> = Uint8Array::new(&proving_key).to_vec();
-        let pk = match ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut BufReader::new(&pk[..]), SerdeFormat::RawBytes) {
+        // // let pk: Vec<u8> = Uint8Array::new(&proving_key).to_vec();
+        let mut pk_vec = Vec::with_capacity(3 * 1024 * 1024 * 1024);
+        // let mut reader = BufReader::new(pk_vec.as_slice());
+        log_1(&JsValue::from_str(&format!("pk_chunks.length(): {}", pk_chunks.length())));
+        for idx in 0..pk_chunks.length() {
+            let mut chunk: Vec<u8> = Uint8Array::new(&pk_chunks.get(idx)).to_vec();
+            pk_vec.append(&mut chunk);
+            // let read_bytes = reader.read(&mut chunk).expect("fail to read chunk");
+            // log_1(&JsValue::from_str(&format!("read_bytes: {}", read_bytes)));
+            log_1(&JsValue::from_str(&format!("{}-th chunk added", idx)));
+            log_1(&JsValue::from_str(&format!("pk_vec.len(): {}", pk_vec.len())));
+        }
+        let pk = match ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut pk_vec.as_slice(), SerdeFormat::RawBytes) {
             Ok(pk) => pk,
             Err(_) => {
                 return Err(JsValue::from_str("fail to read proving key"));
             }
         };
-        let circuit = build_circuit::<Fr>(&email_str).await;
-        let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
-        let instances = circuit.instances();
-        match create_proof::<KZGCommitmentScheme<_>, ProverGWC<_>, _, _, _, _>(&params, &pk, &[circuit], &[&[instances[0].as_slice()]], OsRng, &mut transcript) {
-            Ok(_) => (),
-            Err(_) => {
-                return Err(JsValue::from_str("fail to create proof"));
-            }
-        };
-        let proof = transcript.finalize();
-        {
-            let strategy = SingleStrategy::new(&params);
-            let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-            verify_proof::<_, VerifierGWC<_>, _, _, _>(&params, pk.get_vk(), strategy, &[&[instances[0].as_slice()]], &mut transcript).expect("proof invalid");
-        }
-        Ok(serde_wasm_bindgen::to_value(&proof).unwrap())
+        log_1(&JsValue::from_str("pk read"));
+        // let circuit = build_circuit::<Fr>(&email_str).await;
+        // let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
+        // let instances = circuit.instances();
+        // match create_proof::<KZGCommitmentScheme<_>, ProverGWC<_>, _, _, _, _>(&params, &pk, &[circuit], &[&[instances[0].as_slice()]], OsRng, &mut transcript) {
+        //     Ok(_) => (),
+        //     Err(_) => {
+        //         return Err(JsValue::from_str("fail to create proof"));
+        //     }
+        // };
+        // let proof = transcript.finalize();
+        // {
+        //     let strategy = SingleStrategy::new(&params);
+        //     let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+        //     verify_proof::<_, VerifierGWC<_>, _, _, _>(&params, pk.get_vk(), strategy, &[&[instances[0].as_slice()]], &mut transcript).expect("proof invalid");
+        // }
+        // Ok(serde_wasm_bindgen::to_value(&proof).unwrap())
+        Ok(JsValue::from_str("proof"))
     })
 }
 
@@ -131,7 +147,6 @@ pub fn prove_email(params: JsValue, proving_key: JsValue, email_str: String) -> 
 // }
 
 pub(crate) fn configure_wasm<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> DefaultEmailVerifyConfig<F> {
-    let storage = &mut quad_storage::STORAGE.lock().unwrap();
     let params = get_config_params_wasm();
     let range_config = RangeConfig::configure(
         meta,
@@ -162,13 +177,13 @@ pub(crate) fn configure_wasm<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> D
     let sign_verify_config = SignVerifyConfig::configure(range_config.clone(), sign_verify_params.public_key_bits);
 
     let bodyhash_allstr_def = {
-        let string = storage.get(&header_params.bodyhash_allstr_filepath).expect("failed to get allstr");
+        let string = LocalStorage::get::<String>(&header_params.bodyhash_allstr_filepath).expect("failed to get allstr");
         let mut streader = StringReader::new(&string);
         let bufreader = BufReader::new(streader);
         AllstrRegexDef::read_from_reader(bufreader)
     };
     let bodyhash_substr_def = {
-        let string = storage.get(&header_params.bodyhash_substr_filepath).expect("failed to get substr");
+        let string = LocalStorage::get::<String>(&header_params.bodyhash_substr_filepath).expect("failed to get substr");
         let mut streader = StringReader::new(&string);
         let bufreader = BufReader::new(streader);
         SubstrRegexDef::read_from_reader(bufreader)
@@ -183,14 +198,14 @@ pub(crate) fn configure_wasm<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> D
         .iter()
         .zip(header_params.substr_filepathes.iter())
         .map(|(allstr_path, substr_pathes)| {
-            let string = storage.get(allstr_path).expect("failed to get allstr");
+            let string = LocalStorage::get::<String>(allstr_path).expect("failed to get allstr");
             let mut streader = StringReader::new(&string);
             let bufreader = BufReader::new(streader);
             let allstr = AllstrRegexDef::read_from_reader(bufreader);
             let substrs = substr_pathes
                 .into_iter()
                 .map(|path| {
-                    let string = storage.get(path).expect("failed to get substr");
+                    let string = LocalStorage::get::<String>(path).expect("failed to get substr");
                     let mut streader = StringReader::new(&string);
                     let bufreader = BufReader::new(streader);
                     SubstrRegexDef::read_from_reader(bufreader)
@@ -213,14 +228,14 @@ pub(crate) fn configure_wasm<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> D
         .iter()
         .zip(body_params.substr_filepathes.iter())
         .map(|(allstr_path, substr_pathes)| {
-            let string = storage.get(allstr_path).expect("failed to get allstr");
+            let string = LocalStorage::get::<String>(allstr_path).expect("failed to get allstr");
             let mut streader = StringReader::new(&string);
             let bufreader = BufReader::new(streader);
             let allstr = AllstrRegexDef::read_from_reader(bufreader);
             let substrs = substr_pathes
                 .into_iter()
                 .map(|path| {
-                    let string = storage.get(path).expect("failed to get substr");
+                    let string = LocalStorage::get::<String>(path).expect("failed to get substr");
                     let mut streader = StringReader::new(&string);
                     let bufreader = BufReader::new(streader);
                     SubstrRegexDef::read_from_reader(bufreader)
@@ -251,8 +266,7 @@ pub(crate) fn configure_wasm<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> D
 }
 
 pub(crate) fn get_config_params_wasm() -> EmailVerifyConfigParams {
-    let storage = &mut quad_storage::STORAGE.lock().unwrap();
-    let config_params_str = storage.get(EMAIL_VERIFY_CONFIG_ENV).expect("failed to get config params");
+    let config_params_str = LocalStorage::get::<String>(EMAIL_VERIFY_CONFIG_ENV).expect("failed to get config params");
     let config_params: EmailVerifyConfigParams = serde_json::from_str(&config_params_str).expect("failed to parse config params");
     config_params
 }
@@ -267,3 +281,45 @@ pub(crate) async fn build_circuit<F: PrimeField>(email_str: &str) -> DefaultEmai
         _f: PhantomData,
     }
 }
+
+// #[wasm_bindgen]
+// pub async fn fetch_params(url: String) -> String {
+//     let params = Request::get(&url)
+//         .send()
+//         .await
+//         .expect("failed to send get request for params")
+//         .binary()
+//         .await
+//         .expect("failed to fetch params");
+//     // let params = Uint8Array::new(&params).to_vec();
+//     log_1(&JsValue::from_str(&format!("params: {:?}", params)));
+//     let hex_str = format!("0x{}", hex::encode(params));
+//     hex_str
+//     // let params = ParamsKZG::<Bn256>::read(&mut BufReader::new(&params[..])).expect("failed to read params");
+//     // params
+// }
+
+// #[wasm_bindgen]
+// pub async fn fetch_proving_key(url: String) -> String {
+//     let pk = Request::get(&url)
+//         .send()
+//         .await
+//         .expect("failed to send get request for pk")
+//         .binary()
+//         .await
+//         .expect("failed to fetch pk");
+//     let hex_str = format!("0x{}", hex::encode(pk));
+//     hex_str
+//     // let pk = Uint8Array::new(&pk).to_vec();
+//     // let pk = ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut BufReader::new(&pk[..]), SerdeFormat::RawBytes).expect("failed to read pk");
+//     // pk
+// }
+
+// #[wasm_bindgen]
+// pub async fn fetch_public_key(email_str: &str) -> String {
+//     let email_bytes = email_str.as_bytes().to_vec();
+//     let public_key = resolve_rsa_public_key(&email_bytes).await.expect("failed to resolve public key");
+//     let public_key_n = public_key.n().clone().to_radix_le(16);
+//     let hex_str = format!("0x{}", hex::encode(public_key_n));
+//     hex_str
+// }
