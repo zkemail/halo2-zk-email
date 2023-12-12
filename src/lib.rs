@@ -721,7 +721,8 @@ mod test {
             f.read_to_end(&mut buf).unwrap();
             buf
         };
-
+        println!("email {}", String::from_utf8(email_bytes.clone()).unwrap());
+        println!("email bytes {:?}", email_bytes.clone());    
         let logger = slog::Logger::root(slog::Discard, slog::o!());
         let public_key = resolve_public_key(&logger, &email_bytes).await.unwrap();
         let public_key = match public_key {
