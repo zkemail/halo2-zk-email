@@ -35,18 +35,22 @@ use wasm_bindgen::prelude::*;
 pub use wasm_bindgen_rayon::init_thread_pool;
 extern crate console_error_panic_hook;
 use cfdkim::{get_google_dns_url, get_rsa_public_key_from_google_dns};
+use js_sys::JSON;
 use js_sys::{Array as JsArray, Promise};
 use num_bigint::BigUint;
+use once_cell::sync::OnceCell;
 use rsa::rand_core::OsRng;
 use serde_wasm_bindgen::*;
 use snark_verifier_sdk::gen_pk;
 use std::io::Read;
 use wasm_bindgen_futures::future_to_promise;
 use web_sys::console::log_1;
-use js_sys::JSON;
+
 // use indexed_db_futures::prelude::*;
 
 const HALO2_ZKEMAIL_SETTINGS_OBJECT: &str = "halo2_zkemail_settings";
+
+// pub static PROVING_KEY: OnceCell<ProvingKey<G1Affine>> = OnceCell::new();
 
 #[wasm_bindgen]
 pub fn init_panic_hook() {
@@ -55,13 +59,13 @@ pub fn init_panic_hook() {
 
 #[wasm_bindgen]
 pub fn init_configs(
-    config_params: String, 
-    bodyhash_allstr_def: String, 
-    bodyhash_substr_def: String, 
-    header_allstr_defs: JsArray, 
-    header_substr_defs: JsArray, 
+    config_params: String,
+    bodyhash_allstr_def: String,
+    bodyhash_substr_def: String,
+    header_allstr_defs: JsArray,
+    header_substr_defs: JsArray,
     body_allstr_defs: JsArray,
-    body_substr_defs: JsArray
+    body_substr_defs: JsArray,
 ) -> Result<JsValue, JsValue> {
     console_error_panic_hook::set_once();
     let config_params: EmailVerifyConfigParams = serde_json::from_str(&config_params).map_err(|err| JsValue::from_str(&err.to_string()))?;
@@ -69,7 +73,7 @@ pub fn init_configs(
         let mut streader = StringReader::new(&bodyhash_allstr_def);
         let bufreader = BufReader::new(streader);
         AllstrRegexDef::read_from_reader(bufreader)
-    };        
+    };
     let bodyhash_substr_def: SubstrRegexDef = {
         let mut streader = StringReader::new(&bodyhash_substr_def);
         let bufreader = BufReader::new(streader);
@@ -82,7 +86,8 @@ pub fn init_configs(
     let mut bodyhash_substr_id = 1;
 
     let header_regex_defs = header_allstr_defs
-        .iter().enumerate()
+        .iter()
+        .enumerate()
         .map(|(idx, allstr_def)| {
             let allstr_def_str = allstr_def.as_string().unwrap();
             let mut streader = StringReader::new(&allstr_def_str);
@@ -104,7 +109,8 @@ pub fn init_configs(
         })
         .collect_vec();
     let body_regex_defs = body_allstr_defs
-        .iter().enumerate()
+        .iter()
+        .enumerate()
         .map(|(idx, allstr_def)| {
             let allstr_def_str = allstr_def.as_string().unwrap();
             let mut streader = StringReader::new(&allstr_def_str);
@@ -149,27 +155,28 @@ pub fn fetch_rsa_public_key(response: String) -> Result<String, JsValue> {
     Ok(hex)
 }
 
-#[wasm_bindgen]
-pub fn gen_proving_key(params: JsValue, email_str: String, public_key_n: String) -> Result<JsValue, JsValue> {
-    console_error_panic_hook::set_once();
-    let params = Uint8Array::new(&params).to_vec();
-    let mut params = match ParamsKZG::<Bn256>::read(&mut BufReader::new(&params[..])) {
-        Ok(params) => params,
-        Err(_) => {
-            return Err(JsValue::from_str("fail to read params"));
-        }
-    };
-    log_1(&JsValue::from_str("params read"));
-    let app_config = default_config_params();
-    log_1(&JsValue::from_str("config params read"));
-    if params.k() > app_config.degree {
-        params.downsize(app_config.degree);
-    }
-    let circuit = build_circuit::<Fr>(&email_str, &public_key_n);
-    log_1(&JsValue::from_str("circuit built"));
-    let pk = gen_pk::<DefaultEmailVerifyCircuit<Fr>>(&params, &circuit, None);
-    Ok(JsValue::from_str("proof"))
-}
+// #[wasm_bindgen]
+// pub fn gen_proving_key(params: JsValue, email_str: String, public_key_n: String) -> Result<JsValue, JsValue> {
+//     console_error_panic_hook::set_once();
+//     let params = Uint8Array::new(&params).to_vec();
+//     let mut params = match ParamsKZG::<Bn256>::read(&mut BufReader::new(&params[..])) {
+//         Ok(params) => params,
+//         Err(_) => {
+//             return Err(JsValue::from_str("fail to read params"));
+//         }
+//     };
+//     log_1(&JsValue::from_str("params read"));
+//     let app_config = default_config_params();
+//     log_1(&JsValue::from_str("config params read"));
+//     if params.k() > app_config.degree {
+//         params.downsize(app_config.degree);
+//     }
+//     let circuit = build_circuit::<Fr>(&email_str, &public_key_n);
+//     log_1(&JsValue::from_str("circuit built"));
+//     let pk = gen_pk::<DefaultEmailVerifyCircuit<Fr>>(&params, &circuit, None);
+//     PROVING_KEY.set(pk).unwrap();
+//     Ok(JsValue::NULL)
+// }
 
 #[wasm_bindgen]
 pub fn prove_email(params: JsValue, pk_chunks: JsArray, email_str: String, public_key_n: String) -> Result<JsValue, JsValue> {
@@ -184,48 +191,65 @@ pub fn prove_email(params: JsValue, pk_chunks: JsArray, email_str: String, publi
     };
     log_1(&JsValue::from_str("params read"));
 
-    // // let pk: Vec<u8> = Uint8Array::new(&proving_key).to_vec();
-    log_1(&JsValue::from_str(&format!("pk max size {}", 1 * 1024 * 1024 * 1024 as u128)));
-    let mut pk_vec = Vec::with_capacity(1 * 1024 * 1024 * 1024);
-    log_1(&JsValue::from_str(&format!("pk max size {}", 2 * 1024 * 1024 * 1024 as u128)));
-    pk_vec.append(&mut vec![0; 1 * 1024 * 1024 * 1024]);
-    log_1(&JsValue::from_str(&format!("pk max size {}", 2987231672 as u128)));
-    pk_vec.append(&mut vec![0; 2987231672 - 2 * 1024 * 1024 * 1024]);
-    // let mut reader = BufReader::new(pk_vec.as_slice());
-    log_1(&JsValue::from_str(&format!("pk_chunks.length(): {}", pk_chunks.length())));
-    for idx in 0..pk_chunks.length() {
-        // let mut chunk: Vec<u8> = Uint8Array::new(&pk_chunks.get(idx)).to_vec();
-        // assert!(chunk.len() < 1 * 1024 * 1024 * 1024);
-        // pk_vec.append(&mut chunk);
-        // let read_bytes = reader.read(&mut chunk).expect("fail to read chunk");
-        // log_1(&JsValue::from_str(&format!("read_bytes: {}", read_bytes)));
-        // log_1(&JsValue::from_str(&format!("{}-th chunk added", idx)));
-        // log_1(&JsValue::from_str(&format!("pk_vec.len(): {}", pk_vec.len())));
-    }
-    let pk = match ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut pk_vec.as_slice(), SerdeFormat::RawBytes) {
+    let mut reader = JsArrayReader::new(pk_chunks);
+    let pk = match ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut BufReader::new(&mut reader), SerdeFormat::RawBytes) {
         Ok(pk) => pk,
         Err(_) => {
             return Err(JsValue::from_str("fail to read proving key"));
         }
     };
     log_1(&JsValue::from_str("pk read"));
-    // let circuit = build_circuit::<Fr>(&email_str).await;
-    // let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
-    // let instances = circuit.instances();
-    // match create_proof::<KZGCommitmentScheme<_>, ProverGWC<_>, _, _, _, _>(&params, &pk, &[circuit], &[&[instances[0].as_slice()]], OsRng, &mut transcript) {
-    //     Ok(_) => (),
+
+    // // let pk: Vec<u8> = Uint8Array::new(&proving_key).to_vec();
+    // log_1(&JsValue::from_str(&format!("pk max size {}", 1 * 1024 * 1024 * 1024 as u128)));
+    // let mut pk_vec = Vec::with_capacity(1 * 1024 * 1024 * 1024);
+    // log_1(&JsValue::from_str(&format!("pk max size {}", 2 * 1024 * 1024 * 1024 as u128)));
+    // pk_vec.append(&mut vec![0; 1 * 1024 * 1024 * 1024]);
+    // log_1(&JsValue::from_str(&format!("pk max size {}", 2987231672 as u128)));
+    // pk_vec.append(&mut vec![0; 2987231672 - 2 * 1024 * 1024 * 1024]);
+    // // let mut reader = BufReader::new(pk_vec.as_slice());
+    // log_1(&JsValue::from_str(&format!("pk_chunks.length(): {}", pk_chunks.length())));
+    // for idx in 0..pk_chunks.length() {
+    //     // let mut chunk: Vec<u8> = Uint8Array::new(&pk_chunks.get(idx)).to_vec();
+    //     // assert!(chunk.len() < 1 * 1024 * 1024 * 1024);
+    //     // pk_vec.append(&mut chunk);
+    //     // let read_bytes = reader.read(&mut chunk).expect("fail to read chunk");
+    //     // log_1(&JsValue::from_str(&format!("read_bytes: {}", read_bytes)));
+    //     // log_1(&JsValue::from_str(&format!("{}-th chunk added", idx)));
+    //     // log_1(&JsValue::from_str(&format!("pk_vec.len(): {}", pk_vec.len())));
+    // }
+    // let pk = match ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut pk_vec.as_slice(), SerdeFormat::RawBytes) {
+    //     Ok(pk) => pk,
     //     Err(_) => {
-    //         return Err(JsValue::from_str("fail to create proof"));
+    //         return Err(JsValue::from_str("fail to read proving key"));
     //     }
     // };
-    // let proof = transcript.finalize();
-    // {
-    //     let strategy = SingleStrategy::new(&params);
-    //     let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-    //     verify_proof::<_, VerifierGWC<_>, _, _, _>(&params, pk.get_vk(), strategy, &[&[instances[0].as_slice()]], &mut transcript).expect("proof invalid");
-    // }
-    // Ok(serde_wasm_bindgen::to_value(&proof).unwrap())
-    Ok(JsValue::from_str("proof"))
+
+    // let pk = PROVING_KEY.get().ok_or(JsValue::from_str(&"proving key is not set"))?.clone();
+    // log_1(&JsValue::from_str(&format!("pk {:?}", pk)));
+    // log_1(&JsValue::from_str("pk read"));
+    let circuit = build_circuit::<Fr>(&email_str, &public_key_n);
+    log_1(&JsValue::from_str("circuit built"));
+    let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
+    let instances = circuit.instances();
+    log_1(&JsValue::from_str("instances built"));
+    match create_proof::<KZGCommitmentScheme<_>, ProverGWC<_>, _, _, _, _>(&params, &pk, &[circuit], &[&[instances[0].as_slice()]], OsRng, &mut transcript) {
+        Ok(_) => (),
+        Err(err) => {
+            return Err(JsValue::from_str(&format!("fail to create proof. Error: {}", err.to_string())));
+        }
+    };
+    let proof = transcript.finalize();
+    log_1(&JsValue::from_str("proof generated"));
+    {
+        let strategy = SingleStrategy::new(&params);
+        let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+        verify_proof::<_, VerifierGWC<_>, _, _, _>(&params, pk.get_vk(), strategy, &[&[instances[0].as_slice()]], &mut transcript)
+            .map_err(|_| JsValue::from_str("fail to verify proof"))?;
+    }
+    log_1(&JsValue::from_str("proof verified"));
+    Ok(serde_wasm_bindgen::to_value(&proof).unwrap())
+    // Ok(JsValue::from_str("proof"))
 }
 
 // #[wasm_bindgen]
@@ -380,6 +404,8 @@ pub(crate) fn configure_wasm<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> D
     //     })
     //     .collect_vec();
     let header_regex_defs = GLOBAL_HEADER_DEFS.get().expect("header_regex_defs is not set").clone();
+    // log_1(&JsValue::from_str(&format!("header_regex_defs: {:?}", header_regex_defs)));
+    // log_1(&JsValue::from_str(&format!("bodyhash_defs: {:?}", bodyhash_defs)));
     let header_config = RegexSha2Config::configure(
         meta,
         header_params.max_variable_byte_size,
@@ -434,6 +460,7 @@ pub(crate) fn configure_wasm<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> D
     //     })
     //     .collect_vec();
     let body_regex_defs = GLOBAL_BODY_DEFS.get().expect("body_regex_defs is not set").clone();
+    // log_1(&JsValue::from_str(&format!("body_regex_defs: {:?}", body_regex_defs)));
     let body_config = RegexSha2Base64Config::configure(
         meta,
         body_params.max_variable_byte_size,
@@ -489,44 +516,37 @@ fn parse_js_array_string(string: &str) -> JsArray {
     parsed.into()
 }
 
-// #[wasm_bindgen]
-// pub async fn fetch_params(url: String) -> String {
-//     let params = Request::get(&url)
-//         .send()
-//         .await
-//         .expect("failed to send get request for params")
-//         .binary()
-//         .await
-//         .expect("failed to fetch params");
-//     // let params = Uint8Array::new(&params).to_vec();
-//     log_1(&JsValue::from_str(&format!("params: {:?}", params)));
-//     let hex_str = format!("0x{}", hex::encode(params));
-//     hex_str
-//     // let params = ParamsKZG::<Bn256>::read(&mut BufReader::new(&params[..])).expect("failed to read params");
-//     // params
-// }
+struct JsArrayReader {
+    array: JsArray,
+    consumed: (usize, usize),
+}
+impl Read for JsArrayReader {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, std::io::Error> {
+        let n = buf.len();
+        if n == 0 {
+            return Ok(0);
+        }
+        let mut remaining = n;
+        while (remaining > 0) {
+            if self.consumed.0 >= self.array.length() as usize {
+                return Ok(n - remaining);
+            }
+            let chunk = Uint8Array::new(&self.array.get(self.consumed.0 as u32)).to_vec();
+            let read_bytes = std::cmp::min(chunk.len() - self.consumed.1, remaining);
+            buf[n - remaining..n - remaining + read_bytes].copy_from_slice(&chunk[self.consumed.1..self.consumed.1 + read_bytes]);
+            remaining -= read_bytes;
+            self.consumed.1 += read_bytes;
+            if self.consumed.1 >= chunk.len() {
+                self.consumed.0 += 1;
+                self.consumed.1 = 0;
+            }
+        }
+        Ok(n - remaining)
+    }
+}
 
-// #[wasm_bindgen]
-// pub async fn fetch_proving_key(url: String) -> String {
-//     let pk = Request::get(&url)
-//         .send()
-//         .await
-//         .expect("failed to send get request for pk")
-//         .binary()
-//         .await
-//         .expect("failed to fetch pk");
-//     let hex_str = format!("0x{}", hex::encode(pk));
-//     hex_str
-//     // let pk = Uint8Array::new(&pk).to_vec();
-//     // let pk = ProvingKey::<G1Affine>::read::<_, DefaultEmailVerifyCircuit<Fr>>(&mut BufReader::new(&pk[..]), SerdeFormat::RawBytes).expect("failed to read pk");
-//     // pk
-// }
-
-// #[wasm_bindgen]
-// pub async fn fetch_public_key(email_str: &str) -> String {
-//     let email_bytes = email_str.as_bytes().to_vec();
-//     let public_key = resolve_rsa_public_key(&email_bytes).await.expect("failed to resolve public key");
-//     let public_key_n = public_key.n().clone().to_radix_le(16);
-//     let hex_str = format!("0x{}", hex::encode(public_key_n));
-//     hex_str
-// }
+impl JsArrayReader {
+    fn new(array: JsArray) -> Self {
+        Self { array, consumed: (0, 0) }
+    }
+}

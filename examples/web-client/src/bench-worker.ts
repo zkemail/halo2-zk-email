@@ -29,7 +29,8 @@ export async function fetchPublicKey(emailStr: string) {
     return publicKey;
 }
 
-export async function genProvingKey(params: Uint8Array, emailStr: string, publicKey: string) {
+
+export async function runBench(emailStr: string, times: number) {
     // const multiThread = await import(
     //     'halo2-zk-email'
     // );
@@ -37,62 +38,84 @@ export async function genProvingKey(params: Uint8Array, emailStr: string, public
     // await multiThread.default();
     // console.log(`hardware: ${navigator.hardwareConcurrency}`);
     // await multiThread.initThreadPool(4);
-    const multiThread = await fetchSaveConfigs();
-    console.log(publicKey);
-    await multiThread.gen_proving_key(params, emailStr, publicKey);
+    const multiThread = await initMultiThread();
+    await fetchSaveConfigs(multiThread);
+    const params = await fetchParams();
+    console.log(params);
+    const publicKey = await fetchPublicKey(emailStr);
+    // await genProvingKey(multiThread, params, emailStr, publicKey)
+    const pkChunks = await fetchPkChunks();
+    console.log(pkChunks);
+    if (pkChunks == null) {
+        throw new Error("pkChunks is null");
+    }
+    // const vk = await fetchVk();
+    // console.log(vk);
+    // await fetch_save_configs();
+    // const privateKey = multiThread.sample_rsa_private_key(bits_len);
+    // const publicKey = multiThread.generate_rsa_public_key(privateKey);
+    // const signature = multiThread.sign(privateKey, msg);
+    const indexes = [];
+    const benches: number[] = [];
+    // // const results = multiThread.multi_bench_2048_1024_circuit(params, pk, vk, publicKey, msg, signature, times);
+    console.log("init");
+    for (let i = 0; i < times; i++) {
+        indexes.push(i);
+        // await multiThread.initThreadPool(4);
+        const start = performance.now();
+        const proof = await multiThread.prove_email(params, pkChunks, emailStr, publicKey);
+        const sub = performance.now() - start;
+        console.log(`index: ${i}, bench: ${sub} ms`);
+        benches.push(sub);
+        // const isValid = multiThread.verify_pkcs1v15_2048_1024_circuit(params, vk, proof);
+        // console.log(isValid);
+        // initOutput.__wbg_wbg_rayon_poolbuilder_free(navigator.hardwareConcurrency);
+    }
+    return proxy({
+        indexes: indexes,
+        benches: benches
+    })
 }
 
-// export async function fetchPk() {
-//     const response = await fetch('http://localhost:3000/bench.pk');
-//     // console.log(await response.blob());
-//     if (response.body == null) {
-//         return;
-//     }
-//     const chunks: Uint8Array[] = [];
-//     let maxSize = 0;
-//     let idx = 0;
-//     const reader = response.body.getReader();
 
-//     while (true) {
-//         const { done, value } = await reader.read();
-//         if (done) {
-//             break;
-//         }
-//         // console.log(value.toString());
-//         // localStorage.setItem(`pk_chunk_${idx}`, value.toString());
-//         chunks.push(value);
-//         maxSize += value.byteLength;
-//     }
-//     console.log(maxSize);
-
-//     // reader.read().then(function pump({ done, value }) {
-//     //     console.log(done, value);
-//     //     if (!done) {
-//     //         segments.push(value);
-//     //         maxSize += value.byteLength;
-//     //         reader.read().then(pump);
-//     //     }
-//     // });
-//     // const whole = new Uint8Array(0);
-//     // console.log(whole);
-//     // let pos = 0;
-//     // for (const chunk of chunks) {
-//     //     whole.set(new Uint8Array(chunk), pos);
-//     //     pos += chunk.byteLength;
-//     // }
-
-//     // return whole;
-//     //     // for await (chunk of response.body) {
-//     //     //     console.log(chunk);
-//     //     // }
-//     //     // const blob = await response.blob();
-//     //     // const bytes = await blob.arrayBuffer();
-//     //     // console.log(bytes);
-//     //     // const pk = new Uint8Array(bytes);
-//     //     // console.log(pk);
-//     //     // return pk;
-//     return chunks;
+// async function genProvingKey(multiThread: MultiThread, params: Uint8Array, emailStr: string, publicKey: string) {
+//     // const multiThread = await import(
+//     //     'halo2-zk-email'
+//     // );
+//     // console.log(multiThread);
+//     // await multiThread.default();
+//     // console.log(`hardware: ${navigator.hardwareConcurrency}`);
+//     // await multiThread.initThreadPool(4);
+//     // const multiThread = await fetchSaveConfigs();
+//     console.log(publicKey);
+//     await multiThread.gen_proving_key(params, emailStr, publicKey);
 // }
+
+export async function fetchPkChunks() {
+    const response = await fetch('http://localhost:3000/bench.pk');
+    // console.log(await response.blob());
+    if (response.body == null) {
+        return;
+    }
+    const chunks: Uint8Array[] = [];
+    let maxSize = 0;
+    // let idx = 0;
+    const reader = response.body.getReader();
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+            break;
+        }
+        // console.log(value.toString());
+        // localStorage.setItem(`pk_chunk_${idx}`, value.toString());
+        chunks.push(value);
+        maxSize += value.byteLength;
+    }
+    console.log(maxSize);
+
+    return chunks;
+}
 
 // export async function fetchVk() {
 //     const response = await fetch('http://localhost:3000/bench.vk');
@@ -101,13 +124,13 @@ export async function genProvingKey(params: Uint8Array, emailStr: string, public
 //     return vk;
 // }
 
-async function fetchSaveConfigs() {
+async function fetchSaveConfigs(multiThread: MultiThread) {
     // const multiThread = await import(
     //     'halo2-zk-email'
     // );
     // await multiThread.default();
     // await multiThread.initThreadPool(4);
-    const multiThread = await initMultiThread();
+    await multiThread.initThreadPool(4);
     const configParams = await fetchConfigParams();
     let configParamsJson = JSON.parse(configParams);
     // localStorage.setItem(configParamsJson.header_config.bodyhash_allstr_filepath, await fetchRegexFile(configParamsJson.header_config.bodyhash_allstr_filepath));
@@ -145,7 +168,6 @@ async function fetchSaveConfigs() {
     }
     console.log(bodySubstrDefs);
     multiThread.init_configs(configParams, bodyHashAllstrDef, bodyHashSubstrDef, headerAllstrDefs, headerSubstrDefs, bodyAllstrDefs, bodySubstrDefs);
-    return multiThread;
 }
 
 async function fetchConfigParams() {
@@ -462,11 +484,12 @@ async function initMultiThread() {
 
 const exports = {
     // initHandlers,
-    fetchSaveConfigs,
-    fetchParams,
+    // fetchSaveConfigs,
+    // fetchParams,
     // fetchPk,
-    fetchPublicKey,
-    genProvingKey,
+    // fetchPublicKey,
+    // genProvingKey,
+    runBench
 };
 expose(exports);
 export type BenchWorker = typeof exports;

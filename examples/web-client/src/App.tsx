@@ -157,8 +157,8 @@ function App() {
     // }
     // console.log(localStorage.length);
 
-    const params = await workerApi.fetchParams();
-    console.log(params);
+    // const params = await workerApi.fetchParams();
+    // console.log(params);
 
     const emailStr = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -175,8 +175,8 @@ function App() {
       reader.readAsText(emailFile, 'utf-8');
     });
     console.log(emailStr);
-    const publicKey = await workerApi.fetchPublicKey(emailStr);
-    await workerApi.genProvingKey(params, emailStr, publicKey);
+    // const publicKey = await workerApi.fetchPublicKey(emailStr);
+    // await workerApi.genProvingKey(params, emailStr, publicKey);
     // const vk = await fetch_vk();
     // console.log(vk);
     // try {
@@ -190,8 +190,8 @@ function App() {
     // }
     // let msg = new Uint8Array(new Array(32).fill(0));
     // console.log(msg);
-    // const results = await workerApi.initHandlers(emailStr, 1);
-    // console.log(results);
+    const results = await workerApi.runBench(emailStr, 1);
+    console.log(results);
     // const graph = document.getElementById('graph');
     // const avg = await results.avg;
     // const sdv = await results.sdv;
