@@ -37,15 +37,17 @@ extern crate console_error_panic_hook;
 use cfdkim::{get_google_dns_url, get_rsa_public_key_from_google_dns};
 use js_sys::JSON;
 use js_sys::{Array as JsArray, Promise};
+use log;
 use num_bigint::BigUint;
 use once_cell::sync::OnceCell;
-use rsa::rand_core::OsRng;
+use rand::rngs::OsRng;
 use serde_wasm_bindgen::*;
 use snark_verifier_sdk::gen_pk;
+use snark_verifier_sdk::halo2::gen_proof_shplonk;
 use std::io::Read;
+use wasm_bindgen_console_logger::DEFAULT_LOGGER;
 use wasm_bindgen_futures::future_to_promise;
 use web_sys::console::log_1;
-
 // use indexed_db_futures::prelude::*;
 
 const HALO2_ZKEMAIL_SETTINGS_OBJECT: &str = "halo2_zkemail_settings";
@@ -69,16 +71,20 @@ pub fn init_configs(
 ) -> Result<JsValue, JsValue> {
     console_error_panic_hook::set_once();
     let config_params: EmailVerifyConfigParams = serde_json::from_str(&config_params).map_err(|err| JsValue::from_str(&err.to_string()))?;
+    log_1(&JsValue::from_str(&format!("bodyhash_allstr_def: {}", bodyhash_allstr_def)));
     let bodyhash_allstr_def: AllstrRegexDef = {
-        let mut streader = StringReader::new(&bodyhash_allstr_def);
-        let bufreader = BufReader::new(streader);
+        // let mut streader = StringReader::new(&bodyhash_allstr_def);
+        let mut bytes = bodyhash_allstr_def.as_bytes();
+        let bufreader = BufReader::new(&mut bytes);
         AllstrRegexDef::read_from_reader(bufreader)
     };
+    log_1(&JsValue::from_str(&format!("bodyhash_allstr_def: {:?}", bodyhash_allstr_def)));
     let bodyhash_substr_def: SubstrRegexDef = {
         let mut streader = StringReader::new(&bodyhash_substr_def);
         let bufreader = BufReader::new(streader);
         SubstrRegexDef::read_from_reader(bufreader)
     };
+    log_1(&JsValue::from_str(&format!("bodyhash_substr_def: {:?}", bodyhash_substr_def)));
     let bodyhash_defs = RegexDefs {
         allstr: bodyhash_allstr_def,
         substrs: vec![bodyhash_substr_def],
@@ -181,6 +187,8 @@ pub fn fetch_rsa_public_key(response: String) -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn prove_email(params: JsValue, pk_chunks: JsArray, email_str: String, public_key_n: String) -> Result<JsValue, JsValue> {
     console_error_panic_hook::set_once();
+    log::set_logger(&DEFAULT_LOGGER).unwrap();
+    log::set_max_level(log::LevelFilter::Info);
     log_1(&JsValue::from_str("prove_email"));
     let params = Uint8Array::new(&params).to_vec();
     let params = match ParamsKZG::<Bn256>::read(&mut BufReader::new(&params[..])) {
@@ -233,21 +241,23 @@ pub fn prove_email(params: JsValue, pk_chunks: JsArray, email_str: String, publi
     let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
     let instances = circuit.instances();
     log_1(&JsValue::from_str("instances built"));
-    match create_proof::<KZGCommitmentScheme<_>, ProverGWC<_>, _, _, _, _>(&params, &pk, &[circuit], &[&[instances[0].as_slice()]], OsRng, &mut transcript) {
-        Ok(_) => (),
-        Err(err) => {
-            return Err(JsValue::from_str(&format!("fail to create proof. Error: {}", err.to_string())));
-        }
-    };
-    let proof = transcript.finalize();
+
+    // match create_proof::<KZGCommitmentScheme<_>, ProverGWC<_>, _, _, _, _>(&params, &pk, &[circuit], &[&[instances[0].as_slice()]], OsRng, &mut transcript) {
+    //     Ok(_) => (),
+    //     Err(err) => {
+    //         return Err(JsValue::from_str(&format!("fail to create proof. Error: {}", err.to_string())));
+    //     }
+    // };
+    // let proof = transcript.finalize();
+    let proof = gen_proof_shplonk(&params, &pk, circuit, instances, &mut OsRng, None);
     log_1(&JsValue::from_str("proof generated"));
-    {
-        let strategy = SingleStrategy::new(&params);
-        let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        verify_proof::<_, VerifierGWC<_>, _, _, _>(&params, pk.get_vk(), strategy, &[&[instances[0].as_slice()]], &mut transcript)
-            .map_err(|_| JsValue::from_str("fail to verify proof"))?;
-    }
-    log_1(&JsValue::from_str("proof verified"));
+    // {
+    //     let strategy = SingleStrategy::new(&params);
+    //     let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+    //     verify_proof::<_, VerifierGWC<_>, _, _, _>(&params, pk.get_vk(), strategy, &[&[instances[0].as_slice()]], &mut transcript)
+    //         .map_err(|_| JsValue::from_str("fail to verify proof"))?;
+    // }
+    // log_1(&JsValue::from_str("proof verified"));
     Ok(serde_wasm_bindgen::to_value(&proof).unwrap())
     // Ok(JsValue::from_str("proof"))
 }

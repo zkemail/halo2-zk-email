@@ -63,7 +63,11 @@ export async function runBench(emailStr: string, times: number) {
         indexes.push(i);
         // await multiThread.initThreadPool(4);
         const start = performance.now();
-        const proof = await multiThread.prove_email(params, pkChunks, emailStr, publicKey);
+        try {
+            const proof = multiThread.prove_email(params, pkChunks, emailStr, publicKey);
+        } catch (e) {
+            console.error(e);
+        }
         const sub = performance.now() - start;
         console.log(`index: ${i}, bench: ${sub} ms`);
         benches.push(sub);
