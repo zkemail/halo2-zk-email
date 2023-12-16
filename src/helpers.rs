@@ -231,6 +231,34 @@ pub fn prove<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str, pk
 /// # Return values
 /// Return `true` if the proof is valid, otherwise `false`.
 pub fn verify<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str, vk_path: &str, proof_path: &str, public_input_path: &str) -> Result<bool, Error> {
+    let proof = {
+        let mut f = File::open(&proof_path).unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+        buf
+    };
+    verify_util::<C>(params_path, circuit_config_path, vk_path, proof, public_input_path)
+}
+
+/// Verify a proof for the email verification circuit generated in wasm.
+///
+/// # Arguments
+/// * `params_path` - a file path of the SRS parameters.
+/// * `circuit_config_path` - a file path of the configuration of the email verification circuit.
+/// * `vk_path` - a file path of the verifying key.
+/// * `proof_hex_path` - a file path of the proof hex string.
+/// * `public_input_path` - a file path of the public input.
+/// # Return values
+/// Return `true` if the proof is valid, otherwise `false`.
+pub fn verify_wasm<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str, vk_path: &str, proof_hex_path: &str, public_input_path: &str) -> Result<bool, Error> {
+    let proof = {
+        let hex = fs::read_to_string(proof_hex_path).unwrap();
+        hex::decode(hex.trim_start_matches("0x")).unwrap()
+    };
+    verify_util::<C>(params_path, circuit_config_path, vk_path, proof, public_input_path)
+}
+
+fn verify_util<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str, vk_path: &str, proof: Vec<u8>, public_input_path: &str) -> Result<bool, Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let params = {
         let f = File::open(Path::new(params_path)).unwrap();
@@ -241,12 +269,6 @@ pub fn verify<C: CircuitExt<Fr>>(params_path: &str, circuit_config_path: &str, v
         let f = File::open(Path::new(vk_path)).unwrap();
         let mut reader = BufReader::new(f);
         VerifyingKey::<G1Affine>::read::<_, C>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
-    };
-    let proof = {
-        let mut f = File::open(&proof_path).unwrap();
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf).unwrap();
-        buf
     };
     let public_input = serde_json::from_reader::<_, DefaultEmailVerifyPublicInput>(File::open(public_input_path).unwrap()).unwrap();
     let instances = public_input.instances::<Fr>();

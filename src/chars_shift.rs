@@ -95,7 +95,11 @@ impl<F: PrimeField> CharsShiftConfig<F> {
         shift_value: &AssignedValue<'a, F>,
     ) -> Vec<AssignedValue<'a, F>> {
         debug_assert_eq!(inputs.len(), self.max_chars_size);
-        let max_shift_bits: usize = 64 - (self.max_chars_size).leading_zeros() as usize;
+        #[cfg(target_pointer_width = "64")]
+        let usize_bits = 64;
+        #[cfg(target_pointer_width = "32")]
+        let usize_bits = 32;
+        let max_shift_bits: usize = (usize_bits - (self.max_chars_size).leading_zeros()) as usize;
         let shift_value_bits = gate.num_to_bits(ctx, shift_value, max_shift_bits);
         let mut prev_tmp = inputs.to_vec();
         let max_len = inputs.len();

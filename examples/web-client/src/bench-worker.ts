@@ -1,6 +1,20 @@
 import { expose, proxy } from 'comlink';
 
 type MultiThread = typeof import('halo2-zk-email');
+interface DefaultEmailVerifyPublicInput {
+    // A decimal string of a commitment of the signature defined as poseidon(rsaSign).
+    sign_commit: string,
+    // A decimal string of the poseidon hash of the `n` parameter in the RSA public key. (The e parameter is fixed to 65537.)
+    public_key_hash: string,
+    // The start position of the substrings in the email header.
+    header_starts: number[],
+    // The substrings in the email header.
+    header_substrs: string[],
+    // The start position of the substrings in the email body.
+    body_starts: number[],
+    // The substrings in the email body.
+    body_substrs: string[],
+}
 
 export async function fetchParams() {
     const response = await fetch('http://localhost:3000/params.bin');
@@ -9,26 +23,12 @@ export async function fetchParams() {
     return params;
 }
 
-
-
-export async function fetchPublicKey(emailStr: string) {
-    // const multiThread = await import(
-    //     'halo2-zk-email'
-    // );
-    // console.log(multiThread);
-    // await multiThread.default();
-    // await multiThread.initThreadPool(4);
-    const multiThread = await initMultiThread();
-    console.log(emailStr);
-    const url = multiThread.google_dns_url_from_email(emailStr);
-    console.log(url);
-    const response = await fetch(url);
-    const responseText = await response.text();
-    console.log(responseText);
-    const publicKey = multiThread.fetch_rsa_public_key(responseText);
-    return publicKey;
+export async function fetchVk() {
+    const response = await fetch('http://localhost:3000/bench.vk');
+    const bytes = await response.arrayBuffer();
+    const vk = new Uint8Array(bytes);
+    return vk;
 }
-
 
 export async function runBench(emailStr: string, times: number) {
     // const multiThread = await import(
@@ -42,13 +42,14 @@ export async function runBench(emailStr: string, times: number) {
     await fetchSaveConfigs(multiThread);
     const params = await fetchParams();
     console.log(params);
-    const publicKey = await fetchPublicKey(emailStr);
+    const publicKey = await fetchPublicKey(multiThread, emailStr);
     // await genProvingKey(multiThread, params, emailStr, publicKey)
     const pkChunks = await fetchPkChunks();
     console.log(pkChunks);
     if (pkChunks == null) {
         throw new Error("pkChunks is null");
     }
+    const vk = await fetchVk();
     // const vk = await fetchVk();
     // console.log(vk);
     // await fetch_save_configs();
@@ -63,16 +64,17 @@ export async function runBench(emailStr: string, times: number) {
         indexes.push(i);
         // await multiThread.initThreadPool(4);
         const start = performance.now();
-        try {
-            const proof = multiThread.prove_email(params, pkChunks, emailStr, publicKey);
-        } catch (e) {
-            console.error(e);
-        }
+        const [proof, publicInput] = proveEmail(multiThread, params, pkChunks, emailStr, publicKey);
+        console.log(proof);
+        console.log(publicInput);
         const sub = performance.now() - start;
         console.log(`index: ${i}, bench: ${sub} ms`);
         benches.push(sub);
-        // const isValid = multiThread.verify_pkcs1v15_2048_1024_circuit(params, vk, proof);
-        // console.log(isValid);
+        const isValid = verifyEmailProof(multiThread, params, vk, proof, publicInput);
+        console.log(isValid);
+        if (!isValid) {
+            throw new Error("verify failed");
+        }
         // initOutput.__wbg_wbg_rayon_poolbuilder_free(navigator.hardwareConcurrency);
     }
     return proxy({
@@ -94,6 +96,28 @@ export async function runBench(emailStr: string, times: number) {
 //     console.log(publicKey);
 //     await multiThread.gen_proving_key(params, emailStr, publicKey);
 // }
+
+export function proveEmail(multiThread: MultiThread, params: Uint8Array, pkChunks: Uint8Array[], emailStr: string, publicKey: string): [string, DefaultEmailVerifyPublicInput] {
+    const proofOut = multiThread.prove_email(params, pkChunks, emailStr, publicKey);
+    return [proofOut[0], proofOut[1]];
+}
+
+export function verifyEmailProof(multiThread: MultiThread, params: Uint8Array, vk: Uint8Array, proof: string, publicInput: DefaultEmailVerifyPublicInput): boolean {
+    const isValid = multiThread.verify_email_proof(params, vk, proof, publicInput);
+    return isValid;
+}
+
+export async function fetchPublicKey(multiThread: MultiThread, emailStr: string) {
+    console.log(emailStr);
+    const url = multiThread.google_dns_url_from_email(emailStr);
+    console.log(url);
+    const response = await fetch(url);
+    const responseText = await response.text();
+    console.log(responseText);
+    const publicKey = multiThread.fetch_rsa_public_key(responseText);
+    return publicKey;
+}
+
 
 export async function fetchPkChunks() {
     const response = await fetch('http://localhost:3000/bench.pk');
@@ -121,20 +145,9 @@ export async function fetchPkChunks() {
     return chunks;
 }
 
-// export async function fetchVk() {
-//     const response = await fetch('http://localhost:3000/bench.vk');
-//     const bytes = await response.arrayBuffer();
-//     const vk = new Uint8Array(bytes);
-//     return vk;
-// }
 
-async function fetchSaveConfigs(multiThread: MultiThread) {
-    // const multiThread = await import(
-    //     'halo2-zk-email'
-    // );
-    // await multiThread.default();
-    // await multiThread.initThreadPool(4);
-    await multiThread.initThreadPool(4);
+
+export async function fetchSaveConfigs(multiThread: MultiThread) {
     const configParams = await fetchConfigParams();
     let configParamsJson = JSON.parse(configParams);
     // localStorage.setItem(configParamsJson.header_config.bodyhash_allstr_filepath, await fetchRegexFile(configParamsJson.header_config.bodyhash_allstr_filepath));
@@ -305,195 +318,27 @@ async function fetchRegexFile(filePath: string) {
 //     })
 // }
 
-async function initMultiThread() {
+export async function initMultiThread() {
     const multiThread = await import(
         'halo2-zk-email'
     );
     console.log(multiThread);
     await multiThread.default();
     console.log(`hardware: ${navigator.hardwareConcurrency}`);
-    // await multiThread.initThreadPool(4);
+    await multiThread.initThreadPool(4);
     return multiThread;
-    // return proxy({
-    //     multiThread: multiThread,
-    // })
-    // return multiThread;
 }
 
-// async function sample_rsa_private_key(bits_len: number): Promise<any> {
-//     const multiThread = await import(
-//         'halo2-rsa'
-//     );
-//     await multiThread.default();
-//     await multiThread.initThreadPool(navigator.hardwareConcurrency);
-
-//     const private_key = multiThread.sample_rsa_private_key(bits_len);
-//     return private_key
-// }
-
-// async function to_public_key(private_key: any): Promise<any> {
-//     const multiThread = await import(
-//         'halo2-rsa'
-//     );
-//     await multiThread.default();
-//     await multiThread.initThreadPool(navigator.hardwareConcurrency);
-
-//     const public_key = multiThread.generate_rsa_public_key(private_key);
-//     return public_key
-// }
-
-// async function sign(private_key: any, msg: any): Promise<any> {
-//     const multiThread = await import(
-//         'halo2-rsa'
-//     );
-//     await multiThread.default();
-//     await multiThread.initThreadPool(navigator.hardwareConcurrency);
-
-//     const sign = multiThread.sign(private_key, msg);
-//     return sign
-// }
-
-// async function sha256_msg(msg: any): Promise<any> {
-//     const multiThread = await import(
-//         'halo2-rsa'
-//     );
-//     await multiThread.default();
-//     await multiThread.initThreadPool(navigator.hardwareConcurrency);
-
-//     const ret = multiThread.sha256_msg(msg);
-//     return ret
-// }
-
-// async function prove_1024_64(
-//     pk: any,
-//     public_key: any,
-//     msg: any,
-//     signature: any
-// ): Promise<any> {
-//     const params = await fetch_params();
-//     const multiThread = await import(
-//         'halo2-rsa'
-//     );
-//     await multiThread.default();
-//     await multiThread.initThreadPool(navigator.hardwareConcurrency);
-//     const ret = multiThread.prove_pkcs1v15_1024_64_circuit(params, pk, public_key, msg, signature);
-//     return ret;
-// }
-
-// async function verify_1024_64(
-//     vk: any,
-//     proof: any
-// ): Promise<boolean> {
-//     const params = await fetch_params();
-//     const multiThread = await import(
-//         'halo2-rsa'
-//     );
-//     await multiThread.default();
-//     await multiThread.initThreadPool(navigator.hardwareConcurrency);
-//     const ret = multiThread.verify_pkcs1v15_1024_64_circuit(params, vk, proof);
-//     return ret;
-// }
-
-
-// async function prove_1024_1024(
-//     pk: any,
-//     public_key: any,
-//     msg: any,
-//     signature: any
-// ): Promise<any> {
-//     const params = await fetch_params();
-//     const multiThread = await import(
-//         'halo2-rsa'
-//     );
-//     await multiThread.default();
-//     await multiThread.initThreadPool(navigator.hardwareConcurrency);
-//     const ret = multiThread.prove_pkcs1v15_1024_1024_circuit(params, pk, public_key, msg, signature);
-//     return ret;
-// }
-
-// async function verify_1024_1024(
-//     vk: any,
-//     proof: any
-// ): Promise<boolean> {
-//     const params = await fetch_params();
-//     const multiThread = await import(
-//         'halo2-rsa'
-//     );
-//     await multiThread.default();
-//     await multiThread.initThreadPool(navigator.hardwareConcurrency);
-//     const ret = multiThread.verify_pkcs1v15_1024_1024_circuit(params, vk, proof);
-//     return ret;
-// }
-
-// async function prove_2048_64(
-//     pk: any,
-//     public_key: any,
-//     msg: any,
-//     signature: any
-// ): Promise<any> {
-//     const params = await fetch_params();
-//     const multiThread = await import(
-//         'halo2-rsa'
-//     );
-//     await multiThread.default();
-//     await multiThread.initThreadPool(navigator.hardwareConcurrency);
-//     const ret = multiThread.prove_pkcs1v15_2048_64_circuit(params, pk, public_key, msg, signature);
-//     return ret;
-// }
-
-// async function verify_2048_64(
-//     vk: any,
-//     proof: any
-// ): Promise<boolean> {
-//     const params = await fetch_params();
-//     const multiThread = await import(
-//         'halo2-rsa'
-//     );
-//     await multiThread.default();
-//     await multiThread.initThreadPool(navigator.hardwareConcurrency);
-//     const ret = multiThread.verify_pkcs1v15_2048_64_circuit(params, vk, proof);
-//     return ret;
-// }
-
-// async function prove_2048_1024(
-//     pk: any,
-//     public_key: any,
-//     msg: any,
-//     signature: any
-// ): Promise<any> {
-//     const params = await fetch_params();
-//     const multiThread = await import(
-//         'halo2-rsa'
-//     );
-//     await multiThread.default();
-//     await multiThread.initThreadPool(navigator.hardwareConcurrency);
-//     const ret = multiThread.prove_pkcs1v15_2048_1024_circuit(params, pk, public_key, msg, signature);
-//     return ret;
-// }
-
-// async function verify_2048_1024(
-//     vk: any,
-//     proof: any
-// ): Promise<boolean> {
-//     const params = await fetch_params();
-//     const multiThread = await import(
-//         'halo2-rsa'
-//     );
-//     await multiThread.default();
-//     await multiThread.initThreadPool(navigator.hardwareConcurrency);
-//     const ret = multiThread.verify_pkcs1v15_2048_1024_circuit(params, vk, proof);
-//     return ret;
-// }
 
 
 const exports = {
-    // initHandlers,
-    // fetchSaveConfigs,
-    // fetchParams,
-    // fetchPk,
-    // fetchPublicKey,
-    // genProvingKey,
-    runBench
+    fetchParams,
+    fetchVk,
+    runBench,
+    fetchSaveConfigs,
+    fetchPkChunks,
+    fetchPublicKey,
+    initMultiThread,
 };
 expose(exports);
 export type BenchWorker = typeof exports;

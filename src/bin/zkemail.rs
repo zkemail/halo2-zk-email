@@ -101,6 +101,23 @@ enum Commands {
         #[arg(long, default_value = "./build/public_input.json")]
         public_input_path: String,
     },
+    VerifyWasm {
+        /// setup parameters path
+        #[arg(short, long, default_value = "./build/params.bin")]
+        params_path: String,
+        /// email verification circuit configure file
+        #[arg(short, long, default_value = "./configs/default_app.config")]
+        circuit_config_path: String,
+        /// verifying key file
+        #[arg(long, default_value = "./build/app.vk")]
+        vk_path: String,
+        /// proof hex file
+        #[arg(long, default_value = "./build/app_proof.hex")]
+        proof_hex_path: String,
+        /// public input file
+        #[arg(long, default_value = "./build/public_input.json")]
+        public_input_path: String,
+    },
     GenEVMVerifier {
         /// setup parameters path
         #[arg(short, long, default_value = "./build/params.bin")]
@@ -196,6 +213,20 @@ async fn main() {
             public_input_path,
         } => {
             let result = verify::<DefaultEmailVerifyCircuit<Fr>>(&params_path, &circuit_config_path, &vk_path, &proof_path, &public_input_path).unwrap();
+            if result {
+                println!("proof is valid");
+            } else {
+                println!("proof is invalid");
+            }
+        }
+        Commands::VerifyWasm {
+            params_path,
+            circuit_config_path,
+            vk_path,
+            proof_hex_path,
+            public_input_path,
+        } => {
+            let result = verify_wasm::<DefaultEmailVerifyCircuit<Fr>>(&params_path, &circuit_config_path, &vk_path, &proof_hex_path, &public_input_path).unwrap();
             if result {
                 println!("proof is valid");
             } else {
