@@ -34,18 +34,25 @@ You can open the API specification by executing `cargo doc --open`.
 ## Test
 You can run the tests by executing `cargo test --release`.
 
-## Description
+## CLI
+You can install CLI `zkemail` to prove and verify emails as follows:
+`cargo install --path .`
+
 To generate a proof and verify it on EVM, do:
 ```bash
 cargo build --release
-cargo run --release -- gen-params --k 18
-cargo run --release -- gen-keys
-cargo run --release -- gen-evm-verifier
-cargo run --release -- evm-prove
-cargo run --release -- evm-verify
+zkemail gen-params --k 18
+zkemail gen-keys
+zkemail gen-evm-verifier
+zkemail evm-prove
+zkemail evm-verify
 ```
 
 To generate regex files for a new decomposed regex definition. do:
 ```bash
-cargo run --release -- gen-regex-files --decomposed-regex-config-path new_regex_file.json --regex-files-prefix new_regex
+zkemail gen-regex-files --decomposed-regex-config-path new_regex_file.json --regex-files-prefix new_regex
 ```
+
+## WASM prover on browser
+You can generate a proof on browser with our wasm prover.
+For more information, please see `examples/web-client/README.md`.

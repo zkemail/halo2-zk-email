@@ -67,7 +67,7 @@ pub fn get_substr(input_str: &str, regexes: &[String]) -> Option<(usize, String)
     let regexes = regexes.into_iter().map(|raw| Regex::new(&raw).unwrap()).collect_vec();
     let mut start = 0;
     let mut substr = input_str;
-    println!("first regex {}", regexes[0]);
+    // println!("first regex {}", regexes[0]);
     for regex in regexes.into_iter() {
         // println!(r"regex {}", regex);
         match regex.find(substr).unwrap() {
@@ -80,7 +80,7 @@ pub fn get_substr(input_str: &str, regexes: &[String]) -> Option<(usize, String)
             }
         };
     }
-    println!("substr {}", substr);
-    println!("start {}", start);
+    // println!("substr {}", substr);
+    // println!("start {}", start);
     Some((start, substr.to_string()))
 }

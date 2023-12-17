@@ -59,6 +59,18 @@ pub fn init_panic_hook() {
     console_error_panic_hook::set_once();
 }
 
+/// Initialize the configurations for [`DefaultEmailVerifyCircuit`].
+/// You must call this function once before calling any other functions in this module.
+/// # Arguments
+/// * `config_params` - a json string of [`EmailVerifyConfigParams`].
+/// * `bodyhash_allstr_def` - a string of [`AllstrRegexDef`] for the bodyhash.
+/// * `bodyhash_substr_def` - a string of [`SubstrRegexDef`] for the bodyhash.
+/// * `header_allstr_defs` - a list of strings of [`AllstrRegexDef`] for the headers.
+/// * `header_substr_defs` - a list of strings of [`SubstrRegexDef`] for the headers.
+/// * `body_allstr_defs` - a list of strings of [`AllstrRegexDef`] for the body.
+/// * `body_substr_defs` - a list of strings of [`SubstrRegexDef`] for the body.
+/// # Return values
+/// Return a promise of `null`.
 #[wasm_bindgen]
 pub fn init_configs(
     config_params: String,
@@ -144,6 +156,11 @@ pub fn init_configs(
     Ok(JsValue::NULL)
 }
 
+/// Extract a selector and a domain name from the given email string and generate an url to fetch the public key from the google dns.
+/// # Arguments
+/// * `email_str` - an email string.
+/// # Return values
+/// Return a promise of the url string.
 #[wasm_bindgen]
 pub fn google_dns_url_from_email(email_str: String) -> Result<String, JsValue> {
     console_error_panic_hook::set_once();
@@ -153,6 +170,11 @@ pub fn google_dns_url_from_email(email_str: String) -> Result<String, JsValue> {
     Ok(url)
 }
 
+/// Fetch the public key from the response of the google dns.
+/// # Arguments
+/// * `response` - a response string from the google dns.
+/// # Return values
+/// Return a promise of the public key string.
 #[wasm_bindgen]
 pub fn fetch_rsa_public_key(response: String) -> Result<String, JsValue> {
     console_error_panic_hook::set_once();
@@ -185,6 +207,14 @@ pub fn fetch_rsa_public_key(response: String) -> Result<String, JsValue> {
 //     Ok(JsValue::NULL)
 // }
 
+/// Generate a proof for the given email string and public key.
+/// # Arguments
+/// * `params` - a trusted setup parameter bytes.
+/// * `pk_chunks` - a list of chunks of the proving key.
+/// * `email_str` - an email string.
+/// * `public_key_n` - a public key string.
+/// # Return values
+/// Return a promise of a list of the hex string of the proof and the public input.
 #[wasm_bindgen]
 pub fn prove_email(params: JsValue, pk_chunks: JsArray, email_str: String, public_key_n: String) -> Result<JsArray, JsValue> {
     console_error_panic_hook::set_once();
@@ -205,27 +235,8 @@ pub fn prove_email(params: JsValue, pk_chunks: JsArray, email_str: String, publi
     let public_input = circuit.gen_default_public_input();
     let proof = gen_proof_shplonk(&params, &pk, circuit, instances.clone(), &mut OsRng, None);
     log_1(&JsValue::from_str("proof generated"));
-    // {
-    //     // let instances = public_input.instances::<Fr>();
-
-    //     let mut transcript_read = PoseidonTranscript::<NativeLoader, &[u8]>::new(&proof);
-    //     let result = VerificationStrategy::<_, VerifierSHPLONK<Bn256>>::finalize(
-    //         verify_proof::<_, VerifierSHPLONK<Bn256>, _, _, _>(
-    //             params.verifier_params(),
-    //             &pk.get_vk(),
-    //             AccumulatorStrategy::new(params.verifier_params()),
-    //             &[&instances.iter().map(Vec::as_slice).collect_vec()],
-    //             &mut transcript_read,
-    //         )
-    //         .map_err(|err| JsValue::from_str(&format!("verification error: {}", err.to_string())))?,
-    //     );
-    //     if !result {
-    //         return Err(JsValue::from_str("verification failed in the proof generation"));
-    //     }
-    // }
 
     let proof_hex = format!("0x{}", hex::encode(&proof));
-    // serde_wasm_bindgen::to_value(&proof).map_err(|err| JsValue::from_str(&format!("fail to serialize proof. Error: {}", err.to_string())))?;
     let public_input = serde_wasm_bindgen::to_value(&public_input).map_err(|err| JsValue::from_str(&format!("fail to serialize public input. Error: {}", err.to_string())))?;
     let mut js_array = JsArray::new();
     js_array.push(&JsValue::from_str(&proof_hex));
@@ -233,6 +244,14 @@ pub fn prove_email(params: JsValue, pk_chunks: JsArray, email_str: String, publi
     Ok(js_array)
 }
 
+/// Verify the proof for the given email string and public key.
+/// # Arguments
+/// * `params` - a trusted setup parameter bytes.
+/// * `vk` - a verification key bytes.
+/// * `proof` - a hex string of the proof.
+/// * `public_input` - a public input json string.
+/// # Return values
+/// Return a promise of a boolean value.
 #[wasm_bindgen]
 pub fn verify_email_proof(params: JsValue, vk: JsValue, proof: JsValue, public_input: JsValue) -> Result<JsValue, JsValue> {
     console_error_panic_hook::set_once();
@@ -267,6 +286,11 @@ pub fn verify_email_proof(params: JsValue, vk: JsValue, proof: JsValue, public_i
     Ok(JsValue::from_bool(result))
 }
 
+/// Configure the constraints definitions for [`DefaultEmailVerifyCircuit`].
+/// # Arguments
+/// * `meta` - a constraint system.
+/// # Return values
+/// Return a [`DefaultEmailVerifyConfig`].
 pub(crate) fn configure_wasm<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> DefaultEmailVerifyConfig<F> {
     let params = default_config_params();
     let range_config = RangeConfig::configure(
@@ -327,7 +351,7 @@ pub(crate) fn configure_wasm<F: PrimeField>(meta: &mut ConstraintSystem<F>) -> D
     }
 }
 
-pub(crate) fn build_circuit<F: PrimeField>(email_str: &str, public_key_n: &str) -> DefaultEmailVerifyCircuit<F> {
+fn build_circuit<F: PrimeField>(email_str: &str, public_key_n: &str) -> DefaultEmailVerifyCircuit<F> {
     let email_bytes = email_str.as_bytes().to_vec();
     let public_key_n = BigUint::from_bytes_le(&hex::decode(&public_key_n[2..]).unwrap());
     DefaultEmailVerifyCircuit {
