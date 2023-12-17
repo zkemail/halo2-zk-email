@@ -40,6 +40,7 @@
     "jest-watch-typeahead": "^1.0.0",
     "jsencrypt": "^3.3.1",
     "mini-css-extract-plugin": "^2.4.5",
+    "plotly": "^1.0.6",
     "plotly.js-dist": "^2.18.2",
     "postcss": "^8.4.4",
     "postcss-flexbugs-fixes": "^5.0.2",
@@ -101,13 +102,14 @@
       "!src/**/*.d.ts"
     ],
     "setupFiles": [
-      "react-app-polyfill/jsdom"
+      "react-app-polyfill/jsdom",
+      "jsdom-worker"
     ],
     "setupFilesAfterEnv": [
       "<rootDir>/src/setupTests.ts"
     ],
     "testMatch": [
-      "<rootDir>/src/**/__tests__/**/*.{js,jsx,ts,tsx}",
+      "<rootDir>/**/__tests__/**/*.{js,jsx,ts,tsx}",
       "<rootDir>/src/**/*.{spec,test}.{js,jsx,ts,tsx}"
     ],
     "testEnvironment": "jsdom",

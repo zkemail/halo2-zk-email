@@ -524,6 +524,7 @@ impl<F: PrimeField> DefaultEmailVerifyCircuit<F> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 mod test {
     use super::*;

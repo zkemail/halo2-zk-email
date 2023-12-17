@@ -30,6 +30,51 @@ export async function fetchVk() {
     return vk;
 }
 
+export async function runValidTest(emailStr: string) {
+    const multiThread = await initMultiThread();
+    await fetchSaveConfigs(multiThread);
+    const params = await fetchParams();
+    console.log(params);
+    const publicKey = await fetchPublicKey(multiThread, emailStr);
+    // await genProvingKey(multiThread, params, emailStr, publicKey)
+    const pkChunks = await fetchPkChunks();
+    console.log(pkChunks);
+    if (pkChunks == null) {
+        throw new Error("pkChunks is null");
+    }
+    const vk = await fetchVk();
+    const [proof, publicInput] = proveEmail(multiThread, params, pkChunks, emailStr, publicKey);
+    console.log(proof);
+    console.log(publicInput);
+    const isValid = verifyEmailProof(multiThread, params, vk, proof, publicInput);
+    console.log(isValid);
+    return isValid;
+}
+
+export async function runInvalidTest(emailStr: string) {
+    const multiThread = await initMultiThread();
+    await fetchSaveConfigs(multiThread);
+    const params = await fetchParams();
+    console.log(params);
+    let publicKey = await fetchPublicKey(multiThread, emailStr);
+    // for (const i = 0; i < 512; i++) {
+    //     publicKey[i+2] = 
+    // }
+    publicKey = '0x' + 'f'.repeat(publicKey.length - 2);
+    const pkChunks = await fetchPkChunks();
+    console.log(pkChunks);
+    if (pkChunks == null) {
+        throw new Error("pkChunks is null");
+    }
+    const vk = await fetchVk();
+    const [proof, publicInput] = proveEmail(multiThread, params, pkChunks, emailStr, publicKey);
+    console.log(proof);
+    console.log(publicInput);
+    const isValid = verifyEmailProof(multiThread, params, vk, proof, publicInput);
+    console.log(isValid);
+    return isValid;
+}
+
 export async function runBench(emailStr: string, times: number) {
     // const multiThread = await import(
     //     'halo2-zk-email'
@@ -334,10 +379,14 @@ export async function initMultiThread() {
 const exports = {
     fetchParams,
     fetchVk,
+    runValidTest,
+    runInvalidTest,
     runBench,
     fetchSaveConfigs,
     fetchPkChunks,
     fetchPublicKey,
+    proveEmail,
+    verifyEmailProof,
     initMultiThread,
 };
 expose(exports);
