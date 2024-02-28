@@ -43,8 +43,8 @@ serde_regex = "1.1.0"
 mailparse = "0.14"
 thiserror = "1.0.40"
 once_cell = "1.18.0"
-# cfdkim = { version = "0.3.0", git = "https://github.com/SoraSuegami/dkim.git" }
-cfdkim = { version = "0.3.0", path = "../dkim" }
+cfdkim = { version = "0.3.0", git = "https://github.com/SoraSuegami/dkim.git" }
+# cfdkim = { version = "0.3.0", path = "../dkim" }
 log = "0.4.17"
 
 
