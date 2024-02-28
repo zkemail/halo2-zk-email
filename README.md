@@ -9,10 +9,12 @@ DO NOT USE THIS LIBRARY IN PRODUCTION. At this point, this is under development 
 `halo2-zk-email` provides a library and a command-line interface for an email verification circuit compatible with the [halo2 library developed by privacy-scaling-explorations team](https://github.com/privacy-scaling-explorations/halo2).
 
 ## Requirement
-- rustc 1.68.0-nightly (0468a00ae 2022-12-17)
-- cargo 1.68.0-nightly (cc0a32087 2022-12-14)
+- rustc 1.73.0
+- cargo 1.73.0
 - solc 0.8.19+commit.7dd6d404
 - anvil 0.1.0 (0d3bd04 2022-11-20T00:11:22.107775Z)
+
+Note that we previously recommended rustc 1.68.0-nightly (0468a00ae 2022-12-17) and cargo 1.68.0-nightly (cc0a32087 2022-12-14), but those had package errors with the latest version.
 
 Install solc (Mac instructions):
 ```bash
