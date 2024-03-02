@@ -861,9 +861,8 @@ dependencies = [
 
 [[package]]
 name = "curve25519-dalek"
-version = "4.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a677b8922c94e01bdbb12126b0bc852f00447528dee1782229af9c720c3f348"
+version = "4.1.1"
+source = "git+https://github.com/dalek-cryptography/curve25519-dalek.git?tag=curve25519-4.1.1#0cd099a9fb8ff9f6fedc8723d44dbb1c743e9d35"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -878,9 +877,8 @@ dependencies = [
 
 [[package]]
 name = "curve25519-dalek-derive"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
+version = "0.1.0"
+source = "git+https://github.com/dalek-cryptography/curve25519-dalek.git?tag=curve25519-4.1.1#0cd099a9fb8ff9f6fedc8723d44dbb1c743e9d35"
 dependencies = [
  "proc-macro2",
  "quote",
