@@ -36,7 +36,6 @@ use snark_verifier_sdk::{gen_pk, CircuitExt, LIMBS};
 use std::env::set_var;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
-use std::os::unix::prelude::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::rc::Rc;
