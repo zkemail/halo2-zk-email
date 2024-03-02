@@ -135,3 +135,8 @@ halo2_proofs = { git = "https://github.com/privacy-scaling-explorations//halo2.g
 
 [patch.crates-io]
 colored = { git = "https://github.com/colored-rs/colored.git", version = "2.0.4", tag = "v2.0.4" }
+lalrpop = { git = "https://github.com/lalrpop/lalrpop.git", tag = "0.20.0", version = "0.20.0" }
+lalrpop-util = { git = "https://github.com/lalrpop/lalrpop.git", tag = "0.20.0", version = "0.20.0" }
+cargo-platform = { git = "https://github.com/rust-lang/cargo.git", rev = "2b28383", version = "0.1.5" }
+bumpalo = { git = "https://github.com/fitzgen/bumpalo.git", tag = "3.14.0", version = "3.14.0" }
+ahash = { git = "https://github.com/tkaitchuck/aHash.git", rev = "2153ab9", version = "0.8.6" }
