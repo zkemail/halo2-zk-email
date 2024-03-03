@@ -14,7 +14,7 @@ DO NOT USE THIS LIBRARY IN PRODUCTION. At this point, this is under development 
 - solc 0.8.19+commit.7dd6d404
 - anvil 0.1.0 (0d3bd04 2022-11-20T00:11:22.107775Z)
 
-Note that we previously recommended rustc 1.68.0-nightly (0468a00ae 2022-12-17) and cargo 1.68.0-nightly (cc0a32087 2022-12-14), but those had package errors with the latest version.
+<!-- Note that we previously recommended rustc 1.68.0-nightly (0468a00ae 2022-12-17) and cargo 1.68.0-nightly (cc0a32087 2022-12-14), but those had package errors with the latest version. -->
 
 Install solc (Mac instructions):
 ```bash
