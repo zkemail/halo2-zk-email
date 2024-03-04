@@ -35,7 +35,7 @@ enum Commands {
         #[arg(short, long, default_value = "./configs/default_app.config")]
         circuit_config_path: String,
         /// emails path
-        #[arg(short, long, default_value = "./build/demo.eml")]
+        #[arg(short, long, default_value = "./examples/demo.eml")]
         email_path: String,
         /// proving key path
         #[arg(long, default_value = "./build/app.pk")]
@@ -55,7 +55,7 @@ enum Commands {
         #[arg(long, default_value = "./build/app.pk")]
         pk_path: String,
         /// emails path
-        #[arg(short, long, default_value = "./build/demo.eml")]
+        #[arg(short, long, default_value = "./examples/demo.eml")]
         email_path: String,
         /// output proof file
         #[arg(long, default_value = "./build/app.proof")]
@@ -75,7 +75,7 @@ enum Commands {
         #[arg(long, default_value = "./build/app.pk")]
         pk_path: String,
         /// emails path
-        #[arg(short, long, default_value = "./build/demo.eml")]
+        #[arg(short, long, default_value = "./examples/demo.eml")]
         email_path: String,
         /// output proof file
         #[arg(long, default_value = "./build/app_evm.proof")]
@@ -126,7 +126,7 @@ enum Commands {
         #[arg(short, long, default_value = "./configs/default_app.config")]
         circuit_config_path: String,
         // /// emails path
-        // #[arg(short, long, default_value = "./build/demo.eml")]
+        // #[arg(short, long, default_value = "./examples/demo.eml")]
         // email_path: String,
         /// verifying key file
         #[arg(long, default_value = "./build/app.vk")]

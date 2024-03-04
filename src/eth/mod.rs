@@ -125,6 +125,7 @@ pub async fn deploy_and_call_verifiers(sols_dir: &PathBuf, runs: Option<usize>, 
     ]);
     let proof = Bytes::from(proof.to_vec());
     verifier.verify_email(Bytes::from(instance.clone()), proof.clone()).call().await.unwrap();
+    println!("verification passed");
     let call = verifier.method::<_, ()>("verifyEmail", (Bytes::from(instance.clone()), proof.clone())).unwrap();
     println!("estimated gas {:?}", call.estimate_gas().await.unwrap());
     // drop(anvil);
@@ -163,8 +164,8 @@ async fn deploy_verifier_via_solidity<T: Tokenize>(
         .send_with_receipt()
         .await
         .expect("failed to deploy the factory");
-    println!("solidity code path: {:?}", &sol_code_path);
-    println!("gas used: {:?}", receipt.gas_used);
+    // println!("solidity code path: {:?}", &sol_code_path);
+    // println!("gas used: {:?}", receipt.gas_used);
     (contract.address(), receipt.gas_used.unwrap())
 }
 
@@ -192,7 +193,7 @@ pub fn get_contract_artifacts(sol_code_path: &PathBuf, contract_name: &str, runs
 fn get_sol_contract_factory<M: 'static + Middleware>(abi: Abi, bytecode: Bytes, runtime_bytecode: Bytes, client: Arc<M>) -> ContractFactory<M> {
     const MAX_RUNTIME_BYTECODE_SIZE: usize = 24577;
     let size = runtime_bytecode.len();
-    println!("bytecode size {}", size);
+    // println!("bytecode size {}", size);
     if size > MAX_RUNTIME_BYTECODE_SIZE {
         // `_runtime_bytecode` exceeds the limit
         panic!(
