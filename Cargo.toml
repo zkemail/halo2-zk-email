@@ -79,7 +79,10 @@ home = { version = "=0.5.5" }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
-wasm-bindgen = { version = "0.2.81", features = ["serde-serialize"] }
+wasm-bindgen = { version = "=0.2.91", features = ["serde-serialize"] }
+# { git = "https://github.com/rustwasm/wasm-bindgen.git", rev = "fe8bc949b5553ca6da811f13209d9f3b86cc5b1e", version = "0.2.91", features = [
+#     "serde-serialize",
+# ] }
 console_error_panic_hook = "0.1.7"
 rayon = "1.5"
 wasm-bindgen-rayon = { version = "1.0" }
@@ -90,8 +93,10 @@ web-sys = { version = "0.3", features = [
     "Storage",
     "console",
 ] }
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3"
+wasm-bindgen-futures = "=0.4.39"
+#  { git = "https://github.com/rustwasm/wasm-bindgen.git", rev = "fe8bc949b5553ca6da811f13209d9f3b86cc5b1e", version = "0.4.41" }
+js-sys = "=0.3.68"
+# { git = "https://github.com/rustwasm/wasm-bindgen.git", rev = "fe8bc949b5553ca6da811f13209d9f3b86cc5b1e", version = "0.3" }
 halo2-regex = { git = "https://github.com/zkemail/halo2-regex.git", version = "0.1.0", default-features = false }
 # halo2-regex = { path = "../halo2-regex-1", version = "0.1.0", default-features = false }
 snark-verifier-sdk = { git = "https://github.com/zkemail/snark-verifier.git", version = "0.0.1", branch = "main", default-features = false, features = [
@@ -146,3 +151,9 @@ parity-scale-codec = { git = "https://github.com/paritytech/parity-scale-codec.g
 plotters = { git = "https://github.com/plotters-rs/plotters.git", tag = "v0.3.5", version = "0.3.5" }
 pathfinder_simd = { git = "https://github.com/servo/pathfinder.git", rev = "b01bbcc", version = "=0.5.2" }
 pathfinder_geometry = { git = "https://github.com/servo/pathfinder.git", rev = "b01bbcc", version = "=0.5.1" }
+# wasm-bindgen-futures = { git = "https://github.com/rustwasm/wasm-bindgen.git", rev = "fe8bc949b5553ca6da811f13209d9f3b86cc5b1e", version = "0.4.41" }
+# wasm-bindgen-macro = { git = "https://github.com/rustwasm/wasm-bindgen.git", rev = "fe8bc949b5553ca6da811f13209d9f3b86cc5b1e", version = "0.2.29" }
+# wasm-bindgen = { git = "https://github.com/rustwasm/wasm-bindgen.git", rev = "fe8bc949b5553ca6da811f13209d9f3b86cc5b1e", version = "0.2.91", features = [
+#     "serde-serialize",
+# ] }
+# js-sys = { git = "https://github.com/rustwasm/wasm-bindgen.git", rev = "fe8bc949b5553ca6da811f13209d9f3b86cc5b1e", version = "0.3" }
