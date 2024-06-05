@@ -150,6 +150,8 @@ enum Commands {
         /// public input file
         #[arg(long, default_value = "./build/public_input.json")]
         public_input_path: String,
+        #[arg(short, long)]
+        gas_limit: Option<u64>,
     },
     GenRegexFiles {
         #[arg(short, long, default_value = "./configs/decomposed_regex_config.json")]
@@ -247,8 +249,9 @@ async fn main() {
             sols_dir,
             proof_path,
             public_input_path,
+            gas_limit,
         } => {
-            evm_verify(&circuit_config_path, &sols_dir, &proof_path, &public_input_path).await.unwrap();
+            evm_verify(&circuit_config_path, &sols_dir, &proof_path, &public_input_path, gas_limit).await.unwrap();
         }
         Commands::GenRegexFiles {
             decomposed_regex_config_path,

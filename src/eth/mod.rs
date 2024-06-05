@@ -65,9 +65,9 @@ pub struct DeployParamsJson {
 pub type EthersClient = Arc<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>>;
 
 // original: https://github.com/zkonduit/ezkl/blob/main/src/eth.rs#L58-L86
-pub async fn setup_eth_backend() -> AnvilInstance {
+pub async fn setup_eth_backend(gas_limit: u64) -> AnvilInstance {
     // Launch anvil
-    let anvil = Anvil::new().arg("--gas-limit").arg("100000000").spawn();
+    let anvil = Anvil::new().arg("--gas-limit").arg(gas_limit.to_string()).spawn();
     anvil
 }
 
@@ -87,8 +87,8 @@ pub async fn setup_eth_client(anvil: &AnvilInstance) -> EthersClient {
     client
 }
 
-pub async fn deploy_and_call_verifiers(sols_dir: &PathBuf, runs: Option<usize>, proof: &[u8], instance: &DefaultEmailVerifyPublicInput) {
-    let anvil = setup_eth_backend().await;
+pub async fn deploy_and_call_verifiers(sols_dir: &PathBuf, runs: Option<usize>, proof: &[u8], instance: &DefaultEmailVerifyPublicInput, gas_limit: u64) {
+    let anvil = setup_eth_backend(gas_limit).await;
     let client = setup_eth_client(&anvil).await;
     let runs = runs.unwrap_or(1);
     let config_params = default_config_params();

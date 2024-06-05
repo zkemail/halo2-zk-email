@@ -280,7 +280,7 @@ export async function initMultiThread() {
     console.log(multiThread);
     await multiThread.default();
     console.log(`hardware: ${navigator.hardwareConcurrency}`);
-    await multiThread.initThreadPool(4);
+    await multiThread.initThreadPool(navigator.hardwareConcurrency);
     return multiThread;
 }
 

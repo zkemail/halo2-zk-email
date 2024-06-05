@@ -503,7 +503,7 @@ pub fn gen_evm_verifier<C: CircuitExt<Fr>>(
 /// # Note
 /// The contract size limitation is disabled in this function.
 /// Therefore, your verifier contract may violate that limitation even if it passes the verification here.
-pub async fn evm_verify(circuit_config_path: &str, sols_dir: &str, proof_path: &str, public_input_path: &str) -> Result<(), Error> {
+pub async fn evm_verify(circuit_config_path: &str, sols_dir: &str, proof_path: &str, public_input_path: &str, gas_limit: Option<u64>) -> Result<(), Error> {
     set_var(EMAIL_VERIFY_CONFIG_ENV, circuit_config_path);
     let proof = {
         let mut f = File::open(&proof_path).unwrap();
@@ -514,7 +514,8 @@ pub async fn evm_verify(circuit_config_path: &str, sols_dir: &str, proof_path: &
     println!("proof {}", hex::encode(&proof));
     let public_input = serde_json::from_reader(File::open(public_input_path).unwrap()).unwrap();
     println!("public_input {:?}", public_input);
-    deploy_and_call_verifiers(&PathBuf::new().join(sols_dir), None, &proof, &public_input).await;
+    let gas_limit = gas_limit.unwrap_or(100000000);
+    deploy_and_call_verifiers(&PathBuf::new().join(sols_dir), None, &proof, &public_input, gas_limit).await;
     Ok(())
 }
 
@@ -640,7 +641,7 @@ mod test {
             evm_prove(params_path, circuit_config_path, pk_path, evm_proof_path, circuit.clone()).unwrap();
             gen_evm_verifier::<DefaultEmailVerifyCircuit<Fr>>(params_path, circuit_config_path, vk_path, sols_dir, None).unwrap();
         });
-        evm_verify(circuit_config_path, sols_dir, evm_proof_path, public_input_path).await.unwrap();
+        evm_verify(circuit_config_path, sols_dir, evm_proof_path, public_input_path, None).await.unwrap();
     }
 
     // #[ignore]
