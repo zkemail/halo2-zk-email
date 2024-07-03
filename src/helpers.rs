@@ -428,7 +428,7 @@ pub fn gen_evm_verifier<C: CircuitExt<Fr>>(
         let mut reader = BufReader::new(f);
         VerifyingKey::<G1Affine>::read::<_, C>(&mut reader, SerdeFormat::RawBytesUnchecked).unwrap()
     };
-    let max_line_size_per_file = max_line_size_per_file.unwrap_or(100 * 1000);
+    let max_line_size_per_file = max_line_size_per_file.unwrap_or(90 * 1000);
     if PathBuf::new().join(sols_dir).exists() {
         fs::remove_dir_all(sols_dir).unwrap();
     }
